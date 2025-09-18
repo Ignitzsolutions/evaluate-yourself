@@ -1,0 +1,16 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+opencv-python==4.8.1.78
+scipy==1.11.3
+numpy==1.24.3
+websockets==12.0
+python-multipart==0.0.6
+
+# Face detection (choose one)
+dlib==19.24.2  # May require CMake on Windows
+
+# Alternative face detection libraries (uncomment if dlib fails)
+# mediapipe==0.10.3
+# torch==2.0.1
+# torchvision==0.15.2
