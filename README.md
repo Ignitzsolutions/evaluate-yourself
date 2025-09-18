@@ -23,8 +23,7 @@ An elegant pre-interview evaluation web app that measures and analyzes interpers
 
 > Replace these examples with real screenshots from `public/assets` as needed.
 
-![Landing Screenshot](public/assets/landing-screenshot.png)
-![Report Screenshot](public/assets/report-screenshot.png)
+![Landing Screenshot](public/assets/skillevaluation.png)
 
 ---
 
