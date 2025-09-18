@@ -19,9 +19,6 @@ An elegant pre-interview evaluation web app that measures and analyzes interpers
 
 ---
 
-## Screenshots
-
-> Replace these examples with real screenshots from `public/assets` as needed.
 
 ![Landing Screenshot](public/assets/skillevaluation.png)
 
