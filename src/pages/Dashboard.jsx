@@ -23,7 +23,6 @@ import {
 import {
   TrendingUp,
   TrendingDown,
-  PlayArrow,
   Assessment,
   Schedule,
   MoreVert,
@@ -31,7 +30,6 @@ import {
   Visibility as ViewIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import LogoutButton from '../components/LogoutButton';
 import {
   LineChart,
   Line,
@@ -124,30 +122,6 @@ export default function Dashboard() {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-        <Box>
-          <Typography variant="h4" gutterBottom>
-            Interview Dashboard
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Track your progress and improve your interview skills
-          </Typography>
-        </Box>
-        
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="contained"
-            startIcon={<PlayArrow />}
-            onClick={() => navigate('/interview-cfig')}
-            size="large"
-          >
-            New Interview
-          </Button>
-          <LogoutButton />
-        </Box>
-      </Box>
-
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
