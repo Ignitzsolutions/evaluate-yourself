@@ -186,8 +186,6 @@ export default function InterviewHUD() {
           </div>
         </div>
 
-        {/* Right: Logout */}
-        <LogoutButton />
       </div>
 
       {/* Question Card - Positioned below video frame */}

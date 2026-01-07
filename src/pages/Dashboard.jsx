@@ -1,379 +1,203 @@
-import React, { useState } from 'react';
-import {
-  Box,
-  Container,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  Button,
-  Chip,
-  LinearProgress,
-  Avatar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Menu,
-  MenuItem
-} from '@mui/material';
-import {
-  TrendingUp,
-  TrendingDown,
-  Assessment,
-  Schedule,
-  MoreVert,
-  Delete,
-  Visibility as ViewIcon
-} from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts';
-
-// Mock data for dashboard
-const mockUserStats = {
-  totalSessions: 24,
-  avgScore: 78,
-  improvementRate: 12,
-  totalHours: 8.5
-};
-
-const mockPerformanceData = [
-  { date: '2025-09-10', score: 65, eyeContact: 58, confidence: 70 },
-  { date: '2025-09-12', score: 72, eyeContact: 64, confidence: 75 },
-  { date: '2025-09-14', score: 68, eyeContact: 61, confidence: 72 },
-  { date: '2025-09-16', score: 81, eyeContact: 75, confidence: 83 },
-  { date: '2025-09-18', score: 78, eyeContact: 72, confidence: 80 }
-];
-
-const mockRecentSessions = [
-  {
-    id: 1,
-    date: '2025-09-18',
-    type: 'Technical',
-    duration: '25 min',
-    score: 78,
-    status: 'completed'
-  },
-  {
-    id: 2,
-    date: '2025-09-16',
-    type: 'Behavioral',
-    duration: '18 min',
-    score: 81,
-    status: 'completed'
-  },
-  {
-    id: 3,
-    date: '2025-09-14',
-    type: 'Mixed',
-    duration: '22 min',
-    score: 68,
-    status: 'completed'
-  },
-  {
-    id: 4,
-    date: '2025-09-12',
-    type: 'Technical',
-    duration: '30 min',
-    score: 72,
-    status: 'completed'
-  }
-];
-
-const skillsData = [
-  { name: 'Communication', value: 85, color: '#4CAF50' },
-  { name: 'Technical Knowledge', value: 78, color: '#2196F3' },
-  { name: 'Problem Solving', value: 82, color: '#FF9800' },
-  { name: 'Confidence', value: 75, color: '#9C27B0' }
-];
+import React from "react";
+import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper } from "@mui/material";
+import { useNavigate } from "react-router-dom";
+import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
+import { useAuth } from "../context/AuthContext";
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const [anchorEl, setAnchorEl] = useState(null);
+  const nav = useNavigate();
+  const go = useNavigate();
+  const { user } = useAuth();
 
-  const handleMenuClick = (event, session) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const getScoreColor = (score) => {
-    if (score >= 80) return 'success';
-    if (score >= 60) return 'warning';
-    return 'error';
-  };
-
-  const getTrendIcon = (rate) => {
-    return rate > 0 ? <TrendingUp color="success" /> : <TrendingDown color="error" />;
-  };
+  const cards = [
+    {
+      icon: <PlayArrow sx={{ fontSize: 38, opacity: 0.8 }} />,
+      title: "Start an Interview",
+      subtitle: "Practice in a real interview setup",
+      body: "Launch a live AI interview that feels like a real conversation. Choose one question or a full interview and respond naturally.",
+      cta: "Start Now",
+      action: () => go("/interviews")
+    },
+    {
+      icon: <TrendingUp sx={{ fontSize: 38, opacity: 0.8 }} />,
+      title: "Experience How You Perform",
+      subtitle: "See how you actually answer under pressure",
+      body: "While you speak, the system observes your pace, clarity, confidence, and technical understanding — just like a real interviewer would.",
+      cta: "View Insights",
+      action: () => go("/analytics")
+    },
+    {
+      icon: <Assessment sx={{ fontSize: 38, opacity: 0.8 }} />,
+      title: "Review Your Report",
+      subtitle: "Clear mistakes and improvement areas",
+      body: "After the interview, get a detailed report highlighting where you struggled, what worked, and why it matters in real interviews.",
+      cta: "Open Report",
+      action: () => go("/report")
+    },
+    {
+      icon: <Psychology sx={{ fontSize: 38, opacity: 0.8 }} />,
+      title: "Adaptive Follow-ups",
+      subtitle: "Questions change based on your response",
+      body: "If your answer is unclear or shallow, the interviewer probes deeper. If it’s strong, the difficulty increases."
+    },
+    {
+      icon: <TrendingUp sx={{ fontSize: 38, opacity: 0.8 }} />,
+      title: "Improve Over Time",
+      subtitle: "Track progress across sessions",
+      body: "Your dashboard shows how your communication, depth, and confidence improve with practice — so every session has a purpose."
+    }
+  ];
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Total Sessions
-                  </Typography>
-                  <Typography variant="h4">
-                    {mockUserStats.totalSessions}
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: 'primary.main' }}>
-                  <Assessment />
-                </Avatar>
+    <>
+      {/* PAGE WRAPPER FIXED TO WHITE SURFACE ONLY IN THIS COMPONENT */}
+      <div style={{ minHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto", background: "#fff", margin: 0, padding: 0 }}>
+
+        {/* HEADER */}
+        <header className="glossy-header">
+          <div className="glossy-inner">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <img src="/assets/logo.png" alt="logo" style={{ width: 34, height: 34, borderRadius: 8 }} />
+              <Typography sx={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Evaluate Yourself</Typography>
+            </div>
+          </div>
+        </header>
+
+        {/* MAIN CONTENT */}
+        <Container maxWidth="lg" sx={{ py: 8 }}>
+          <Stack spacing={1.8} textAlign="left" alignItems="flex-start" sx={{ mb: 6 }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.85 }}>
+              Hello, {user?.username || "User"} 👋
+            </Typography>
+            <Typography sx={{ fontSize: 15, opacity: 0.55 }}>
+              Welcome back! Ready to sharpen your interview skills.
+            </Typography>
+
+            <Typography variant="h3" sx={{ fontWeight: 800, opacity: 0.9 }}>
+              How to Use{" "}
+              <Box component="span" sx={{ color: (theme) => theme.palette.primary.main }}>
+                Evaluate Yourself
               </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+            </Typography>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Average Score
-                  </Typography>
-                  <Typography variant="h4">
-                    {mockUserStats.avgScore}%
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: 'success.main' }}>
-                  <TrendingUp />
-                </Avatar>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+            <Typography sx={{ fontSize: 17, opacity: 0.6, maxWidth: 700 }}>
+              A realistic interview experience designed to help you practice, improve, and get ready.
+            </Typography>
+          </Stack>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Improvement
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="h4">
-                      +{mockUserStats.improvementRate}%
-                    </Typography>
-                    {getTrendIcon(mockUserStats.improvementRate)}
-                  </Box>
-                </Box>
-                <Avatar sx={{ bgcolor: 'info.main' }}>
-                  <TrendingUp />
-                </Avatar>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+          <Divider sx={{ my: 6 }} />
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Practice Hours
-                  </Typography>
-                  <Typography variant="h4">
-                    {mockUserStats.totalHours}h
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: 'warning.main' }}>
-                  <Schedule />
-                </Avatar>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={3}>
-        {/* Performance Chart */}
-        <Grid item xs={12} lg={8}>
-          <Card sx={{ height: 400 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Performance Trends
-              </Typography>
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={mockPerformanceData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="score"
-                    stroke="#2196F3"
-                    strokeWidth={2}
-                    name="Overall Score"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="eyeContact"
-                    stroke="#4CAF50"
-                    strokeWidth={2}
-                    name="Eye Contact"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="confidence"
-                    stroke="#FF9800"
-                    strokeWidth={2}
-                    name="Confidence"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Skills Breakdown */}
-        <Grid item xs={12} lg={4}>
-          <Card sx={{ height: 400 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Skills Assessment
-              </Typography>
-              <Box sx={{ mt: 2 }}>
-                {skillsData.map((skill, index) => (
-                  <Box key={index} sx={{ mb: 3 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">
-                        {skill.name}
+          {/* ROW 1 → 3 CARDS WITH BUTTONS */}
+          <Grid container spacing={4} justifyContent="flex-start" wrap="nowrap" sx={{ overflowX: "auto", pb: 2 }}>
+            {cards.slice(0, 3).map((card, i) => (
+              <Grid item key={i} sx={{ minWidth: 340 }}>
+                <Card sx={{ borderRadius: 4, boxShadow: 1.4 }}>
+                  <CardContent sx={{ p: 4 }}>
+                    <Stack spacing={2.5} alignItems="flex-start" textAlign="left" sx={{ width: "100%" }}>
+                      {card.icon}
+                      <Typography variant="h6" sx={{ fontWeight: 700, opacity: 0.9 }}>
+                        {card.title}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {skill.value}%
+
+                      <Paper elevation={0} sx={{ px: 2, py: 0.6, borderRadius: 2, opacity: 0.5, alignSelf: "flex-start" }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{card.subtitle}</Typography>
+                      </Paper>
+
+                      <Typography sx={{ fontSize: 15, opacity: 0.75, lineHeight: 1.5 }}>
+                        {card.body}
                       </Typography>
-                    </Box>
-                    <LinearProgress
-                      variant="determinate"
-                      value={skill.value}
-                      sx={{
-                        height: 8,
-                        borderRadius: 1,
-                        '& .MuiLinearProgress-bar': {
-                          backgroundColor: skill.color
-                        }
-                      }}
-                    />
-                  </Box>
-                ))}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
 
-        {/* Recent Sessions */}
-        <Grid item xs={12}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  Recent Sessions
-                </Typography>
-                <Button
-                  variant="outlined"
-                  onClick={() => navigate('/report')}
-                >
-                  View All Reports
-                </Button>
-              </Box>
-              
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell>Type</TableCell>
-                      <TableCell>Duration</TableCell>
-                      <TableCell>Score</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {mockRecentSessions.map((session) => (
-                      <TableRow key={session.id} hover>
-                        <TableCell>{session.date}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={session.type}
-                            size="small"
-                            color={session.type === 'Technical' ? 'primary' : 
-                                   session.type === 'Behavioral' ? 'secondary' : 'default'}
-                          />
-                        </TableCell>
-                        <TableCell>{session.duration}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={`${session.score}%`}
-                            color={getScoreColor(session.score)}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={session.status}
-                            color="success"
-                            size="small"
-                            variant="outlined"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <IconButton
-                            onClick={(e) => handleMenuClick(e, session)}
-                            size="small"
-                          >
-                            <MoreVert />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+                      <Button variant="contained" size="large" onClick={card.action} sx={{ px: 3.5, fontSize: 15, borderRadius: 2, alignSelf: "flex-start" }}>
+                        {card.cta}
+                      </Button>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
 
-      {/* Action Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
+          {/* ROW 2 → REMAINING CARDS WITHOUT BUTTON */}
+          <Grid container spacing={4} justifyContent="flex-start">
+            {cards.slice(3).map((card, i) => (
+              <Grid item xs={12} sm={6} md={4} key={i}>
+                <Card sx={{ borderRadius: 4, boxShadow: 1, height: "100%" }}>
+                  <CardContent sx={{ p: 4 }}>
+                    <Stack spacing={2.2} alignItems="flex-start" textAlign="left">
+                      {card.icon}
+                      <Typography variant="h6" sx={{ fontWeight: 600, opacity: 0.85 }}>
+                        {card.title}
+                      </Typography>
+                      <Typography sx={{ fontSize: 14, opacity: 0.55 }}>{card.subtitle}</Typography>
+                      <Typography sx={{ fontSize: 15, opacity: 0.7, lineHeight: 1.5 }}>
+                        {card.body}
+                      </Typography>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+
+          <Divider sx={{ my: 8 }} />
+
+          {/* FINAL LEFT ALIGNED CTA */}
+          <Stack spacing={3} alignItems="flex-start" textAlign="left" sx={{ width: "100%" }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, opacity: 0.8 }}>
+              Interviews are a skill.<br />Skills improve when you practice the real thing.
+            </Typography>
+
+            <Button variant="contained" size="large" onClick={() => nav("/interviews")} sx={{ px: 4, py: 1.4, fontSize: 16, borderRadius: 2 }}>
+              Start practicing now
+            </Button>
+
+            <Typography sx={{ fontSize: 15, opacity: 0.5 }}>
+              So when the real interview happens, it won’t feel new anymore.
+            </Typography>
+          </Stack>
+
+        </Container>
+
+
+      </div>
+      <Box
+        component="div"
+        sx={{
+          width: "100%",
+          bgcolor: "primary.main", // EXACT MUI button color
+          m: 0,                    // no margin
+          py: 3,
+          textAlign: "center"
+        }}
       >
-        <MenuItem onClick={() => { navigate('/report'); handleMenuClose(); }}>
-          <ViewIcon sx={{ mr: 1 }} />
-          View Report
-        </MenuItem>
-        <MenuItem onClick={handleMenuClose}>
-          <Delete sx={{ mr: 1 }} />
-          Delete Session
-        </MenuItem>
-      </Menu>
-    </Container>
+        <Typography
+          sx={{
+            fontSize: 164,
+            fontWeight: 800,
+            letterSpacing: 1.2,
+            opacity: 0.95,
+            color: "white"
+          }}
+        >
+          EvaluateYourself
+        </Typography>
+        {/* Break line below main text */}
+        <div style={{ width: "100%", marginTop: 12, marginBottom: 12 }}>
+          <Divider sx={{ bgcolor: "white", opacity: 0.3, height: 2, width: "100%" }} />
+        </div>
+
+        {/* Copyright text */}
+        <Typography
+          sx={{
+            fontSize: 14,
+            fontWeight: 500,
+            color: "white",
+            opacity: 0.7
+          }}
+        >
+          © {new Date().getFullYear()} Evaluate Yourself. All rights reserved.
+        </Typography>
+      </Box>
+    </>
   );
 }

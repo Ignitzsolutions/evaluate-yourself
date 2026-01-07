@@ -23,7 +23,6 @@ import {
   PlayArrow
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
-import LogoutButton from "../components/LogoutButton";
 import { 
   LineChart, 
   Line, 
@@ -188,9 +187,8 @@ export default function ReportPage() {
               }
             }}
           >
-            New Interview
+            Back to Home
           </Button>
-          <LogoutButton />
         </Box>
       </Box>
 

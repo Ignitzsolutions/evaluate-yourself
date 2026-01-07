@@ -63,7 +63,7 @@
   padding: 12px 18px; border-radius: 12px; font-weight: 700; cursor:pointer;
   border: none; transition: transform .12s ease, box-shadow .12s ease, filter .2s;
 }
-.btn-primary{ background: var(--brand); color:#fff; box-shadow: 0 12px 30px rgba(30,136,229,.35);}
+.btn-primary{ background: var(--brand); color:#fff;}
 .btn-primary:hover{ transform: translateY(-1px); filter: brightness(1.05); }
 .btn-ghost{ background:#fff; color:#111827; border:1px solid #e5e7eb; }
 .hero-img{

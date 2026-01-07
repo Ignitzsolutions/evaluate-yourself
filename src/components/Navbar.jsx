@@ -76,7 +76,7 @@ export default function Navbar() {
   };
 
   const handleNewInterview = () => {
-    navigate('/interview-cfig');
+    navigate('/interviews');
     setDrawerOpen(false);
   };
 
@@ -176,7 +176,7 @@ export default function Navbar() {
       >
         <Toolbar sx={{ justifyContent: 'space-between' }}>
           {/* Logo */}
-          <Logo onClick={() => navigate('/dashboard')} />
+          <Logo onClick={() => navigate('/')} />
 
           {/* Desktop Navigation */}
           {!isMobile && (

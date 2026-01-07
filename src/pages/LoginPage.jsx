@@ -13,7 +13,7 @@ export default function LoginPage() {
   const handleSubmit = (e) => {
     e.preventDefault();
     const res = login(email, password);
-    if (res.success) nav("/dashboard"); else setError(res.message);
+    if (res.success) nav("/"); else setError(res.message);
   };
 
   return (
@@ -24,10 +24,10 @@ export default function LoginPage() {
           {/* Left: Logo */}
           <div className="brand-section">
             <Link to="/" style={{ display: "flex", alignItems: "center", gap: "8px", textDecoration: "none", color: "inherit" }}>
-              <img 
-                src="/assets/logo.png" 
+              <img
+                src="/assets/logo.png"
                 alt="Evaluate Yourself Logo"
-                style={{width:36, height:36, borderRadius:12}}
+                style={{ width: 36, height: 36, borderRadius: 12 }}
               />
               <strong>Evaluate Yourself</strong>
             </Link>
@@ -37,7 +37,7 @@ export default function LoginPage() {
           <div></div>
 
           {/* Right: Demo info */}
-          <div style={{color:"#6b7280", fontSize:"14px"}}>
+          <div style={{ color: "#6b7280", fontSize: "14px" }}>
             Demo login → <b>demo@example.com / demo123</b>
           </div>
         </div>
@@ -54,20 +54,20 @@ export default function LoginPage() {
               <img
                 src="/assets/skillevaluation.png"
                 alt="Skill Evaluation"
-                style={{width:"90%",maxWidth:520,borderRadius:16, boxShadow:"0 16px 40px rgba(30,136,229,.25)", display:"block", margin:"18px auto 0"}}
+                style={{ width: "90%", maxWidth: 520, borderRadius: 16, boxShadow: "0 16px 40px rgba(30,136,229,.25)", display: "block", margin: "18px auto 0" }}
               />
             </div>
           </div>
 
           {/* right form side */}
           <form className="auth-form" onSubmit={handleSubmit}>
-            <h2 style={{margin:0, fontSize:22}}>Login</h2>
+            <h2 style={{ margin: 0, fontSize: 22 }}>Login</h2>
             <input
               className="input"
               type="email"
               placeholder="Email"
               value={email}
-              onChange={(e)=>setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               required
             />
             <input
@@ -75,11 +75,22 @@ export default function LoginPage() {
               type="password"
               placeholder="Password"
               value={password}
-              onChange={(e)=>setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               required
             />
-            {error && <div style={{color:"crimson", fontSize:13, textAlign:"center"}}>{error}</div>}
+            {error && <div style={{ color: "crimson", fontSize: 13, textAlign: "center" }}>{error}</div>}
             <button className="btn btn-primary btn-lg" type="submit">Sign in</button>
+            <div className="hint" style={{ marginTop: "10px" }}>
+              Don’t have an account?{" "}
+              <Link to="/register" style={{ textDecoration: "none", color: "var(--brand)", fontWeight: 700 }}>
+                Register
+              </Link>
+            </div>
+            <div className="hint">
+              <Link to="/forgot-password" style={{ textDecoration: "none", color: "var(--brand)", fontWeight: 700 }}>
+                Forgot password?
+              </Link>
+            </div>
             <div className="hint">Use demo: <b>demo@example.com / demo123</b></div>
           </form>
         </section>
