@@ -6,8 +6,11 @@ import PrivateRoute from "./components/PrivateRoute";
 import Navbar from "./components/Navbar";
 import theme from "./theme/theme";
 
+import Home from "./pages/Home";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Dashboard from "./pages/Dashboard";
 import PreInterviewForm from "./pages/PreInterviewForm";
 import InterviewHUD from "./pages/InterviewHUD";
@@ -36,6 +39,8 @@ export default function App() {
             {/* Public routes without navbar */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
             {/* Auth-protected routes with navbar */}
             <Route
@@ -49,7 +54,6 @@ export default function App() {
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/interviews" element={<InterviewsPage />} />
-              <Route path="/interview-cfig" element={<PreInterviewForm />} />
               <Route path="/interview-config" element={<PreInterviewForm />} />
               <Route path="/interview-hud" element={<InterviewHUD />} />
               <Route path="/interview/:type" element={<InterviewHUD />} />
