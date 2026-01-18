@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   AppBar,
   Toolbar,
-  Typography,
   Button,
   IconButton,
   Box,
@@ -48,7 +47,7 @@ const Logo = ({ onClick }) => {
       onClick={onClick}
     >
       <img 
-        src="/logo.png" 
+        src="/assets/logo.png" 
         alt="Evaluate Yourself Logo" 
         style={{ height: '100px', width: 'auto' }}
       />

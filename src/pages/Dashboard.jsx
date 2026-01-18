@@ -51,17 +51,7 @@ export default function Dashboard() {
   return (
     <>
       {/* PAGE WRAPPER FIXED TO WHITE SURFACE ONLY IN THIS COMPONENT */}
-      <div style={{ minHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr auto", background: "#fff", margin: 0, padding: 0 }}>
-
-        {/* HEADER */}
-        <header className="glossy-header">
-          <div className="glossy-inner">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <img src="/assets/logo.png" alt="logo" style={{ width: 34, height: 34, borderRadius: 8 }} />
-              <Typography sx={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Evaluate Yourself</Typography>
-            </div>
-          </div>
-        </header>
+      <div style={{ minHeight: "100vh", display: "grid", gridTemplateRows: "1fr auto", background: "#fff", margin: 0, padding: 0 }}>
 
         {/* MAIN CONTENT */}
         <Container maxWidth="lg" sx={{ py: 8 }}>
@@ -138,6 +128,137 @@ export default function Dashboard() {
               </Grid>
             ))}
           </Grid>
+
+          <Divider sx={{ my: 8 }} />
+
+          {/* Your Progress Section */}
+          <Box sx={{ mb: 8 }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, opacity: 0.9, mb: 4 }}>
+              Your Progress
+            </Typography>
+            
+            <Grid container spacing={3}>
+              {/* Clarity Card */}
+              <Grid item xs={12} sm={6} md={3}>
+                <Card sx={{ 
+                  borderRadius: 2, 
+                  boxShadow: 1,
+                  border: "1px solid #e0e0e0",
+                  height: "100%"
+                }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Speed sx={{ fontSize: 24, color: "#6b7280" }} />
+                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
+                          Clarity
+                        </Typography>
+                      </Box>
+                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
+                        82%
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
+                        Average across sessions
+                      </Typography>
+                      <Box sx={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                        <Box sx={{ height: "100%", width: "82%", background: "#4ade80" }} />
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              {/* Confidence Card */}
+              <Grid item xs={12} sm={6} md={3}>
+                <Card sx={{ 
+                  borderRadius: 2, 
+                  boxShadow: 1,
+                  border: "1px solid #e0e0e0",
+                  height: "100%"
+                }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <TrendingUp sx={{ fontSize: 24, color: "#6b7280" }} />
+                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
+                          Confidence
+                        </Typography>
+                      </Box>
+                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
+                        75%
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
+                        Improving over time
+                      </Typography>
+                      <Box sx={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                        <Box sx={{ height: "100%", width: "75%", background: "#3b82f6" }} />
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              {/* Pace Card */}
+              <Grid item xs={12} sm={6} md={3}>
+                <Card sx={{ 
+                  borderRadius: 2, 
+                  boxShadow: 1,
+                  border: "1px solid #e0e0e0",
+                  height: "100%"
+                }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Speed sx={{ fontSize: 24, color: "#6b7280" }} />
+                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
+                          Pace
+                        </Typography>
+                      </Box>
+                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
+                        78%
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
+                        Speaking rate optimal
+                      </Typography>
+                      <Box sx={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                        <Box sx={{ height: "100%", width: "78%", background: "#f59e0b" }} />
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              {/* Technical Depth Card */}
+              <Grid item xs={12} sm={6} md={3}>
+                <Card sx={{ 
+                  borderRadius: 2, 
+                  boxShadow: 1,
+                  border: "1px solid #e0e0e0",
+                  height: "100%"
+                }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Assessment sx={{ fontSize: 24, color: "#6b7280" }} />
+                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
+                          Technical Depth
+                        </Typography>
+                      </Box>
+                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
+                        70%
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
+                        Room for improvement
+                      </Typography>
+                      <Box sx={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                        <Box sx={{ height: "100%", width: "70%", background: "#ef4444" }} />
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
 
           <Divider sx={{ my: 8 }} />
 

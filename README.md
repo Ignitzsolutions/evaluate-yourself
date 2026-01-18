@@ -27,17 +27,42 @@ An elegant pre-interview evaluation web app that measures and analyzes interpers
 
 ## Local development
 
-Install dependencies and run locally:
+> **📌 For Cursor AI**: See [CURSOR_INSTRUCTIONS.md](CURSOR_INSTRUCTIONS.md) for detailed installation requirements and forbidden packages list.
 
-```powershell
-# install
+### Quick Start
+
+**Frontend:**
+```bash
 npm install
-
-# start dev server (create-react-app default)
 npm start
 ```
 
+**Backend:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r backend/requirements.txt
+cd backend
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+```
+
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
+
+### Azure Configuration (Required for Voice Interview)
+
+The voice-only interview feature requires Azure OpenAI Realtime API configuration:
+
+1. **Create Azure OpenAI resource** in Azure Portal
+2. **Deploy `gpt-4o-realtime` model**
+3. **Get API key and endpoint** from Azure Portal
+4. **Configure `backend/.env`** file:
+   ```env
+   AZURE_OPENAI_API_KEY=your-api-key
+   AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+   AZURE_OPENAI_DEPLOYMENT=gpt-4o-realtime
+   ```
+
+See [SETUP.md](SETUP.md) for detailed configuration instructions.
 
 
 ---
