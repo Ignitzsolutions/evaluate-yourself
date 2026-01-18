@@ -237,7 +237,7 @@ const LandingPage = () => {
                     Real-time speech-to-text with continuous recognition via Azure Speech SDK.
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 'auto' }}>
-                    Powers: Live transcription in InterviewHUD, speaking rate analysis
+                    Powers: Live transcription in Interview Session, speaking rate analysis
                   </Typography>
                 </Paper>
               </Grid>
@@ -389,7 +389,7 @@ const LandingPage = () => {
                 variant="contained" 
                 color="secondary" 
                 size="large"
-                onClick={() => navigate('/interview-hud')}
+                onClick={() => navigate('/interviews')}
                 sx={{ 
                   px: 4, 
                   py: 1.5, 

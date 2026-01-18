@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { 
   Box, 
   Card, 
@@ -22,7 +22,8 @@ import {
   Assessment,
   PlayArrow
 } from "@mui/icons-material";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import { 
   LineChart, 
   Line, 
@@ -79,6 +80,54 @@ const timeDistributionData = [
 
 export default function ReportPage() {
   const navigate = useNavigate();
+  const { sessionId } = useParams();
+  const { user } = useAuth();
+  const [report, setReport] = useState(null);
+  
+  // Fetch report from backend
+  useEffect(() => {
+    if (sessionId) {
+      const fetchReport = async () => {
+        try {
+          const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || 'http://localhost:8000';
+          
+          // Build headers with auth if available
+          const headers = {
+            'Content-Type': 'application/json',
+          };
+          
+          // Try to get auth token from localStorage (if using Clerk or similar)
+          const authToken = localStorage.getItem('clerk_session') || localStorage.getItem('authToken');
+          if (authToken) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+          }
+          
+          const response = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, {
+            headers: headers
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            setReport(data);
+          } else if (response.status === 401) {
+            // Auth failed but backend should still return report if it exists
+            console.warn('Authentication failed, but report may still be accessible');
+            // Try again without auth token
+            const retryResponse = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`);
+            if (retryResponse.ok) {
+              const data = await retryResponse.json();
+              setReport(data);
+            }
+          } else {
+            console.error("Error fetching report:", response.status, response.statusText);
+          }
+        } catch (error) {
+          console.error("Error fetching report:", error);
+        }
+      };
+      fetchReport();
+    }
+  }, [sessionId, user]);
   
   // Rating and feedback state
   const [experienceRating, setExperienceRating] = useState(0);
@@ -617,27 +666,173 @@ export default function ReportPage() {
           </Card>
         </Grid>
 
+        {/* Eye Contact & Presence Section */}
+        <Grid item xs={12}>
+          <Card sx={{ 
+            p: 4,
+            bgcolor: "white",
+            border: "1px solid #e0e0e0",
+            borderRadius: "12px",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+          }}>
+            <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
+              <Visibility sx={{ 
+                fontSize: 24, 
+                color: "#1976d2", 
+                mr: 1 
+              }} />
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  fontWeight: 600,
+                  color: "#1a1a1a",
+                  fontFamily: "'Inter', sans-serif"
+                }}
+              >
+                Eye Contact & Presence
+              </Typography>
+            </Box>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ textAlign: "center", p: 2 }}>
+                  <Typography 
+                    variant="h4" 
+                    sx={{ 
+                      fontWeight: 700,
+                      color: averageMetrics.avgEyeContact >= 70 ? "#4CAF50" : "#FF9800",
+                      fontFamily: "'Inter', sans-serif",
+                      mb: 1
+                    }}
+                  >
+                    {mockSessionData.eyeContactPercentage}%
+                  </Typography>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: "#666",
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    Average Eye Contact
+                  </Typography>
+                  <Typography 
+                    variant="caption" 
+                    sx={{ 
+                      color: "#999",
+                      fontFamily: "'Inter', sans-serif",
+                      display: "block",
+                      mt: 1
+                    }}
+                  >
+                    Target: >70%
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} md={8}>
+                <Box>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: "#666",
+                      fontFamily: "'Inter', sans-serif",
+                      mb: 2
+                    }}
+                  >
+                    {averageMetrics.avgEyeContact >= 70 
+                      ? "Good eye contact maintained throughout the interview. Continue this practice."
+                      : "Eye contact was below the recommended threshold. Practice maintaining focus on the camera lens."}
+                  </Typography>
+                  
+                  {averageMetrics.avgEyeContact < 70 && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography 
+                        variant="subtitle2" 
+                        sx={{ 
+                          fontWeight: 600,
+                          color: "#1a1a1a",
+                          fontFamily: "'Inter', sans-serif",
+                          mb: 1
+                        }}
+                      >
+                        Recommendations:
+                      </Typography>
+                      <ul style={{ margin: 0, paddingLeft: "20px", color: "#666" }}>
+                        <li>Position your camera at eye level</li>
+                        <li>Use notes sparingly to maintain eye contact</li>
+                        <li>Practice maintaining focus on the camera lens</li>
+                        <li>Minimize distractions in your environment</li>
+                      </ul>
+                    </Box>
+                  )}
+                </Box>
+              </Grid>
+            </Grid>
+          </Card>
+        </Grid>
+        
         {/* Recommendations */}
         <Grid item xs={12}>
-          <Card sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
+          <Card sx={{ 
+            p: 4,
+            bgcolor: "white",
+            border: "1px solid #e0e0e0",
+            borderRadius: "12px",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+          }}>
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                fontWeight: 600,
+                color: "#1a1a1a",
+                fontFamily: "'Inter', sans-serif",
+                mb: 3
+              }}
+            >
               Recommendations
             </Typography>
             
-            <Grid container spacing={2}>
-              {averageMetrics.avgEyeContact < 70 && (
-                <Grid item xs={12} md={6}>
-                  <Box sx={{ p: 2, bgcolor: "warning.light", borderRadius: 1 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
-                      🎯 Improve Eye Contact
-                    </Typography>
-                    <Typography variant="body2">
-                      Try to maintain more consistent eye contact with the camera. 
-                      Practice looking directly at the lens rather than the screen.
+            {report?.recommendations && report.recommendations.length > 0 ? (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {report.recommendations.map((rec, idx) => (
+                  <Box 
+                    key={idx}
+                    sx={{ 
+                      p: 2, 
+                      bgcolor: "#f5f5f5",
+                      border: "1px solid #e0e0e0",
+                      borderRadius: "8px"
+                    }}
+                  >
+                    <Typography 
+                      variant="body2"
+                      sx={{ 
+                        color: "#374151",
+                        fontFamily: "'Inter', sans-serif",
+                        lineHeight: 1.6
+                      }}
+                    >
+                      {rec}
                     </Typography>
                   </Box>
-                </Grid>
-              )}
+                ))}
+              </Box>
+            ) : (
+              <Grid container spacing={2}>
+                {averageMetrics.avgEyeContact < 70 && (
+                  <Grid item xs={12} md={6}>
+                    <Box sx={{ p: 2, bgcolor: "#fff3cd", border: "1px solid #e0e0e0", borderRadius: "8px" }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1, color: "#856404" }}>
+                        Improve Eye Contact
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#856404" }}>
+                        Try to maintain more consistent eye contact with the camera. 
+                        Practice looking directly at the lens rather than the screen.
+                      </Typography>
+                    </Box>
+                  </Grid>
+                )}
               
               {speechAnalysisData.find(d => d.name === "Pace")?.score < 75 && (
                 <Grid item xs={12} md={6}>
@@ -679,6 +874,7 @@ export default function ReportPage() {
                 </Box>
               </Grid>
             </Grid>
+            )}
           </Card>
         </Grid>
       </Grid>

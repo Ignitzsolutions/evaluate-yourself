@@ -116,7 +116,7 @@ const DashboardPage = () => {
 
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, active: true, onClick: () => {} },
-    { text: 'Interviews', icon: <VideoCallIcon />, onClick: () => navigate('/interview') },
+    { text: 'Interviews', icon: <VideoCallIcon />, onClick: () => navigate('/interviews') },
     { text: 'Resume Evaluation', icon: <DescriptionIcon />, onClick: handleFeatureClick },
     { text: 'Motivation Test', icon: <PsychologyIcon />, onClick: handleFeatureClick },
     { text: 'Articles', icon: <ArticleIcon />, onClick: handleFeatureClick },

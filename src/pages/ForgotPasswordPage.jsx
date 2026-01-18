@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import "../ui.css";
 
 export default function ForgotPasswordPage() {
-    const nav = useNavigate();
     const [email, setEmail] = useState("");
     const [sent, setSent] = useState(false);
     const [error, setError] = useState(null);

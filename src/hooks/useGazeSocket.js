@@ -24,13 +24,11 @@ export function useGazeSocket(serverUrl) {
   const connect = useCallback(() => {
     if (wsRef.current) return;
     
-    console.log("Connecting to Azure Face API proxy service...");
     const ws = new WebSocket(serverUrl);
     wsRef.current = ws;
     
     // Handle WebSocket connection events
     ws.onopen = () => {
-      console.log("Connected to Azure Face API proxy service");
       setConnected(true);
       
       // Initial handshake to verify Azure Face API connectivity
@@ -44,13 +42,11 @@ export function useGazeSocket(serverUrl) {
     };
     
     ws.onclose = () => { 
-      console.log("Disconnected from Azure Face API proxy service");
       setConnected(false); 
       wsRef.current = null; 
     };
     
     ws.onerror = (error) => { 
-      console.error("Azure Face API proxy connection error:", error);
       setConnected(false); 
     };
     
@@ -79,7 +75,6 @@ export function useGazeSocket(serverUrl) {
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
     if (wsRef.current) {
-      console.log("Disconnecting from Azure Face API proxy service");
       wsRef.current.close();
       wsRef.current = null;
     }
