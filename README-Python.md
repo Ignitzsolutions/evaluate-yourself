@@ -47,23 +47,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Download Model Files
-
-**Required:** Download the dlib 68 face landmarks model:
-
-```bash
-# Download from official source
-curl -o models/shape_predictor_68_face_landmarks.dat.bz2 http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
-
-# Extract the file
-# Windows: Use 7-Zip or WinRAR to extract
-# Linux/Mac:
-bunzip2 models/shape_predictor_68_face_landmarks.dat.bz2
-```
-
-**Alternative download:** https://github.com/davisking/dlib-models/raw/master/shape_predictor_68_face_landmarks.dat.bz2
-
-### 3. Run the Server
+#### 3. Run the Server
 
 ```bash
 # Start the FastAPI server
