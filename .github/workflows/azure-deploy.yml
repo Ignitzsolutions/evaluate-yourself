@@ -1,7 +1,7 @@
 # Docs for the Azure Web Apps Deploy action:
 # https://github.com/Azure/webapps-deploy
 
-name: Build and deploy Python app to Azure Web App - ElevateU-Ignitz
+name: Build and deploy Python app to Azure Web App - Evaluate Yourself
 
 on:
   push:
@@ -53,6 +53,6 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ElevateU-Ignitz
+          app-name: projecte
           slot-name: Production
           package: ./backend

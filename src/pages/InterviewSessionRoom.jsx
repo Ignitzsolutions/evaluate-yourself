@@ -62,6 +62,7 @@ export default function InterviewSessionRoom() {
 
   // Permission states
   const [hasVideoPermission, setHasVideoPermission] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [hasAudioPermission, setHasAudioPermission] = useState(false);
   // isVideoOn and isAudioOn kept for state management but always true when permission granted
   // eslint-disable-next-line no-unused-vars
@@ -100,6 +101,7 @@ export default function InterviewSessionRoom() {
     questionCount,
     reportId,
     showAudioPrompt,
+    // eslint-disable-next-line no-unused-vars
     lastError,
     startInterview,
     stopInterview,
@@ -338,9 +340,10 @@ export default function InterviewSessionRoom() {
   
   // Cleanup on unmount
   useEffect(() => {
+    const videoStream = videoStreamRef.current;
     return () => {
-      if (videoStreamRef.current) {
-        videoStreamRef.current.getTracks().forEach(track => track.stop());
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
       }
       // Gaze tracking disabled - focusing on core Q&A functionality
       // disconnectGaze();
