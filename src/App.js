@@ -7,7 +7,7 @@ import ErrorBoundaryWrapper from "./components/ErrorBoundary";
 import Navbar from "./components/Navbar";
 import theme from "./theme/theme";
 
-import LandingPage from "./pages/LandingPage";
+import LandingPage from "./pages/LandingPage.jsx";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";

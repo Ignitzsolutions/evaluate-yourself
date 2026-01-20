@@ -36,7 +36,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
   const [userTranscript, setUserTranscript] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [questionCount, setQuestionCount] = useState(0);
-  const [reportId, setReportId] = useState(null);
+  const [reportId] = useState(null);
   const [showAudioPrompt, setShowAudioPrompt] = useState(false);
   const [lastError, setLastError] = useState(null);
 
@@ -66,6 +66,91 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
       setLastError({ type: 'send_error', error: error.message });
     }
   }, [debugLog]);
+
+  // Handle DataChannel messages (Event Contract) - defined before startInterview to avoid use-before-define
+  const handleDataChannelMessage = useCallback((msg) => {
+    debugLog('Message received', { type: msg.type });
+
+    // Session lifecycle events
+    if (msg.type === 'session.created') {
+      debugLog('Session created', { session_id: msg.session?.id });
+    } else if (msg.type === 'session.updated') {
+      debugLog('Session updated', {});
+    } else if (msg.type === 'error') {
+      console.error('Error from Azure:', msg);
+      setLastError({ type: 'azure_error', error: msg.error?.message || 'Unknown error' });
+      setInterviewState(prev => ({ ...prev, status: 'error', error: msg.error?.message }));
+    }
+    
+    // Model output events (Sonia's speech)
+    else if (msg.type === 'response.output_text.delta') {
+      if (msg.delta) {
+        setCurrentQuestion(prev => (prev || '') + msg.delta);
+        soniaSpeakingRef.current = true;
+        setInterviewState(prev => ({ ...prev, aiSpeaking: true }));
+      }
+    } else if (msg.type === 'response.output_text.done') {
+      const fullText = msg.text || currentQuestion;
+      if (fullText) {
+        setAiTranscript(prev => [...prev, {
+          text: fullText,
+          timestamp: new Date().toISOString(),
+          speaker: 'interviewer'
+        }]);
+        setCurrentQuestion('');
+        soniaSpeakingRef.current = false;
+        setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
+      }
+    } else if (msg.type === 'response.completed') {
+      soniaSpeakingRef.current = false;
+      setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
+      setQuestionCount(prev => prev + 1);
+    }
+    
+    // Candidate transcription events (CRITICAL)
+    else if (msg.type === 'input_audio_transcription.completed') {
+      const text = msg.text || msg.transcript;
+      if (text) {
+        setUserTranscript(prev => [...prev, {
+          text: text,
+          timestamp: new Date().toISOString(),
+          speaker: 'candidate'
+        }]);
+        candidateSpeakingRef.current = false;
+        setInterviewState(prev => ({ ...prev, micActive: false }));
+      }
+    } else if (msg.type === 'input_audio_buffer.speech_started') {
+      candidateSpeakingRef.current = true;
+      setInterviewState(prev => ({ ...prev, micActive: true }));
+    } else if (msg.type === 'input_audio_buffer.speech_stopped') {
+      candidateSpeakingRef.current = false;
+      setInterviewState(prev => ({ ...prev, micActive: false }));
+    } else if (msg.type === 'input_audio_buffer.committed') {
+      // Audio committed, waiting for transcription
+    }
+    
+    // Turn management events
+    else if (msg.type === 'conversation.item.created') {
+      debugLog('Conversation item created', { item_id: msg.item?.id });
+    } else if (msg.type === 'conversation.item.input_audio_transcription.completed') {
+      // Alternative transcription event path
+      const text = msg.transcript || msg.text;
+      if (text) {
+        setUserTranscript(prev => [...prev, {
+          text: text,
+          timestamp: new Date().toISOString(),
+          speaker: 'candidate'
+        }]);
+      }
+    }
+    
+    // Ignore all other events (per Event Contract)
+    else {
+      if (DEBUG) {
+        console.log('[Realtime Debug] Unhandled event:', msg.type);
+      }
+    }
+  }, [currentQuestion, debugLog]);
 
   // Start interview - WebRTC connection
   const startInterview = useCallback(async () => {
@@ -277,92 +362,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         pcRef.current = null;
       }
     }
-  }, [sessionId, interviewType, debugLog, sendEvent]);
-
-  // Handle DataChannel messages (Event Contract)
-  const handleDataChannelMessage = useCallback((msg) => {
-    debugLog('Message received', { type: msg.type });
-
-    // Session lifecycle events
-    if (msg.type === 'session.created') {
-      debugLog('Session created', { session_id: msg.session?.id });
-    } else if (msg.type === 'session.updated') {
-      debugLog('Session updated', {});
-    } else if (msg.type === 'error') {
-      console.error('Error from Azure:', msg);
-      setLastError({ type: 'azure_error', error: msg.error?.message || 'Unknown error' });
-      setInterviewState(prev => ({ ...prev, status: 'error', error: msg.error?.message }));
-    }
-    
-    // Model output events (Sonia's speech)
-    else if (msg.type === 'response.output_text.delta') {
-      if (msg.delta) {
-        setCurrentQuestion(prev => (prev || '') + msg.delta);
-        soniaSpeakingRef.current = true;
-        setInterviewState(prev => ({ ...prev, aiSpeaking: true }));
-      }
-    } else if (msg.type === 'response.output_text.done') {
-      const fullText = msg.text || currentQuestion;
-      if (fullText) {
-        setAiTranscript(prev => [...prev, {
-          text: fullText,
-          timestamp: new Date().toISOString(),
-          speaker: 'interviewer'
-        }]);
-        setCurrentQuestion('');
-        soniaSpeakingRef.current = false;
-        setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
-      }
-    } else if (msg.type === 'response.completed') {
-      soniaSpeakingRef.current = false;
-      setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
-      setQuestionCount(prev => prev + 1);
-    }
-    
-    // Candidate transcription events (CRITICAL)
-    else if (msg.type === 'input_audio_transcription.completed') {
-      const text = msg.text || msg.transcript;
-      if (text) {
-        setUserTranscript(prev => [...prev, {
-          text: text,
-          timestamp: new Date().toISOString(),
-          speaker: 'candidate'
-        }]);
-        candidateSpeakingRef.current = false;
-        setInterviewState(prev => ({ ...prev, micActive: false }));
-      }
-    } else if (msg.type === 'input_audio_buffer.speech_started') {
-      candidateSpeakingRef.current = true;
-      setInterviewState(prev => ({ ...prev, micActive: true }));
-    } else if (msg.type === 'input_audio_buffer.speech_stopped') {
-      candidateSpeakingRef.current = false;
-      setInterviewState(prev => ({ ...prev, micActive: false }));
-    } else if (msg.type === 'input_audio_buffer.committed') {
-      // Audio committed, waiting for transcription
-    }
-    
-    // Turn management events
-    else if (msg.type === 'conversation.item.created') {
-      debugLog('Conversation item created', { item_id: msg.item?.id });
-    } else if (msg.type === 'conversation.item.input_audio_transcription.completed') {
-      // Alternative transcription event path
-      const text = msg.transcript || msg.text;
-      if (text) {
-        setUserTranscript(prev => [...prev, {
-          text: text,
-          timestamp: new Date().toISOString(),
-          speaker: 'candidate'
-        }]);
-      }
-    }
-    
-    // Ignore all other events (per Event Contract)
-    else {
-      if (DEBUG) {
-        console.log('[Realtime Debug] Unhandled event:', msg.type);
-      }
-    }
-  }, [currentQuestion, debugLog]);
+  }, [sessionId, interviewType, debugLog, sendEvent, handleDataChannelMessage]);
 
   // Stop interview - cleanup
   const stopInterview = useCallback(async () => {
