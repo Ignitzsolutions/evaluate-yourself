@@ -173,9 +173,12 @@ Set these in Azure App Service Application Settings:
 ### Oryx Build Process
 
 Azure App Service uses Oryx to build Python applications:
-- Automatically installs dependencies from `requirements.txt` in the project root
-- **Important**: Ensure `backend/requirements.txt` is used (workflow handles this)
+- Oryx looks for `requirements.txt` at the **repo root** (`/home/site/wwwroot/requirements.txt`)
+- The root `requirements.txt` references `backend/requirements.txt` to include all dependencies
+- Oryx will automatically resolve and install dependencies from the referenced file
 - Oryx will install system dependencies automatically for common packages
+
+**Important**: The root `requirements.txt` must reference `backend/requirements.txt` so Oryx can find PyJWT and all other dependencies.
 
 ### Build Tools Configuration
 

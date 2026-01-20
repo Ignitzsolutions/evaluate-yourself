@@ -1,15 +1,10 @@
-# Main requirements file
-# Includes base dependencies required for Azure deployment
-# For optional face detection (dlib), see requirements-face.txt
+# Main requirements file for Azure App Service deployment
+# Oryx (Azure build system) looks for requirements.txt at repo root
+# This file references backend/requirements.txt which contains all dependencies
 
-# Base dependencies (core functionality)
--r requirements-base.txt
+# Backend dependencies (used by Azure App Service)
+-r backend/requirements.txt
 
-# Optional: Face detection with dlib (for server.py only)
-# Uncomment the line below if you need dlib for the standalone eye-tracking server
+# Note: For optional face detection (dlib), see requirements-face.txt
+# Uncomment below if you need dlib for server.py:
 # -r requirements-face.txt
-
-# Alternative face detection libraries (if dlib fails)
-# mediapipe==0.10.3
-# torch==2.0.1
-# torchvision==0.15.2
