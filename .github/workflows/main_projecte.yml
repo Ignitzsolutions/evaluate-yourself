@@ -54,6 +54,7 @@ jobs:
           cd backend && python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
+      # Note: The artifact includes the entire repo root (.), ensuring backend/ folder exists in deployment
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
@@ -95,7 +96,8 @@ jobs:
         with:
           app-name: 'projecte'
           slot-name: 'Production'
-          startup-command: 'cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT'
+          startup-command: 'cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000} --timeout 600'
           # Note: If remote build fails, disable SCM_DO_BUILD_DURING_DEPLOYMENT in Azure Portal
           # Configuration → Application settings → Set SCM_DO_BUILD_DURING_DEPLOYMENT to false
+          # Also set WEBSITES_PORT=8000 in Application settings for proper port routing
           
