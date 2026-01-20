@@ -80,23 +80,6 @@ jobs:
           fi
           echo "All secrets are set (values are masked for security)"
 
-      - name: Debug - Check if secrets are set
-        run: |
-          echo "Checking secrets..."
-          if [ -z "${{ secrets.AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B is not set"
-            exit 1
-          fi
-          echo "All secrets are set (values are masked for security)"
-
       - name: Login to Azure
         uses: azure/login@v2
         with:
