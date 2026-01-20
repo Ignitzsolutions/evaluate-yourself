@@ -125,13 +125,32 @@ cd backend && uvicorn app:app --host 0.0.0.0 --port 8000
 
 ### Environment Variables
 
-Required environment variables (set in Azure Portal → Configuration → Application settings):
+**IMPORTANT**: Configure these in Azure Portal → Configuration → Application settings (NOT in .env files).
 
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_DEPLOYMENT`
-- `AZURE_SPEECH_KEY` (optional)
-- `AZURE_SPEECH_REGION` (optional)
+#### Required Variables
+
+Set these in Azure App Service Application Settings:
+
+- `AZURE_OPENAI_API_KEY` - Your Azure OpenAI API key
+- `AZURE_OPENAI_ENDPOINT` - Your Azure OpenAI endpoint (e.g., `https://your-resource.openai.azure.com`)
+
+#### Optional Variables
+
+- `AZURE_OPENAI_DEPLOYMENT` - Deployment name (default: `gpt-realtime`)
+- `AZURE_OPENAI_API_VERSION` - API version (default: `2025-08-28`)
+- `AZURE_REALTIME_SCOPE` - OAuth scope (default: `https://cognitiveservices.azure.com/.default`)
+- `AZURE_SPEECH_KEY` - Azure Speech Services key (optional)
+- `AZURE_SPEECH_REGION` - Speech region (default: `centralindia`)
+
+#### Configuration Steps
+
+1. Go to Azure Portal → App Service → Configuration → Application settings
+2. Click "+ New application setting" for each variable
+3. Add the required variables listed above
+4. Click "Save" and restart the app service
+5. Verify in Log stream that environment variables are loaded correctly
+
+**Security Note**: Never commit `.env` files or hardcode secrets. Use Azure App Service Application Settings or GitHub Secrets only.
 
 ### Oryx Build Process
 
