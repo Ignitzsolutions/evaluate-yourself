@@ -140,6 +140,25 @@ Azure App Service uses Oryx to build Python applications:
 - **Important**: Ensure `backend/requirements.txt` is used (workflow handles this)
 - Oryx will install system dependencies automatically for common packages
 
+### Build Tools Configuration
+
+The `backend/requirements.txt` includes build tools at the top to ensure reliable deployment:
+- `pip>=24.0` - Latest pip for better wheel resolution
+- `setuptools>=70.0` - Required for building packages
+- `wheel>=0.41.0` - Required for wheel-based installations
+
+These are installed first to prevent `BackendUnavailable: Cannot import 'setuptools.build_meta'` errors.
+
+### Disabling Remote Build (If Needed)
+
+If remote build fails due to native dependencies, you can disable it:
+
+1. Go to Azure Portal → App Service → Configuration → Application settings
+2. Set `SCM_DO_BUILD_DURING_DEPLOYMENT` to `false`
+3. The GitHub Actions workflow will deploy the pre-built artifact instead
+
+**Note**: With remote build disabled, ensure all dependencies are built in CI (which they are).
+
 ## CI/CD Compatibility
 
 ### GitHub Actions

@@ -41,14 +41,17 @@ jobs:
         run: |
           python -m venv antenv
           source antenv/bin/activate
-          pip install -U pip
+          # Upgrade pip, setuptools, wheel first (ensures reliable builds)
+          pip install --upgrade pip>=24.0 setuptools>=70.0 wheel>=0.41.0
           pip install -r backend/requirements.txt
 
-      - name: Validate imports
+      - name: Validate imports and app module
         run: |
           source antenv/bin/activate
+          python --version
           python -c "import fastapi, uvicorn, cv2, numpy, scipy; print('✓ Core imports successful')"
-          cd backend && python -c "import app; print('✓ Backend app module loads')"
+          cd backend && python -c "import app; print('✓ Backend app module loads successfully')"
+          python -c "from backend.app import app; print('✓ FastAPI app instance accessible')"
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
       - name: Upload artifact for deployment jobs
@@ -93,4 +96,6 @@ jobs:
           app-name: 'projecte'
           slot-name: 'Production'
           startup-command: 'cd backend && uvicorn app:app --host 0.0.0.0 --port 8000'
+          # Note: If remote build fails, disable SCM_DO_BUILD_DURING_DEPLOYMENT in Azure Portal
+          # Configuration → Application settings → Set SCM_DO_BUILD_DURING_DEPLOYMENT to false
           
