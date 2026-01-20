@@ -26,8 +26,20 @@ jobs:
 
       # 🛠️ Local Build Section (Optional)
       # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
-      - name: Install OpenBLAS
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libopenblas-dev \
+            cmake \
+            build-essential \
+            libx11-dev \
+            libgtk-3-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libswscale-dev \
+            libgl1-mesa-glx \
+            libglib2.0-0
 
       - name: Create and Start virtual environment and Install dependencies
         run: |
@@ -62,23 +74,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
-      
-      - name: Debug - Check if secrets are set
-        run: |
-          echo "Checking secrets..."
-          if [ -z "${{ secrets.AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}" ]; then
-            echo "ERROR: AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B is not set"
-            exit 1
-          fi
-          echo "All secrets are set (values are masked for security)"
+    
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -93,4 +89,5 @@ jobs:
         with:
           app-name: 'projecte'
           slot-name: 'Production'
+          startup-command: 'cd backend && uvicorn app:app --host 0.0.0.0 --port 8000'
           
