@@ -1,0 +1,255 @@
+# Compatibility Guide
+
+This document describes Python version compatibility, OS package requirements, optional dependencies, and Azure App Service configuration for this project.
+
+## Supported Python Version
+
+**Python 3.10** is the recommended and tested version for this project.
+
+- **GitHub Actions CI/CD**: Uses Python 3.10 on Ubuntu 22.04
+- **Azure App Service**: Configure to use Python 3.10 runtime
+- **Local Development**: Python 3.10+ recommended (3.9 minimum)
+
+### Why Python 3.10?
+
+- Best wheel availability for scientific packages (numpy, scipy, opencv-python)
+- Stable compatibility with Azure App Service Linux runtime
+- Avoids compilation issues with native dependencies like dlib
+
+## OS Package Requirements (Linux)
+
+### Required for Azure Deployment
+
+These packages are automatically installed in GitHub Actions CI/CD:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    libopenblas-dev \
+    libgl1 \
+    libglib2.0-0 \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev
+```
+
+### Package Descriptions
+
+- **libopenblas-dev**: Optimized BLAS library for numpy/scipy
+- **libgl1**: OpenGL library (replaces deprecated libgl1-mesa-glx on Ubuntu 24.04+)
+- **libglib2.0-0**: GLib library for OpenCV
+- **libavcodec-dev, libavformat-dev, libswscale-dev**: Video processing libraries for OpenCV
+
+### Optional Build Dependencies
+
+These are only needed if building native packages from source (not required for Azure deployment):
+
+```bash
+cmake \
+build-essential \
+libx11-dev \
+libgtk-3-dev
+```
+
+## Requirements Files Structure
+
+### `backend/requirements.txt` (Azure Deployment)
+
+**This is the main requirements file used for Azure App Service deployment.**
+
+Contains all dependencies needed for `backend/app.py`:
+- FastAPI, uvicorn, websockets
+- OpenCV (headless mode compatible)
+- NumPy, SciPy
+- Azure services, AI/ML libraries
+- **Does NOT include dlib** (not needed for Azure deployment)
+
+### `requirements-base.txt` (Core Dependencies)
+
+Base dependencies shared across the project:
+- Web framework (FastAPI, uvicorn)
+- Computer vision (OpenCV)
+- Scientific computing (NumPy, SciPy)
+- **Does NOT include dlib**
+
+### `requirements-face.txt` (Optional)
+
+Optional face detection dependencies:
+- **dlib** - Only needed for `server.py` (standalone eye-tracking server)
+- **NOT required** for Azure deployment (`backend/app.py` uses OpenCV's haarcascade instead)
+
+### `requirements.txt` (Root)
+
+References `requirements-base.txt` by default. To include optional face detection:
+
+```bash
+# Install base dependencies
+pip install -r requirements-base.txt
+
+# Or install with optional face detection
+pip install -r requirements.txt  # includes base
+pip install -r requirements-face.txt  # add dlib
+```
+
+## Application Structure
+
+### `backend/app.py` (Azure Deployment)
+
+- **Main FastAPI application** deployed to Azure App Service
+- Uses OpenCV for gaze tracking (no dlib required)
+- Startup command: `cd backend && uvicorn app:app --host 0.0.0.0 --port 8000`
+- Requirements: `backend/requirements.txt`
+
+### `server.py` (Standalone Server)
+
+- **Standalone eye-tracking server** (not deployed to Azure)
+- Uses dlib for advanced face landmark detection
+- Optional dependency - gracefully handles missing dlib
+- Requirements: `requirements-base.txt` + `requirements-face.txt`
+
+## Azure App Service Configuration
+
+### Python Runtime
+
+Set the Python version in Azure Portal:
+1. Go to App Service → Configuration → General settings
+2. Set "Stack" to "Python"
+3. Set "Python version" to "3.10"
+
+### Startup Command
+
+The GitHub Actions workflow sets this automatically:
+```bash
+cd backend && uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+### Environment Variables
+
+Required environment variables (set in Azure Portal → Configuration → Application settings):
+
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_DEPLOYMENT`
+- `AZURE_SPEECH_KEY` (optional)
+- `AZURE_SPEECH_REGION` (optional)
+
+### Oryx Build Process
+
+Azure App Service uses Oryx to build Python applications:
+- Automatically installs dependencies from `requirements.txt` in the project root
+- **Important**: Ensure `backend/requirements.txt` is used (workflow handles this)
+- Oryx will install system dependencies automatically for common packages
+
+## CI/CD Compatibility
+
+### GitHub Actions
+
+- **Runner**: `ubuntu-22.04` (pinned for stability)
+- **Python**: 3.10
+- **Installation**: `pip install -r backend/requirements.txt`
+- **Validation**: Tests core imports before deployment
+
+### Build Process
+
+1. Install system dependencies (libgl1, libglib2.0-0, etc.)
+2. Create virtual environment
+3. Upgrade pip
+4. Install Python dependencies from `backend/requirements.txt`
+5. Validate imports
+6. Upload artifact for deployment
+
+## Version Compatibility Notes
+
+### NumPy
+
+- **Version**: `>=1.24.0,<1.26.0`
+- Compatible with Python 3.10
+- Pre-built wheels available for Linux
+
+### SciPy
+
+- **Version**: `>=1.10.0,<1.13.0`
+- Compatible with Python 3.10
+- Requires NumPy >= 1.24.0
+
+### OpenCV
+
+- **Version**: `4.8.1.78`
+- Headless mode compatible (no GUI dependencies)
+- Requires libgl1 and libglib2.0-0 system packages
+
+### dlib (Optional)
+
+- **Version**: `19.24.2`
+- Only needed for `server.py`
+- May require building from source if wheels unavailable
+- Consider `dlib-bin` as alternative if build fails
+
+## Troubleshooting
+
+### Import Errors
+
+If you see import errors for cv2, numpy, or scipy:
+
+1. Verify Python version: `python --version` (should be 3.10)
+2. Check system packages are installed (libgl1, libglib2.0-0)
+3. Reinstall dependencies: `pip install -r backend/requirements.txt`
+
+### dlib Build Failures
+
+If dlib fails to install:
+
+1. **Option 1**: Use `dlib-bin` instead (pre-built binary)
+2. **Option 2**: Install build dependencies (cmake, build-essential)
+3. **Option 3**: Skip dlib if only using `backend/app.py` (not required)
+
+### Azure Deployment Failures
+
+If deployment fails:
+
+1. Check Python runtime version in Azure Portal (should be 3.10)
+2. Verify startup command is correct
+3. Check application logs in Azure Portal → Log stream
+4. Ensure environment variables are set correctly
+
+## Local Development Setup
+
+### Quick Start
+
+```bash
+# Create virtual environment
+python3.10 -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# or: .venv\Scripts\activate  # Windows
+
+# Install backend dependencies (for Azure deployment)
+pip install -r backend/requirements.txt
+
+# Or install with optional face detection (for server.py)
+pip install -r requirements-base.txt
+pip install -r requirements-face.txt
+```
+
+### Testing
+
+```bash
+# Test core imports
+python -c "import fastapi, uvicorn, cv2, numpy, scipy; print('✓ Core imports OK')"
+
+# Test backend app
+cd backend
+python -c "import app; print('✓ Backend app loads')"
+
+# Run backend server
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+## Summary
+
+- **Python**: 3.10 (required)
+- **OS**: Ubuntu 22.04 (CI/CD), Linux (Azure App Service)
+- **Core Dependencies**: `backend/requirements.txt` (no dlib)
+- **Optional**: `requirements-face.txt` (dlib for server.py only)
+- **Azure**: Uses `backend/app.py` with OpenCV (no dlib needed)
+
+For questions or issues, check the GitHub Actions logs or Azure App Service logs for detailed error messages.

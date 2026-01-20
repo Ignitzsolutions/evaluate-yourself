@@ -2,10 +2,18 @@
 import base64, io, time, asyncio, json
 import numpy as np
 import cv2
-import dlib
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.spatial import distance as dist
+
+# Optional dlib import for advanced face landmark detection
+try:
+    import dlib
+    DLIB_AVAILABLE = True
+except ImportError:
+    DLIB_AVAILABLE = False
+    print("WARNING: dlib not available. Install with: pip install -r requirements-face.txt")
+    print("This server requires dlib for face landmark detection.")
 
 app = FastAPI()
 app.add_middleware(
@@ -13,8 +21,18 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True
 )
 
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("models/shape_predictor_68_face_landmarks.dat")
+# Initialize dlib components if available
+if DLIB_AVAILABLE:
+    detector = dlib.get_frontal_face_detector()
+    try:
+        predictor = dlib.shape_predictor("models/shape_predictor_68_face_landmarks.dat")
+    except Exception as e:
+        print(f"ERROR: Could not load dlib shape predictor model: {e}")
+        print("Download from: http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2")
+        DLIB_AVAILABLE = False
+else:
+    detector = None
+    predictor = None
 
 LEFT_EYE_IDX  = list(range(36, 42))
 RIGHT_EYE_IDX = list(range(42, 48))
@@ -65,6 +83,15 @@ MIN_CONFIDENCE      = 0.15
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    if not DLIB_AVAILABLE:
+        await ws.accept()
+        await ws.send_text(json.dumps({
+            "error": "dlib not available. Install with: pip install -r requirements-face.txt",
+            "type": "error"
+        }))
+        await ws.close()
+        return
+    
     await ws.accept()
     earL_ema, earR_ema = EMA(0.3), EMA(0.3)
     contact_ema = EMA(0.2)

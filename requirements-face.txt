@@ -1,0 +1,8 @@
+# Optional face detection dependencies
+# Only needed for server.py (standalone eye-tracking server)
+# NOT required for backend/app.py (Azure deployment)
+
+# dlib for advanced face landmark detection
+# Note: May require system dependencies (cmake, build-essential) if building from source
+# Consider using dlib-bin if prebuilt wheels are not available for your platform
+dlib==19.24.2

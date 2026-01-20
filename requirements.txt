@@ -1,16 +1,15 @@
-# Core dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-opencv-python==4.8.1.78
-scipy>=1.11.0,<1.12.0
-numpy==1.24.3
-websockets==12.0
-python-multipart==0.0.6
+# Main requirements file
+# Includes base dependencies required for Azure deployment
+# For optional face detection (dlib), see requirements-face.txt
 
-# Face detection (choose one)
-dlib==19.24.2  # May require CMake on Windows
+# Base dependencies (core functionality)
+-r requirements-base.txt
 
-# Alternative face detection libraries (uncomment if dlib fails)
+# Optional: Face detection with dlib (for server.py only)
+# Uncomment the line below if you need dlib for the standalone eye-tracking server
+# -r requirements-face.txt
+
+# Alternative face detection libraries (if dlib fails)
 # mediapipe==0.10.3
 # torch==2.0.1
 # torchvision==0.15.2
