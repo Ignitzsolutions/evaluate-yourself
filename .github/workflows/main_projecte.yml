@@ -55,6 +55,21 @@ jobs:
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
       # Note: The artifact includes the entire repo root (.), ensuring backend/ folder exists in deployment
+      - name: Verify deployment artifact structure
+        run: |
+          echo "Verifying backend/ folder exists in artifact..."
+          if [ ! -d "backend" ]; then
+            echo "❌ ERROR: backend/ folder not found!"
+            exit 1
+          fi
+          if [ ! -f "backend/app.py" ]; then
+            echo "❌ ERROR: backend/app.py not found!"
+            exit 1
+          fi
+          echo "✓ backend/ folder verified"
+          echo "✓ backend/app.py verified"
+          ls -la backend/ | head -10
+      
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:

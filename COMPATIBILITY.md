@@ -261,7 +261,9 @@ If you see "Your web app is running and waiting for your content":
 - Use Azure Portal → Advanced Tools (Kudu) → SSH
 - Run: `cd /home/site/wwwroot && ls -la`
 - Confirm `backend/` folder exists
-- If missing, check deployment artifact includes entire repo root
+- Verify `backend/app.py` is present: `ls -la backend/app.py`
+- If missing, the deployment artifact structure is incorrect
+- The workflow uploads entire repo root (`.`), so `backend/` should always be present
 
 **4. Test Application Startup**
 - In Kudu SSH: `cd /home/site/wwwroot/backend`
