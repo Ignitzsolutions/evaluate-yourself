@@ -1,6 +1,6 @@
 """Evaluation engine for assessing interview responses."""
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import re
 
 
@@ -227,7 +227,7 @@ def _generate_notes(
     depth: int,
     relevance: int,
     star_completeness: Optional[Dict[str, bool]] = None
-) -> List[str]:
+) -> list[str]:
     """Generate evaluation notes."""
     notes = []
     
