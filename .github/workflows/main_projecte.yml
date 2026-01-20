@@ -69,6 +69,7 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}
+          enable-Azure-PowerShell: false
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
