@@ -1,6 +1,6 @@
 """Evaluation engine for assessing interview responses."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import re
 
 
