@@ -120,8 +120,26 @@ Set the Python version in Azure Portal:
 
 The GitHub Actions workflow sets this automatically:
 ```bash
-cd backend && uvicorn app:app --host 0.0.0.0 --port 8000
+cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000} --timeout 600
 ```
+
+**Why gunicorn?**
+- More reliable on Azure App Service than uvicorn directly
+- Uses uvicorn worker for ASGI support (FastAPI compatibility)
+- `${PORT:-8000}` provides fallback if `$PORT` environment variable isn't set
+- `--timeout 600` prevents premature timeouts on long-running requests
+
+### Port Configuration
+
+**IMPORTANT**: Set `WEBSITES_PORT=8000` in Azure Portal → Configuration → Application settings.
+
+This tells Azure which port your application listens on, enabling proper traffic routing.
+
+**Steps:**
+1. Go to Azure Portal → App Service → Configuration → Application settings
+2. Click "+ New application setting"
+3. Name: `WEBSITES_PORT`, Value: `8000`
+4. Click "Save" and restart the app service
 
 ### Environment Variables
 
@@ -225,6 +243,36 @@ If remote build fails due to native dependencies, you can disable it:
 
 ## Troubleshooting
 
+### Azure App Service Shows Placeholder Page
+
+If you see "Your web app is running and waiting for your content":
+
+**1. Check Application Logs**
+- Go to Azure Portal → App Service → Log stream
+- Enable "Application Logging (Filesystem)" and "Web server logging" in App Service logs
+- Restart the app and watch for startup errors
+
+**2. Verify Port Configuration**
+- Ensure `WEBSITES_PORT=8000` is set in Application settings
+- Check startup command uses `${PORT:-8000}` fallback
+- Restart app service after changing settings
+
+**3. Verify Folder Structure**
+- Use Azure Portal → Advanced Tools (Kudu) → SSH
+- Run: `cd /home/site/wwwroot && ls -la`
+- Confirm `backend/` folder exists
+- If missing, check deployment artifact includes entire repo root
+
+**4. Test Application Startup**
+- In Kudu SSH: `cd /home/site/wwwroot/backend`
+- Run: `python -c "import app; print('App module loads')"`
+- Check for import errors or missing dependencies
+
+**5. Verify Server is Running**
+- Check if process is listening: `netstat -tlnp | grep 8000`
+- Test API endpoint: `curl http://localhost:8000/docs` (from Kudu SSH)
+- External test: `https://your-app.azurewebsites.net/docs`
+
 ### Import Errors
 
 If you see import errors for cv2, numpy, or scipy:
@@ -246,9 +294,11 @@ If dlib fails to install:
 If deployment fails:
 
 1. Check Python runtime version in Azure Portal (should be 3.10)
-2. Verify startup command is correct
+2. Verify startup command is correct (should use gunicorn)
 3. Check application logs in Azure Portal → Log stream
 4. Ensure environment variables are set correctly
+5. Verify `WEBSITES_PORT=8000` is configured
+6. Check that `backend/` folder exists in deployment artifact
 
 ## Local Development Setup
 
