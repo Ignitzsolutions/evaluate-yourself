@@ -36,5 +36,5 @@ azure-identity==1.17.1
 reportlab==4.0.9
 
 # Security
-pyjwt==2.8.0
+PyJWT>=2.8.0  # Package name is PyJWT, imports as 'jwt'
 cryptography==41.0.7
