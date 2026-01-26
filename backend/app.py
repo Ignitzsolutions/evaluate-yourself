@@ -73,6 +73,11 @@ AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 
+# OpenAI Realtime API variables (optional - for direct OpenAI API, not Azure)
+OPENAI_REALTIME_API_KEY = os.getenv("OPENAI_REALTIME_API_KEY")
+OPENAI_REALTIME_ENDPOINT = os.getenv("OPENAI_REALTIME_ENDPOINT", "wss://api.openai.com/v1/realtime")
+OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
+
 # #region agent log
 import json as json_module
 from datetime import datetime
@@ -82,6 +87,46 @@ try:
 except: pass
 # #endregion
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
+
+def extract_azure_endpoint_info(endpoint: str) -> tuple:
+    """Extract resource name, domain, and region from Azure OpenAI endpoint.
+    
+    For Realtime API:
+    - If endpoint is already *.openai.azure.com, use it as-is (no conversion)
+    - If endpoint is *.cognitiveservices.azure.com, convert to openai.azure.com format
+    """
+    if not endpoint:
+        raise ValueError("AZURE_OPENAI_ENDPOINT is not set")
+    
+    # Remove protocol and any path/query parameters
+    from urllib.parse import urlparse
+    parsed = urlparse(endpoint if endpoint.startswith(('http://', 'https://')) else f"https://{endpoint}")
+    hostname = parsed.netloc or parsed.path.split('/')[0] if not parsed.netloc else parsed.netloc
+    # Remove any remaining path/query if still present
+    hostname = hostname.split('/')[0].split('?')[0]
+    
+    # Case 1: Already in openai.azure.com format - use as-is
+    match = re.match(r"^([^.]+)\.openai\.azure\.com$", hostname)
+    if match:
+        resource_name = match.group(1)
+        return resource_name, "openai.azure.com", None
+    
+    # Case 2: cognitiveservices.azure.com format - convert to openai.azure.com
+    match = re.match(r"^(.+)\.cognitiveservices\.azure\.com$", hostname)
+    if match:
+        full_name = match.group(1)
+        # Extract region for reference, but preserve full name for hostname
+        parts = full_name.rsplit("-", 1)
+        if len(parts) == 2:
+            resource_name = full_name  # Keep full "ignit-mk7zvb02-swedencentral"
+            region = parts[1]           # Extract region for reference/logging
+            return resource_name, "openai.azure.com", region
+        else:
+            # No region suffix, use full name as-is
+            return full_name, "openai.azure.com", None
+    
+    # Case 3: Unknown format
+    raise ValueError(f"Unknown endpoint format: {hostname}. Must be *.openai.azure.com or *.cognitiveservices.azure.com")
 
 # Environment variable validation on startup
 def validate_environment():
@@ -361,46 +406,6 @@ class WebRTCRequest(BaseModel):
     questionMix: Optional[str] = "balanced"
     questionMixRatio: Optional[float] = None
     interviewStyle: Optional[str] = "neutral"
-
-def extract_azure_endpoint_info(endpoint: str) -> tuple:
-    """Extract resource name, domain, and region from Azure OpenAI endpoint.
-    
-    For Realtime API:
-    - If endpoint is already *.openai.azure.com, use it as-is (no conversion)
-    - If endpoint is *.cognitiveservices.azure.com, convert to openai.azure.com format
-    """
-    if not endpoint:
-        raise ValueError("AZURE_OPENAI_ENDPOINT is not set")
-    
-    # Remove protocol and any path/query parameters
-    from urllib.parse import urlparse
-    parsed = urlparse(endpoint if endpoint.startswith(('http://', 'https://')) else f"https://{endpoint}")
-    hostname = parsed.netloc or parsed.path.split('/')[0] if not parsed.netloc else parsed.netloc
-    # Remove any remaining path/query if still present
-    hostname = hostname.split('/')[0].split('?')[0]
-    
-    # Case 1: Already in openai.azure.com format - use as-is
-    match = re.match(r"^([^.]+)\.openai\.azure\.com$", hostname)
-    if match:
-        resource_name = match.group(1)
-        return resource_name, "openai.azure.com", None
-    
-    # Case 2: cognitiveservices.azure.com format - convert to openai.azure.com
-    match = re.match(r"^(.+)\.cognitiveservices\.azure\.com$", hostname)
-    if match:
-        full_name = match.group(1)
-        # Extract region for reference, but preserve full name for hostname
-        parts = full_name.rsplit("-", 1)
-        if len(parts) == 2:
-            resource_name = full_name  # Keep full "ignit-mk7zvb02-swedencentral"
-            region = parts[1]           # Extract region for reference/logging
-            return resource_name, "openai.azure.com", region
-        else:
-            # No region suffix, use full name as-is
-            return full_name, "openai.azure.com", None
-    
-    # Case 3: Unknown format
-    raise ValueError(f"Unknown endpoint format: {hostname}. Must be *.openai.azure.com or *.cognitiveservices.azure.com")
 
 def build_azure_realtime_url(resource_name: str, domain: str, path: str, region: Optional[str] = None) -> str:
     """Build Azure Realtime API URL."""
@@ -699,6 +704,7 @@ async def webrtc_proxy(request: WebRTCRequest):
 
 @app.get("/api/token")
 async def realtime_token():
+    # Check if OpenAI API key is configured (for direct OpenAI API)
     if OPENAI_REALTIME_API_KEY and OPENAI_REALTIME_API_KEY != "your-openai-api-key-here":
         return {
             "api_key": OPENAI_REALTIME_API_KEY,
@@ -707,6 +713,7 @@ async def realtime_token():
             "provider": "openai"
         }
     
+    # Fallback to Azure OpenAI (using DefaultAzureCredential)
     try:
         credential = get_azure_credential()
         access_token = credential.get_token(AZURE_REALTIME_SCOPE)
@@ -731,8 +738,12 @@ async def realtime_token():
 async def realtime_websocket_proxy(websocket: WebSocket):
     await websocket.accept()
     
+    # Check if OpenAI API key is configured (for direct OpenAI API)
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
-        await websocket.close(code=1008, reason="OpenAI API key not configured")
+        await websocket.close(
+            code=1008, 
+            reason="OpenAI API key not configured. This endpoint requires OPENAI_REALTIME_API_KEY environment variable. Use /api/realtime/webrtc for Azure OpenAI."
+        )
         return
     
     model = OPENAI_REALTIME_MODEL
@@ -864,18 +875,24 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         # Handle both endpoint patterns:
         # 1. Standard Azure OpenAI: https://{resource}.openai.azure.com
         # 2. Cognitive Services pattern: https://{region}.api.cognitive.microsoft.com
-        if "openai.azure.com" in endpoint:
-            # Standard Azure OpenAI endpoint
-            ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://")
-            ws_url += f"/openai/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}&api-version={AZURE_OPENAI_API_VERSION}"
-        elif "api.cognitive.microsoft.com" in endpoint:
-            # Cognitive Services pattern (if OpenAI is deployed there)
-            ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://")
-            ws_url += f"/openai/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}&api-version={AZURE_OPENAI_API_VERSION}"
+        # IMPORTANT: Use /openai/v1/realtime (not /openai/realtime) to match WebRTC pattern
+        # Extract base hostname (same logic as WebRTC endpoint)
+        try:
+            resource_name, domain, region = extract_azure_endpoint_info(endpoint)
+            base_endpoint = f"{resource_name}.openai.azure.com"
+        except Exception as e:
+            print(f"⚠️  Could not parse endpoint for WebSocket: {e}, using endpoint as-is")
+            # Fallback: try to extract hostname manually
+            from urllib.parse import urlparse
+            parsed = urlparse(endpoint if endpoint.startswith(('http://', 'https://')) else f"https://{endpoint}")
+            base_endpoint = parsed.netloc or endpoint.replace("https://", "").replace("http://", "").split("/")[0]
+        
+        # Build WebSocket URL using /openai/v1/realtime (consistent with WebRTC)
+        # For GA versions (non-preview), api-version may not be required in URL
+        if AZURE_OPENAI_API_VERSION and "-preview" not in AZURE_OPENAI_API_VERSION:
+            ws_url = f"wss://{base_endpoint}/openai/v1/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}"
         else:
-            # Assume standard pattern and construct
-            ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://")
-            ws_url += f"/openai/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}&api-version={AZURE_OPENAI_API_VERSION}"
+            ws_url = f"wss://{base_endpoint}/openai/v1/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}&api-version={AZURE_OPENAI_API_VERSION}"
         
         headers = {"api-key": AZURE_OPENAI_API_KEY}
     else:
@@ -929,19 +946,55 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
                 "message": "Azure OpenAI Realtime connected. Initializing session..."
             }))
         except asyncio.TimeoutError:
-            print(f"❌ Azure connection timeout after 10 seconds")
+            error_msg = "Azure OpenAI connection timeout after 10 seconds"
+            print(f"❌ {error_msg}")
+            print(f"❌ WebSocket URL: {ws_url}")
+            print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
             await websocket.send_text(json.dumps({
                 "type": "error",
-                "error": "Azure OpenAI connection timeout. Please check your Azure configuration."
+                "error": {
+                    "message": error_msg,
+                    "code": "timeout",
+                    "ws_url": ws_url,
+                    "suggestion": "Check your Azure endpoint, deployment name, and API version"
+                }
             }))
             # Keep connection open briefly to allow error message to be received
             await asyncio.sleep(1)
             return
-        except Exception as e:
-            print(f"❌ Azure connection failed: {e}")
+        except websockets.exceptions.InvalidHandshake as e:
+            error_msg = f"Azure OpenAI handshake failed: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"❌ WebSocket URL: {ws_url}")
+            print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
+            print(f"❌ This usually means: Wrong endpoint, wrong API key, or deployment not found")
             await websocket.send_text(json.dumps({
                 "type": "error",
-                "error": f"Azure OpenAI connection failed: {str(e)}"
+                "error": {
+                    "message": error_msg,
+                    "code": "invalid_handshake",
+                    "ws_url": ws_url,
+                    "suggestion": "Verify AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT"
+                }
+            }))
+            await asyncio.sleep(1)
+            return
+        except Exception as e:
+            error_msg = f"Azure OpenAI connection failed: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"❌ Error type: {type(e).__name__}")
+            print(f"❌ WebSocket URL: {ws_url}")
+            print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "error": {
+                    "message": error_msg,
+                    "code": type(e).__name__,
+                    "ws_url": ws_url,
+                    "full_error": str(e)
+                }
             }))
             # Keep connection open briefly to allow error message to be received
             await asyncio.sleep(1)
@@ -1005,6 +1058,7 @@ Provide only one response per user turn. Never produce multiple responses.
                 session_update_payload = {
                     "type": "session.update",
                     "session": {
+                        "type": "realtime",  # ✅ REQUIRED: Azure requires session.type
                         "modalities": ["audio"],  # ONLY audio - prevents text+audio duplicate streams
                         "input_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz input
                         "output_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz output - CRITICAL for correct playback speed
@@ -1260,9 +1314,28 @@ def _build_interviewer_system_prompt(
     interview_style: Optional[str] = None
 ) -> str:
     """Build system prompt for the interviewer agent."""
-    base_prompt = """You are Sonia, a professional interviewer conducting a formal job interview. Your name is Sonia. This is NOT a casual conversation. You are evaluating a candidate for a position.
+    # ⚠️ CRITICAL: ENGLISH-ONLY RULES MUST BE FIRST - HIGHEST PRIORITY
+    base_prompt = """🚨🚨🚨 CRITICAL LANGUAGE REQUIREMENT - READ THIS FIRST 🚨🚨🚨
+
+YOU MUST SPEAK ONLY IN ENGLISH. THIS IS THE ABSOLUTE HIGHEST PRIORITY RULE. NO EXCEPTIONS.
+
+LANGUAGE RULE #1: You are an English-only interviewer. You MUST respond ONLY in English. This is non-negotiable.
+LANGUAGE RULE #2: NEVER use Portuguese, Spanish, Hindi, French, German, Italian, Turkish, Chinese, Japanese, Korean, Arabic, or ANY other language.
+LANGUAGE RULE #3: NEVER translate user input to another language.
+LANGUAGE RULE #4: NEVER mirror the user's language if they speak in a non-English language.
+LANGUAGE RULE #5: If the user speaks in another language, respond ONLY in English with: "Please continue in English so I can evaluate your interview responses."
+LANGUAGE RULE #6: Do NOT detect or respond to non-English languages - always respond in English.
+LANGUAGE RULE #7: Do NOT switch languages under any circumstances.
+LANGUAGE RULE #8: Do NOT use greetings in other languages (no "Opa", "Hola", "Namaste", "Bonjour", "Ciao", "Olá", etc.).
+LANGUAGE RULE #9: ONLY English. ALWAYS English. NO EXCEPTIONS. NO OTHER LANGUAGE IS ALLOWED.
+
+REMEMBER: Every single word you speak must be in English. Every response must be in English. There are no exceptions to this rule. Your first words must be in English. Your greeting must be in English. Everything must be in English.
+
+---
+
+You are Sonia, a professional interviewer conducting a formal job interview. Your name is Sonia. This is NOT a casual conversation. You are evaluating a candidate for a position.
     
-IMPORTANT: You must introduce yourself as Sonia at the start of the interview. Say: "Hello, I'm Sonia, and I'll be conducting your interview today."
+IMPORTANT: You must introduce yourself as Sonia at the start of the interview. Say: "Hello, I'm Sonia, and I'll be conducting your interview today." (IN ENGLISH ONLY)
 
 CRITICAL: You are conducting an INTERVIEW, not having a friendly chat. Your role is to:
 - Ask professional interview questions
@@ -1277,21 +1350,6 @@ You are a single interviewer agent conducting a professional interview.
 You must produce strictly one response per user turn.
 Never generate more than one answer for a single input.
 Never overlap or interrupt yourself.
-
-## CRITICAL LANGUAGE REQUIREMENT - MANDATORY - HIGHEST PRIORITY
-YOU MUST SPEAK ONLY IN ENGLISH. THIS IS THE MOST IMPORTANT RULE.
-
-LANGUAGE RULE #1: You are an English-only interviewer. You MUST respond ONLY in English. This is non-negotiable.
-LANGUAGE RULE #2: NEVER use Portuguese, Spanish, Hindi, French, German, Italian, Turkish, Chinese, Japanese, Korean, Arabic, or ANY other language.
-LANGUAGE RULE #3: NEVER translate user input to another language.
-LANGUAGE RULE #4: NEVER mirror the user's language if they speak in a non-English language.
-LANGUAGE RULE #5: If the user speaks in another language, respond ONLY in English with: "Please continue in English so I can evaluate your interview responses."
-LANGUAGE RULE #6: Do NOT detect or respond to non-English languages - always respond in English.
-LANGUAGE RULE #7: Do NOT switch languages under any circumstances.
-LANGUAGE RULE #8: Do NOT use greetings in other languages (no "Opa", "Hola", "Namaste", "Bonjour", "Ciao", "Olá", etc.).
-LANGUAGE RULE #9: ONLY English. ALWAYS English. NO EXCEPTIONS. NO OTHER LANGUAGE IS ALLOWED.
-
-REMEMBER: Every single word you speak must be in English. Every response must be in English. There are no exceptions to this rule.
 
 Maintain a calm, slow speaking pace suitable for interviews.
 Avoid short greetings or filler sentences.
@@ -1435,7 +1493,7 @@ async def _send_initial_question(azure_ws, session_state: InterviewState):
     await azure_ws.send(json.dumps({
         "type": "response.create",
         "response": {
-            "modalities": ["audio"],  # Audio-only to prevent duplicate streams
+            # ✅ REMOVED: modalities belong in session.update, not response.create
             "instructions": greeting
         }
     }))
@@ -1450,7 +1508,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                # ✅ REMOVED: modalities belong in session.update, not response.create
                 "instructions": question
             }
         }))
@@ -1459,7 +1517,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                # ✅ REMOVED: modalities belong in session.update, not response.create
                 "instructions": follow_up
             }
         }))
@@ -1468,7 +1526,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                # ✅ REMOVED: modalities belong in session.update, not response.create
                 "instructions": follow_up
             }
         }))
@@ -1477,7 +1535,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                # ✅ REMOVED: modalities belong in session.update, not response.create
                 "instructions": follow_up
             }
         }))
@@ -1487,7 +1545,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                # ✅ REMOVED: modalities belong in session.update, not response.create
                 "instructions": question
             }
         }))
@@ -1532,7 +1590,7 @@ async def _end_interview(azure_ws, session_state: InterviewState, client_ws: Web
     await azure_ws.send(json.dumps({
         "type": "response.create",
         "response": {
-            "modalities": ["text", "audio"],
+            # ✅ REMOVED: modalities belong in session.update, not response.create
             "instructions": "Thank you for your time. The interview is now complete. We'll prepare your feedback report."
         }
     }))
@@ -2124,6 +2182,75 @@ async def create_interview_report(request: CreateInterviewReportRequest, authori
     interview_reports[report_id] = report
     
     return {"id": report_id}
+
+@app.post("/api/interview/{session_id}/transcript")
+async def save_interview_transcript(session_id: str, request: Dict):
+    """Save interview transcript to file with session ID."""
+    try:
+        transcript = request.get("transcript", [])
+        
+        if not transcript:
+            return {"message": "No transcript data provided", "session_id": session_id}
+        
+        # Create transcripts directory if it doesn't exist
+        transcripts_dir = os.path.join(os.path.dirname(__file__), "transcripts")
+        os.makedirs(transcripts_dir, exist_ok=True)
+        
+        # Generate filename with session ID and timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename_base = f"transcript_{session_id}_{timestamp}"
+        
+        # Save as JSON (structured data)
+        json_filename = os.path.join(transcripts_dir, f"{filename_base}.json")
+        with open(json_filename, 'w', encoding='utf-8') as f:
+            json.dump({
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "transcript": transcript
+            }, f, indent=2, ensure_ascii=False)
+        
+        # Save as readable text file
+        text_filename = os.path.join(transcripts_dir, f"{filename_base}.txt")
+        with open(text_filename, 'w', encoding='utf-8') as f:
+            f.write(f"Interview Transcript - Session ID: {session_id}\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for entry in transcript:
+                speaker = entry.get("speaker", "Unknown")
+                text = entry.get("text", "")
+                timestamp_str = entry.get("timestamp", "")
+                
+                # Format timestamp if it's an ISO string
+                if timestamp_str:
+                    try:
+                        if isinstance(timestamp_str, str):
+                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            timestamp_str = dt.strftime('%H:%M:%S')
+                    except:
+                        pass
+                
+                f.write(f"[{timestamp_str}] {speaker.upper()}:\n")
+                f.write(f"{text}\n\n")
+        
+        print(f"✅ Transcript saved for session {session_id}")
+        print(f"   JSON: {json_filename}")
+        print(f"   Text: {text_filename}")
+        
+        return {
+            "message": "Transcript saved successfully",
+            "session_id": session_id,
+            "files": {
+                "json": json_filename,
+                "text": text_filename
+            }
+        }
+    
+    except Exception as e:
+        print(f"❌ Error saving transcript: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save transcript: {str(e)}")
 
 # Gaze tracking WebSocket endpoint
 class EMA:
