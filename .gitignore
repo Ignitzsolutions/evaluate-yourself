@@ -33,3 +33,7 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Interview transcripts (contains sensitive data)
+backend/transcripts/
+transcripts/
