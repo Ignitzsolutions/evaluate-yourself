@@ -20,6 +20,7 @@ class InterviewReport(Base):
     __tablename__ = "interview_reports"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, unique=True, index=True, nullable=True)  # Session ID from interview
     user_id = Column(String, index=True, nullable=False)
     title = Column(String, nullable=False)
     date = Column(DateTime(timezone=True), server_default=func.now())

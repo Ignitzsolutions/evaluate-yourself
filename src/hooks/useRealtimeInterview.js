@@ -153,7 +153,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         setInterviewState(prev => ({ ...prev, aiSpeaking: true }));
       }
     } else if (msg.type === 'response.output_audio_transcript.done') {
-      // Full transcript is available - PRIMARY CAPTURE POINT
+      // Full transcript is available - PRIMARY CAPTURE POINT (ONLY THIS ONE)
       const fullText = msg.transcript || currentQuestion;
       const responseId = msg.response_id;
       const transcriptKey = `${responseId}_${fullText}`;
@@ -173,76 +173,14 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         setInterviewState(prev => ({ ...prev, aiSpeaking: false, status: prev.status === 'connected' || prev.status === 'listening' ? 'listening' : prev.status }));
       }
     } else if (msg.type === 'response.content_part.done') {
-      // Skip - already captured from response.output_audio_transcript.done
-      // Only capture here if we missed it above
-      const transcript = msg.part?.transcript || msg.content?.transcript || msg.transcript;
-      const responseId = msg.response_id;
-      const transcriptKey = `${responseId}_${transcript}`;
-      
-      if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
-        console.log('✅ Adding AI transcript (content_part fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
-        capturedTranscriptsRef.current.add(transcriptKey);
-        const newEntry = {
-          text: transcript,
-          timestamp: new Date().toISOString(),
-          speaker: 'interviewer'
-        };
-        aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
-        setAiTranscript(prev => [...prev, newEntry]);
-      }
+      // DISABLED - Skip to avoid duplicates
+      // Only the audio transcript event above should capture AI responses
     } else if (msg.type === 'conversation.item.done' || msg.type === 'response.output_item.done') {
-      // Skip - already captured from response.output_audio_transcript.done
-      // Only use as fallback if primary capture missed
-      const item = msg.item || msg;
-      if (item.content && Array.isArray(item.content)) {
-        item.content.forEach(content => {
-          if (content.type === 'output_audio' && content.transcript) {
-            const transcript = content.transcript;
-            const itemId = item.id || msg.item_id;
-            const transcriptKey = `${itemId}_${transcript}`;
-            
-            if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
-              console.log('✅ Adding AI transcript (item.done fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
-              capturedTranscriptsRef.current.add(transcriptKey);
-              const newEntry = {
-                text: transcript,
-                timestamp: new Date().toISOString(),
-                speaker: 'interviewer'
-              };
-              aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
-              setAiTranscript(prev => [...prev, newEntry]);
-            }
-          }
-        });
-      }
+      // DISABLED - Skip to avoid duplicates  
+      // Only the audio transcript event above should capture AI responses
     } else if (msg.type === 'response.done') {
-      // Skip - already captured from response.output_audio_transcript.done
-      // Only use as fallback
-      if (msg.response?.output && Array.isArray(msg.response.output)) {
-        msg.response.output.forEach(outputItem => {
-          if (outputItem.content && Array.isArray(outputItem.content)) {
-            outputItem.content.forEach(content => {
-              if (content.type === 'output_audio' && content.transcript) {
-                const transcript = content.transcript;
-                const responseId = msg.response?.id || msg.response_id;
-                const transcriptKey = `${responseId}_${transcript}`;
-                
-                if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
-                  console.log('✅ Adding AI transcript (response.done fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
-                  capturedTranscriptsRef.current.add(transcriptKey);
-                  const newEntry = {
-                    text: transcript,
-                    timestamp: new Date().toISOString(),
-                    speaker: 'interviewer'
-                  };
-                  aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
-                  setAiTranscript(prev => [...prev, newEntry]);
-                }
-              }
-            });
-          }
-        });
-      }
+      // DISABLED transcript capture - Only update state
+      // Transcripts are captured from response.output_audio_transcript.done above
       soniaSpeakingRef.current = false;
       setInterviewState(prev => ({ 
         ...prev, 
@@ -251,21 +189,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
       }));
       setQuestionCount(prev => prev + 1);
     } else if (msg.type === 'response.completed') {
-      // Legacy handler
-      if (msg.response?.output_text || msg.text || msg.content) {
-        const fullText = msg.response?.output_text || msg.text || msg.content;
-        if (fullText) {
-          console.log('✅ Adding AI transcript (response.completed):', fullText.substring(0, 50) + (fullText.length > 50 ? '...' : ''));
-          const newEntry = {
-            text: fullText,
-            timestamp: new Date().toISOString(),
-            speaker: 'interviewer'
-          };
-          aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
-          // Don't update state - internal storage only
-          // setAiTranscript(prev => [...prev, newEntry]);
-        }
-      }
+      // Legacy handler - just update state
       soniaSpeakingRef.current = false;
       setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
       setQuestionCount(prev => prev + 1);

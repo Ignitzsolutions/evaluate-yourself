@@ -337,14 +337,8 @@ export default function InterviewSessionRoom() {
   //   }
   // }, [userTranscript.length, gazeHistory, sendGazeMetrics]);
   
-  // Navigate to report when complete
-  useEffect(() => {
-    if (reportId) {
-      setTimeout(() => {
-        navigate(`/report/${reportId}`);
-      }, 2000);
-    }
-  }, [reportId, navigate]);
+  // Don't auto-navigate - let user click "End Interview" button
+  // The reportId is set for tracking purposes but navigation is manual
   
   // Cleanup on unmount
   useEffect(() => {
@@ -372,9 +366,17 @@ export default function InterviewSessionRoom() {
     return "U";
   };
   
-  const handleEndInterview = () => {
-    stopInterview();
-    navigate("/dashboard");
+  const handleEndInterview = async () => {
+    // Stop the interview and save transcript
+    await stopInterview();
+    
+    // Navigate to report page with sessionId
+    if (sessionId) {
+      navigate(`/report/${sessionId}`);
+    } else {
+      // Fallback to dashboard if no sessionId
+      navigate("/dashboard");
+    }
   };
   
   // Mic and camera toggles (now functional)

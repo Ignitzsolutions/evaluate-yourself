@@ -621,6 +621,20 @@ async def webrtc_proxy(request: WebRTCRequest):
                 "type": "realtime",
                 "model": AZURE_OPENAI_DEPLOYMENT,
                 "audio": {
+                    "input": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.6,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 1200,
+                            "create_response": True,
+                            "interrupt_response": False
+                        }
+                    },
                     "output": {
                         "voice": "alloy"
                     }
@@ -1206,7 +1220,11 @@ Provide only one response per user turn. Never produce multiple responses.
                             "speed": 0.6  # Slow, clear speech rate (0.6 = 60% of normal speed - clear and understandable)
                         },
                         "turn_detection": {
-                            "type": "server_vad"
+                            "type": "server_vad",
+                            "threshold": 0.6,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 1200,
+                            "create_response": True
                         },
                         "instructions": english_only_instructions
                     }
@@ -2549,9 +2567,16 @@ async def get_interview_report(
     try:
         user_id = get_user_id_from_auth(authorization)
 
+        # Try to find report by ID first, then by session_id
         report = db.query(models.InterviewReport).filter(
             models.InterviewReport.id == report_id
         ).first()
+        
+        if not report:
+            # Try finding by session_id
+            report = db.query(models.InterviewReport).filter(
+                models.InterviewReport.session_id == report_id
+            ).first()
 
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
@@ -2613,6 +2638,7 @@ async def create_interview_report(
 
         report = models.InterviewReport(
             id=str(uuid.uuid4()),
+            session_id=request.session_id,
             user_id=user_id,
             title=request.title,
             date=datetime.now(),
@@ -2641,13 +2667,32 @@ async def create_interview_report(
         raise HTTPException(status_code=500, detail="Failed to create report")
 
 @app.post("/api/interview/{session_id}/transcript")
-async def save_interview_transcript(session_id: str, request: Dict):
-    """Save interview transcript to file with session ID."""
+async def save_interview_transcript(
+    session_id: str, 
+    request: Dict,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Save interview transcript to file and generate report in database."""
     try:
         transcript = request.get("transcript", [])
         
         if not transcript:
             return {"message": "No transcript data provided", "session_id": session_id}
+        
+        # Get user info from auth (optional - can work without auth for testing)
+        user_id = None
+        try:
+            if authorization:
+                current_user = get_current_user(authorization=authorization, db=db)
+                if current_user:
+                    user_id = current_user.clerk_user_id
+        except Exception as auth_err:
+            print(f"⚠️ Auth optional for transcript save: {auth_err}")
+            user_id = "guest"  # Fallback to guest if no auth
+        
+        if not user_id:
+            user_id = "guest"
         
         # Create transcripts directory if it doesn't exist
         transcripts_dir = os.path.join(os.path.dirname(__file__), "transcripts")
@@ -2693,6 +2738,61 @@ async def save_interview_transcript(session_id: str, request: Dict):
         print(f"✅ Transcript saved for session {session_id}")
         print(f"   JSON: {json_filename}")
         print(f"   Text: {text_filename}")
+        
+        # Generate and save interview report to database
+        try:
+            # Check if report already exists for this session
+            existing_report = db.query(models.InterviewReport).filter(
+                models.InterviewReport.session_id == session_id
+            ).first()
+            
+            if not existing_report:
+                # Generate report using the report generator service
+                from services.report_generator import generate_report as generate_interview_report
+                
+                # Convert transcript to format expected by report generator
+                transcript_messages = [
+                    TranscriptMessage(
+                        speaker=entry.get("speaker", "unknown"),
+                        text=entry.get("text", ""),
+                        timestamp=entry.get("timestamp", datetime.now().isoformat())
+                    ) for entry in transcript
+                ]
+                
+                # Generate the report
+                report_data = generate_interview_report(transcript_messages)
+                
+                # Save to database
+                db_report = models.InterviewReport(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    user_id=user_id,
+                    title=report_data.title,
+                    date=datetime.now(),
+                    type=report_data.type,
+                    mode=report_data.mode,
+                    duration=report_data.duration,
+                    overall_score=report_data.overall_score,
+                    scores=json.dumps(report_data.scores.dict() if hasattr(report_data.scores, 'dict') else report_data.scores),
+                    transcript=json.dumps([t.dict() if hasattr(t, 'dict') else t for t in transcript_messages]),
+                    recommendations=json.dumps(report_data.recommendations),
+                    questions=report_data.questions,
+                    is_sample=False
+                )
+                
+                db.add(db_report)
+                db.commit()
+                db.refresh(db_report)
+                
+                print(f"✅ Report generated and saved to database: {db_report.id}")
+            else:
+                print(f"ℹ️ Report already exists for session {session_id}, skipping generation")
+        
+        except Exception as report_err:
+            print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the whole request if report generation fails
         
         return {
             "message": "Transcript saved successfully",

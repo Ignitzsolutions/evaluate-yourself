@@ -36,6 +36,10 @@ azure-identity==1.17.1
 # PDF generation
 reportlab==4.0.9
 
+# Database (Auth & user persistence)
+sqlalchemy>=2.0.0
+
 # Security
 PyJWT>=2.8.0  # Package name is PyJWT, imports as 'jwt'
+python-jose[cryptography]>=3.3.0  # Clerk JWT verification (jose_jwt)
 cryptography==41.0.7
