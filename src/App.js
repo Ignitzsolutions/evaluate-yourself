@@ -1,7 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Outlet, Navigate } from "react-router-dom";
 import { ThemeProvider, CssBaseline, Box } from "@mui/material";
-import { AuthProvider } from "./context/AuthContext";
+
 import PrivateRoute from "./components/PrivateRoute";
 import ErrorBoundaryWrapper from "./components/ErrorBoundary";
 import Navbar from "./components/Navbar";
@@ -34,70 +34,71 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AuthProvider>
-        <BrowserRouter
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
-          <Routes>
-            {/* Public routes without navbar */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/test-realtime" element={<RealtimeTestPage />} />
 
-            {/* Auth-protected routes with navbar */}
-            <Route
-              element={
-                <PrivateRoute>
-                  <MainLayout />
-                </PrivateRoute>
-              }
-            >
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/interviews" element={<InterviewsPage />} />
-              <Route path="/interview-config" element={<PreInterviewForm />} />
-              <Route path="/report" element={<ReportPage />} />
-              <Route path="/report/:sessionId" element={<ReportPage />} />
-            </Route>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <Routes>
+          {/* Public routes without navbar */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/test-realtime" element={<RealtimeTestPage />} />
 
-            {/* Interview session routes - full screen, no navbar */}
-            <Route
-              path="/interview"
-              element={
-                <PrivateRoute>
-                  <Navigate to="/interviews" replace />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/interview/:type"
-              element={
-                <PrivateRoute>
-                  <ErrorBoundaryWrapper>
-                    <InterviewSessionRoom />
-                  </ErrorBoundaryWrapper>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/interview/session/:sessionId"
-              element={
-                <PrivateRoute>
-                  <ErrorBoundaryWrapper>
-                    <InterviewSessionRoom />
-                  </ErrorBoundaryWrapper>
-                </PrivateRoute>
-              }
-            />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
+          {/* Auth-protected routes with navbar */}
+          <Route
+            element={
+              <PrivateRoute>
+                <MainLayout />
+              </PrivateRoute>
+            }
+          >
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/interviews" element={<InterviewsPage />} />
+            <Route path="/interview-config" element={<PreInterviewForm />} />
+            <Route path="/report" element={<ReportPage />} />
+            <Route path="/report/:sessionId" element={<ReportPage />} />
+          </Route>
+
+          {/* Interview session routes - full screen, no navbar */}
+          <Route
+            path="/interview"
+            element={
+              <PrivateRoute>
+                <Navigate to="/interviews" replace />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/interview/:type"
+            element={
+              <PrivateRoute>
+                <ErrorBoundaryWrapper>
+                  <InterviewSessionRoom />
+                </ErrorBoundaryWrapper>
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/interview/session/:sessionId"
+            element={
+              <PrivateRoute>
+                <ErrorBoundaryWrapper>
+                  <InterviewSessionRoom />
+                </ErrorBoundaryWrapper>
+              </PrivateRoute>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
     </ThemeProvider>
   );
 }

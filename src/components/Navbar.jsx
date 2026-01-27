@@ -26,7 +26,7 @@ import {
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useUser, useClerk } from "@clerk/clerk-react";   // ✅ Clerk
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
@@ -61,15 +61,18 @@ export default function Navbar() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+
+  // ✅ Clerk instead of AuthContext
+  const { user, isSignedIn } = useUser();
+  const { signOut } = useClerk();
 
   const handleNavigation = (path) => {
     navigate(path);
     setDrawerOpen(false);
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await signOut();        // ✅ Clerk logout
     navigate('/login');
     setDrawerOpen(false);
   };

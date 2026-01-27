@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Button, Box, Typography, Paper, Divider } from '@mui/material';
+import { useAuth } from "@clerk/clerk-react";
+import { authFetch } from "../utils/apiClient";
 
 // Support both Create React App (process.env) and Vite (import.meta.env)
 const API_BASE_URL =
@@ -8,6 +10,7 @@ const API_BASE_URL =
   "http://localhost:8000";
 
 export default function RealtimeTestPage() {
+  const { getToken } = useAuth();
   // WebRTC refs
   const pcRef = useRef(null);
   const dcRef = useRef(null);
@@ -246,7 +249,8 @@ export default function RealtimeTestPage() {
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/f0ac307e-28cd-42c1-a0e2-49a4854100b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RealtimeTestPage.jsx:246',message:'Sending SDP offer to backend',data:{api_base_url:API_BASE_URL,sdp_length:offer.sdp.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
       // #endregion
-      const resp = await fetch(`${API_BASE_URL}/api/realtime/webrtc`, {
+      const token = await getToken();
+      const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

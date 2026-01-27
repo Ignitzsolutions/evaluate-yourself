@@ -2,12 +2,30 @@ import React from "react";
 import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
-import { useAuth } from "../context/AuthContext";
+// import { useAuth } from "../context/AuthContext";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { authFetch } from "../utils/apiClient";
+import { useEffect } from "react";
+
 
 export default function Dashboard() {
   const nav = useNavigate();
   const go = useNavigate();
-  const { user } = useAuth();
+  const { user } = useUser();
+  const { getToken } = useAuth();
+  useEffect(() => {
+    const syncUser = async () => {
+      try {
+        await authFetch("http://localhost:8000/api/me");
+        console.log("User synced with backend");
+      } catch (err) {
+        console.error("Failed to sync user:", err);
+      }
+    };
+
+    syncUser();
+  }, []);
+
 
   const cards = [
     {
@@ -57,7 +75,7 @@ export default function Dashboard() {
         <Container maxWidth="lg" sx={{ py: 8 }}>
           <Stack spacing={1.8} textAlign="left" alignItems="flex-start" sx={{ mb: 6 }}>
             <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.85 }}>
-              Hello, {user?.username || "User"} 👋
+              Hello, {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || "User"} 👋
             </Typography>
             <Typography sx={{ fontSize: 15, opacity: 0.55 }}>
               Welcome back! Ready to sharpen your interview skills.

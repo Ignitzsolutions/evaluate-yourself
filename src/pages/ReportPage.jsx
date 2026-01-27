@@ -1,4 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { useAuth } from "@clerk/clerk-react";
+import { authFetch } from "../utils/apiClient";
 import { 
   Box, 
   Card, 
@@ -23,7 +25,7 @@ import {
   PlayArrow
 } from "@mui/icons-material";
 import { useNavigate, useParams } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+// import { useAuth } from "../context/AuthContext";
 import { 
   LineChart, 
   Line, 
@@ -80,6 +82,7 @@ const timeDistributionData = [
 
 export default function ReportPage() {
   const navigate = useNavigate();
+  const { getToken } = useAuth();
   const { sessionId } = useParams();
   const { user } = useAuth();
   const [report, setReport] = useState(null);
@@ -102,7 +105,8 @@ export default function ReportPage() {
             headers['Authorization'] = `Bearer ${authToken}`;
           }
           
-          const response = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, {
+          const token = await getToken();
+          const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, {
             headers: headers
           });
           
