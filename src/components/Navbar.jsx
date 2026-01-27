@@ -62,8 +62,8 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // ✅ Clerk instead of AuthContext
-  const { user, isSignedIn } = useUser();
+  // Clerk: signOut used for logout; user/isSignedIn available for future display
+  const { user: _user, isSignedIn: _isSignedIn } = useUser();
   const { signOut } = useClerk();
 
   const handleNavigation = (path) => {

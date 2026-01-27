@@ -1,30 +1,57 @@
-import React from "react";
-import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper } from "@mui/material";
+import React, { useEffect, useState, useCallback } from "react";
+import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper, Alert, CircularProgress } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
-// import { useAuth } from "../context/AuthContext";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
-import { useEffect } from "react";
 
+const API_BASE = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "http://localhost:8000";
 
 export default function Dashboard() {
   const nav = useNavigate();
   const go = useNavigate();
   const { user } = useUser();
-  const { getToken } = useAuth();
-  useEffect(() => {
-    const syncUser = async () => {
-      try {
-        await authFetch("http://localhost:8000/api/me");
-        console.log("User synced with backend");
-      } catch (err) {
-        console.error("Failed to sync user:", err);
-      }
-    };
+  const { getToken, isLoaded } = useAuth();
+  const [backendUser, setBackendUser] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | error
+  const [syncError, setSyncError] = useState(null);
 
-    syncUser();
-  }, []);
+  const syncUser = useCallback(async () => {
+    setSyncError(null);
+    if (!isLoaded) return;
+    const token = await getToken();
+    if (!token) {
+      setSyncStatus("idle");
+      return;
+    }
+    setSyncStatus("syncing");
+    try {
+      const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+      if (!resp.ok) {
+        const text = await resp.text();
+        let msg = `Backend returned ${resp.status}`;
+        try {
+          const data = JSON.parse(text);
+          msg = data.detail || msg;
+        } catch {
+          if (text) msg = text.slice(0, 120);
+        }
+        setSyncError(msg);
+        setSyncStatus("error");
+        return;
+      }
+      const data = await resp.json();
+      setBackendUser(data);
+      setSyncStatus("ok");
+    } catch (err) {
+      setSyncError(err.message || "Failed to sync user with backend");
+      setSyncStatus("error");
+    }
+  }, [getToken, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) syncUser();
+  }, [isLoaded, syncUser]);
 
 
   const cards = [
@@ -74,9 +101,22 @@ export default function Dashboard() {
         {/* MAIN CONTENT */}
         <Container maxWidth="lg" sx={{ py: 8 }}>
           <Stack spacing={1.8} textAlign="left" alignItems="flex-start" sx={{ mb: 6 }}>
-            <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.85 }}>
-              Hello, {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || "User"} 👋
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.85 }}>
+                Hello, {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || "User"} 👋
+              </Typography>
+              {syncStatus === "syncing" && <CircularProgress size={18} sx={{ ml: 0.5 }} />}
+              {syncStatus === "ok" && backendUser && (
+                <Typography component="span" sx={{ fontSize: 13, opacity: 0.6 }}>
+                  • Synced with backend
+                </Typography>
+              )}
+            </Box>
+            {syncError && (
+              <Alert severity="warning" onClose={() => setSyncError(null)} sx={{ width: "100%", maxWidth: 560 }}>
+                {syncError}
+              </Alert>
+            )}
             <Typography sx={{ fontSize: 15, opacity: 0.55 }}>
               Welcome back! Ready to sharpen your interview skills.
             </Typography>

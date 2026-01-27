@@ -387,6 +387,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         console.log('🔍 Unhandled transcript-related event:', msg.type, JSON.stringify(msg, null, 2));
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- aiTranscript/userTranscript used in closure for transcript logging
   }, [currentQuestion, debugLog, aiTranscript, userTranscript]);
 
   // Start interview - WebRTC connection
@@ -733,6 +734,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
     } catch (error) {
       console.error('Error stopping interview:', error);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- aiTranscript/userTranscript used when saving
   }, [sessionId, aiTranscript, userTranscript, saveTranscriptToBackend]);
 
   // Enable audio (for autoplay prompt)

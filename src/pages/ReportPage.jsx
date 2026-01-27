@@ -106,7 +106,7 @@ export default function ReportPage() {
           }
           
           const token = await getToken();
-          const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, {
+          const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {
             headers: headers
           });
           
@@ -131,7 +131,7 @@ export default function ReportPage() {
       };
       fetchReport();
     }
-  }, [sessionId, user]);
+  }, [sessionId, user, getToken]);
   
   // Rating and feedback state
   const [experienceRating, setExperienceRating] = useState(0);
