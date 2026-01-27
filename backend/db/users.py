@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from models import User
+from .models import User
 from datetime import datetime
 
 def get_or_create_user(db: Session, clerk_user_id: str, email: str = None, full_name: str = None):

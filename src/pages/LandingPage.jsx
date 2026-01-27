@@ -8,8 +8,7 @@ import { Divider, Stack, Paper } from "@mui/material";
 import "../ui.css";
 
 export default function LandingPage() {
-  // const { user, logout } = useAuth();
-  const { user, isSignedIn } = useUser();
+  const { user: _user, isSignedIn } = useUser();
   const { signOut } = useClerk();
   const nav = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);

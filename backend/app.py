@@ -69,28 +69,53 @@ from jose import jwt as jose_jwt
 from fastapi import HTTPException
 import logging
 
-CLERK_JWKS_URL = "https://api.clerk.dev/v1/jwks"
+# Prefer explicit URL; else derive from CLERK_PUBLISHABLE_KEY (pk_*_<base64> decodes to <instance>.clerk.accounts.dev)
+def _clerk_jwks_url():
+    url = os.getenv("CLERK_JWKS_URL", "").strip()
+    if url:
+        return url
+    pk = os.getenv("CLERK_PUBLISHABLE_KEY", "").strip()
+    if pk and "_" in pk:
+        parts = pk.split("_", 2)
+        if len(parts) >= 3 and parts[2]:
+            try:
+                import base64
+                raw = base64.urlsafe_b64decode(parts[2] + "==")
+                domain = raw.decode("utf-8").strip().rstrip("$")
+                if domain:
+                    return f"https://{domain}/.well-known/jwks.json"
+            except Exception:
+                pass
+    return "https://api.clerk.dev/v1/jwks"
+
 _jwks_cache = None
 
 #region Clerk Token Verification
 def get_clerk_jwks():
     global _jwks_cache
-    try:
-        if _jwks_cache is None:
-            resp = requests.get(CLERK_JWKS_URL, timeout=5)
+    if _jwks_cache is not None:
+        return _jwks_cache
+    urls = [_clerk_jwks_url()]
+    secret = os.getenv("CLERK_SECRET_KEY", "").strip()
+    if secret:
+        urls.append("https://api.clerk.com/v1/jwks")
+    for url in urls:
+        try:
+            headers = {"Authorization": f"Bearer {secret}"} if secret and "api.clerk.com" in url else {}
+            resp = requests.get(url, timeout=5, headers=headers or None)
             resp.raise_for_status()
             _jwks_cache = resp.json()
-        return _jwks_cache
+            if _jwks_cache and _jwks_cache.get("keys"):
+                return _jwks_cache
+        except requests.exceptions.RequestException as e:
+            logging.warning("Clerk JWKS fetch failed for %s: %s", url, e)
+            continue
+    logging.exception("❌ Failed to fetch Clerk JWKS from any URL")
+    raise HTTPException(status_code=503, detail="Unable to fetch Clerk public keys")
 
-    except requests.exceptions.RequestException as e:
-        logging.exception("❌ Failed to fetch Clerk JWKS")
-        raise HTTPException(
-            status_code=503,
-            detail="Unable to fetch Clerk public keys"
-        )
-
-#endregion 
-def verify_clerk_token(token: str) -> dict:
+#endregion
+def _verify_clerk_token_jwks(token: str) -> dict:
+    """Verify Clerk JWT using Frontend API JWKS (correct URL from CLERK_PUBLISHABLE_KEY)."""
     try:
         jwks = get_clerk_jwks()
 
@@ -111,7 +136,7 @@ def verify_clerk_token(token: str) -> dict:
                 break
 
         if not key:
-            logging.error(f"❌ No matching JWK found for kid={kid}")
+            logging.error("❌ No matching JWK found for kid=%s (JWKS URL: %s)", kid, _clerk_jwks_url())
             raise HTTPException(status_code=401, detail="Invalid token signing key")
 
         try:
@@ -120,7 +145,7 @@ def verify_clerk_token(token: str) -> dict:
                 key,
                 algorithms=["RS256"],
                 options={
-                    "verify_aud": False,   # Clerk often doesn't use aud
+                    "verify_aud": False,
                     "verify_exp": True,
                 },
             )
@@ -128,17 +153,15 @@ def verify_clerk_token(token: str) -> dict:
             logging.warning("❌ Clerk token expired")
             raise HTTPException(status_code=401, detail="Token expired")
         except jose_jwt.JWTError as e:
-            logging.exception("❌ Clerk token decode failed")
+            logging.exception("❌ Clerk token decode failed: %s", e)
             raise HTTPException(status_code=401, detail="Invalid token")
 
         return payload
 
     except HTTPException:
-        # Already handled — just rethrow
         raise
-
     except Exception as e:
-        logging.exception("❌ Unexpected error verifying Clerk token")
+        logging.exception("❌ Unexpected error verifying Clerk token: %s", e)
         raise HTTPException(
             status_code=500,
             detail="Internal error verifying authentication token"
@@ -295,6 +318,13 @@ validate_environment()
 @app.on_event("startup")
 async def startup_event():
     validate_environment()
+    # Log Clerk JWKS URL so /api/me auth issues are debuggable
+    try:
+        jwks_url = _clerk_jwks_url()
+        has_pk = bool(os.getenv("CLERK_PUBLISHABLE_KEY", "").strip())
+        print(f"🔐 Clerk JWKS URL: {jwks_url} (CLERK_PUBLISHABLE_KEY set: {has_pk})")
+    except Exception as e:
+        print(f"🔐 Clerk JWKS log skip: {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1734,30 +1764,20 @@ async def _end_interview(azure_ws, session_state: InterviewState, client_ws: Web
 
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
 
-def get_clerk_jwks():
-    clerk_publishable_key = os.getenv("CLERK_PUBLISHABLE_KEY", "")
-    if not clerk_publishable_key:
-        return None
-    
-    instance_id = None
-    if "_" in clerk_publishable_key:
-        parts = clerk_publishable_key.split("_")
-        if len(parts) >= 3:
-            instance_id = parts[2]
-    
-    if not instance_id:
-        return None
-    
-    jwks_url = f"https://{instance_id}.clerk.accounts.dev/.well-known/jwks.json"
+def _get_clerk_jwks_for_verify():
+    """Use correct JWKS URL (derive from CLERK_PUBLISHABLE_KEY or CLERK_JWKS_URL)."""
     try:
-        response = requests.get(jwks_url, timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except Exception:
+        url = _clerk_jwks_url()
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logging.warning("Clerk JWKS fetch failed: url=%s err=%s", _clerk_jwks_url(), e)
         return None
 
 def verify_clerk_token(token: str) -> Optional[Dict]:
     if not CLERK_SECRET_KEY:
+        logging.warning("CLERK_SECRET_KEY not set")
         return None
     
     try:
@@ -1771,7 +1791,7 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
         kid = header.get("kid")
         
         if kid:
-            jwks = get_clerk_jwks()
+            jwks = _get_clerk_jwks_for_verify()
             if jwks:
                 for key in jwks.get("keys", []):
                     if key.get("kid") == kid:
@@ -1780,7 +1800,8 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
                             public_key = RSAAlgorithm.from_jwk(json.dumps(key))
                             decoded = jwt.decode(token, public_key, algorithms=["RS256"])
                             return decoded
-                        except Exception:
+                        except Exception as e:
+                            logging.warning("RS256 decode failed for kid=%s: %s", kid, e)
                             pass
         
         try:
@@ -1790,10 +1811,13 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
             return None
             
     except jwt.ExpiredSignatureError:
+        logging.warning("Clerk token expired")
         return None
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logging.warning("Clerk token invalid: %s", e)
         return None
-    except Exception:
+    except Exception as e:
+        logging.warning("Clerk verify error: %s", e)
         return None
 
 
@@ -1858,40 +1882,42 @@ def get_or_create_user_db(
 
 # Dependency to get current user
 def get_current_user(
-    authorization: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """
     Verifies Clerk token and ensures user exists in local DB.
-    Returns User ORM object or None.
+    Returns User ORM object or raises HTTPException 401.
     """
-    if not authorization:
-        return None
+    if not authorization or not authorization.strip():
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     try:
-        token = authorization.replace("Bearer ", "")
-        decoded = verify_clerk_token(token)
-
+        decoded = _verify_clerk_token_jwks(token)
         clerk_user_id = decoded.get("sub") or decoded.get("user_id")
         email = decoded.get("email")
         full_name = decoded.get("name") or decoded.get("full_name")
 
         if not clerk_user_id:
-            return None
+            raise HTTPException(status_code=401, detail="Invalid token: missing sub")
 
-        # 🔴 THIS IS WHAT YOU WERE MISSING
         user = get_or_create_user(
             db=db,
             clerk_user_id=clerk_user_id,
             email=email,
             full_name=full_name
         )
-
         return user
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.exception("get_current_user failed")
-        return None
+        logging.exception("get_current_user failed: %s", e)
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     
 # def get_current_user(
 #     authorization: Optional[str] = Header(None),
@@ -2179,33 +2205,17 @@ def get_me(current_user: User = Depends(get_current_user)):
         "last_login_at": current_user.last_login_at,
     }
 
-# Helper to extract user info from Clerk token
+# Alias for /api/me — same auth, syncs Clerk → DB and returns user
 @app.get("/api/users/me")
-async def get_me(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
-):
-    try:
-        user_info = get_user_info(authorization)  
-        # Make this return dict: { clerk_user_id, email, name }
-
-        user = get_or_create_user(
-            db=db,
-            clerk_user_id=user_info["clerk_user_id"],
-            email=user_info.get("email"),
-            full_name=user_info.get("name"),
-        )
-
-        return {
-            "id": user.id,
-            "clerk_user_id": user.clerk_user_id,
-            "email": user.email,
-            "full_name": user.full_name,
-        }
-
-    except Exception as e:
-        print("Error in /api/users/me:", str(e))
+def get_me_users(current_user: User = Depends(get_current_user)):
+    if not current_user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    return {
+        "id": current_user.id,
+        "clerk_user_id": current_user.clerk_user_id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+    }
 
 @app.post("/api/self-insight/assessments")
 async def create_assessment(request: CreateAssessmentRequest, authorization: Optional[str] = Header(None)):
@@ -2228,7 +2238,10 @@ async def create_assessment(request: CreateAssessmentRequest, authorization: Opt
 async def list_reports(
     current_user: User = Depends(get_current_user)
 ):
-    user_id = current_user.id
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    # Reports store clerk_user_id (from get_user_id), so filter by clerk_user_id
+    user_id = current_user.clerk_user_id
     
     user_reports = [r for r in personality_reports.values() if r.user_id == user_id]
     user_reports.sort(key=lambda x: x.created_at, reverse=True)

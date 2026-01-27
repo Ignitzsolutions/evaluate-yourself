@@ -346,7 +346,7 @@ export default function RealtimeTestPage() {
         pcRef.current = null;
       }
     }
-  }, [status, addTranscript]);
+  }, [status, addTranscript, getToken]);
 
   // Disconnect
   const handleDisconnect = useCallback(() => {

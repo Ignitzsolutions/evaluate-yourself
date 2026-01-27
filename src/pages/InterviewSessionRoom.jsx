@@ -39,8 +39,7 @@ export default function InterviewSessionRoom() {
   }, [params.sessionId, params.type]);
   const typeFromUrl = params.type; // If coming from /interview/:type route
   const navigate = useNavigate();
-  // const { user } = useAuth();
-  const { user, isSignedIn } = useUser();
+  const { user, isSignedIn: _isSignedIn } = useUser();
 
   
   // Get interview type from sessionStorage, URL params, or defaults
