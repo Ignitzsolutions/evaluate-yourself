@@ -42,9 +42,17 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
   const [userTranscript, setUserTranscript] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [questionCount, setQuestionCount] = useState(0);
-  const [reportId] = useState(null);
+  const [reportId, setReportId] = useState(null);
   const [showAudioPrompt, setShowAudioPrompt] = useState(false);
   const [lastError, setLastError] = useState(null);
+
+  // Set reportId to sessionId when hook initializes
+  useEffect(() => {
+    if (sessionId && !reportId) {
+      setReportId(sessionId);
+      console.log('✅ Set reportId to sessionId:', sessionId);
+    }
+  }, [sessionId, reportId]);
 
   // Debug logging helper
   const debugLog = useCallback((eventType, data) => {
@@ -75,37 +83,38 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
 
   // Handle DataChannel messages (Event Contract) - defined before startInterview to avoid use-before-define
   const handleDataChannelMessage = useCallback((msg) => {
-    debugLog('Message received', { type: msg.type });
-    
-    // Enhanced logging for transcript-related events
-    if (msg.type && (
-      msg.type.includes('text') || 
-      msg.type.includes('transcription') || 
-      msg.type.includes('response') ||
-      msg.type.includes('conversation')
-    )) {
-      console.log('📝 Transcript event:', msg.type, msg);
-    }
-
-    // Session lifecycle events
-    if (msg.type === 'session.created') {
-      debugLog('Session created', { session_id: msg.session?.id });
-    } else if (msg.type === 'session.updated') {
-      debugLog('Session updated', {});
-    } else if (msg.type === 'error') {
-      // Enhanced error logging - show full payload
-      console.error('❌ Error from Azure Realtime API:', msg);
-      console.error('❌ Azure error JSON:', JSON.stringify(msg, null, 2));
-      if (msg.error) {
-        console.error('❌ Azure error.details:', msg.error);
-        console.error('❌ Azure error.message:', msg.error.message);
-        console.error('❌ Azure error.code:', msg.error.code);
-        console.error('❌ Azure error.type:', msg.error.type);
+    try {
+      debugLog('Message received', { type: msg.type });
+      
+      // Enhanced logging for transcript-related events
+      if (msg.type && (
+        msg.type.includes('text') || 
+        msg.type.includes('transcription') || 
+        msg.type.includes('response') ||
+        msg.type.includes('conversation')
+      )) {
+        console.log('📝 Transcript event:', msg.type, msg);
       }
-      const errorMessage = msg.error?.message || msg.error?.code || 'Unknown error from Azure';
-      setLastError({ type: 'azure_error', error: errorMessage, fullError: msg });
-      setInterviewState(prev => ({ ...prev, status: 'error', error: errorMessage }));
-    }
+
+      // Session lifecycle events
+      if (msg.type === 'session.created') {
+        debugLog('Session created', { session_id: msg.session?.id });
+      } else if (msg.type === 'session.updated') {
+        debugLog('Session updated', {});
+      } else if (msg.type === 'error') {
+        // Enhanced error logging - show full payload
+        console.error('❌ Error from Azure Realtime API:', msg);
+        console.error('❌ Azure error JSON:', JSON.stringify(msg, null, 2));
+        if (msg.error) {
+          console.error('❌ Azure error.details:', msg.error);
+          console.error('❌ Azure error.message:', msg.error.message);
+          console.error('❌ Azure error.code:', msg.error.code);
+          console.error('❌ Azure error.type:', msg.error.type);
+        }
+        const errorMessage = msg.error?.message || msg.error?.code || 'Unknown error from Azure';
+        setLastError({ type: 'azure_error', error: errorMessage, fullError: msg });
+        setInterviewState(prev => ({ ...prev, status: 'error', error: errorMessage }));
+      }
     
     // Model output events (Sonia's speech)
     // Handle text-based responses
@@ -387,8 +396,15 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         console.log('🔍 Unhandled transcript-related event:', msg.type, JSON.stringify(msg, null, 2));
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- aiTranscript/userTranscript used in closure for transcript logging
-  }, [currentQuestion, debugLog, aiTranscript, userTranscript]);
+    } catch (handlerError) {
+      console.error('❌ Critical error in handleDataChannelMessage:', handlerError);
+      console.error('❌ Error message:', handlerError.message);
+      console.error('❌ Error stack:', handlerError.stack);
+      console.error('❌ Message that caused error:', msg);
+      setLastError({ type: 'message_handler_error', error: handlerError.message, fullError: handlerError });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Using refs instead of state deps to avoid infinite recreations
+  }, [debugLog]);
 
   // Start interview - WebRTC connection
   const startInterview = useCallback(async () => {
@@ -483,8 +499,10 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         try {
           const msg = JSON.parse(e.data);
           handleDataChannelMessage(msg);
-        } catch (error) {
-          console.error('Error parsing DataChannel message:', error);
+        } catch (parseError) {
+          console.error('❌ Error parsing DataChannel message:', parseError);
+          console.error('❌ Parse error message:', parseError.message);
+          console.error('❌ Raw data:', e.data);
           if (DEBUG) {
             console.log('[Realtime Debug] Raw message:', e.data);
           }

@@ -1,6 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { authFetch } from "../utils/apiClient";
 import { 
   Box, 
   Card, 
@@ -13,7 +12,12 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Alert
 } from "@mui/material";
 import { 
   Schedule,
@@ -22,149 +26,89 @@ import {
   Visibility,
   TrendingUp,
   Assessment,
-  PlayArrow
+  PlayArrow,
+  ExpandMore,
+  CheckCircle,
+  Warning
 } from "@mui/icons-material";
 import { useNavigate, useParams } from "react-router-dom";
-// import { useAuth } from "../context/AuthContext";
 import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
   BarChart,
   Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
   PieChart,
   Pie,
   Cell
 } from "recharts";
 
-// Mock data - in real implementation, this would come from session storage or API
-const mockSessionData = {
-  totalDuration: 1245, // seconds
-  questionsAnswered: 5,
-  averageResponseTime: 34, // seconds
-  totalWords: 425,
-  speakingTime: 780, // seconds
-  silenceTime: 465, // seconds
-  eyeContactPercentage: 72,
-  averageBlinkRate: 18,
-  type: "technical"
-};
-
-const mockTimeSeriesData = [
-  { time: 0, eyeContact: 65, confidence: 70, speaking: 1 },
-  { time: 60, eyeContact: 78, confidence: 85, speaking: 1 },
-  { time: 120, eyeContact: 45, confidence: 60, speaking: 0 },
-  { time: 180, eyeContact: 82, confidence: 90, speaking: 1 },
-  { time: 240, eyeContact: 70, confidence: 75, speaking: 1 },
-  { time: 300, eyeContact: 55, confidence: 65, speaking: 0 },
-  { time: 360, eyeContact: 88, confidence: 92, speaking: 1 },
-  { time: 420, eyeContact: 75, confidence: 80, speaking: 1 },
-  { time: 480, eyeContact: 60, confidence: 70, speaking: 0 },
-  { time: 540, eyeContact: 85, confidence: 88, speaking: 1 },
-];
-
-const speechAnalysisData = [
-  { name: "Clarity", score: 85 },
-  { name: "Pace", score: 78 },
-  { name: "Volume", score: 82 },
-  { name: "Articulation", score: 90 },
-];
-
-const timeDistributionData = [
-  { name: "Speaking", value: mockSessionData.speakingTime, color: "#4CAF50" },
-  { name: "Silence", value: mockSessionData.silenceTime, color: "#FF9800" },
-];
+const COLORS = ["#4CAF50", "#FF9800", "#F44336", "#2196F3", "#9C27B0"];
 
 export default function ReportPage() {
   const navigate = useNavigate();
   const { getToken } = useAuth();
   const { sessionId } = useParams();
-  const { user } = useAuth();
   const [report, setReport] = useState(null);
-  
-  // Fetch report from backend
-  useEffect(() => {
-    if (sessionId) {
-      const fetchReport = async () => {
-        try {
-          const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || 'http://localhost:8000';
-          
-          // Build headers with auth if available
-          const headers = {
-            'Content-Type': 'application/json',
-          };
-          
-          // Try to get auth token from localStorage (if using Clerk or similar)
-          const authToken = localStorage.getItem('clerk_session') || localStorage.getItem('authToken');
-          if (authToken) {
-            headers['Authorization'] = `Bearer ${authToken}`;
-          }
-          
-          const token = await getToken();
-          const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {
-            headers: headers
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            setReport(data);
-          } else if (response.status === 401) {
-            // Auth failed but backend should still return report if it exists
-            console.warn('Authentication failed, but report may still be accessible');
-            // Try again without auth token
-            const retryResponse = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`);
-            if (retryResponse.ok) {
-              const data = await retryResponse.json();
-              setReport(data);
-            }
-          } else {
-            console.error("Error fetching report:", response.status, response.statusText);
-          }
-        } catch (error) {
-          console.error("Error fetching report:", error);
-        }
-      };
-      fetchReport();
-    }
-  }, [sessionId, user, getToken]);
-  
-  // Rating and feedback state
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [experienceRating, setExperienceRating] = useState(0);
   const [feedback, setFeedback] = useState("");
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
-  const averageMetrics = useMemo(() => {
-    const avgEyeContact = mockTimeSeriesData.reduce((sum, point) => sum + point.eyeContact, 0) / mockTimeSeriesData.length;
-    const avgConfidence = mockTimeSeriesData.reduce((sum, point) => sum + point.confidence, 0) / mockTimeSeriesData.length;
-    return { avgEyeContact: Math.round(avgEyeContact), avgConfidence: Math.round(avgConfidence) };
-  }, []);
+  // Fetch report from backend
+  useEffect(() => {
+    const fetchReport = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Use sessionId from URL params or fallback to sessionStorage
+        const reportSessionId = sessionId || sessionStorage.getItem('interviewSessionId');
+        
+        if (!reportSessionId) {
+          setError('No interview session found. Please complete an interview first.');
+          setLoading(false);
+          return;
+        }
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+        const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || 'http://localhost:8000';
+        const token = await getToken();
+        
+        console.log('Fetching report for sessionId:', reportSessionId);
+        const response = await fetch(`${API_BASE_URL}/api/interview/reports/${reportSessionId}`, {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Report data fetched:', data);
+          setReport(data);
+        } else if (response.status === 404) {
+          setError('Report not found. The interview session may not have completed properly.');
+        } else {
+          setError(`Failed to load report: ${response.status}`);
+        }
+      } catch (error) {
+        console.error("Error fetching report:", error);
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    // Fetch whenever sessionId changes OR on initial load
+    fetchReport();
+  }, [sessionId, getToken]);
 
-  const formatTimeAxis = (tickItem) => {
-    return formatTime(tickItem);
-  };
-
-  const handleSubmitRating = () => {
-    // In a real app, this would submit to an API
-    console.log("Rating submitted:", { experienceRating, feedback });
-    setShowSuccessPopup(true);
-  };
-
-  const handleClosePopup = () => {
-    setShowSuccessPopup(false);
-    navigate("/dashboard");
-  };
-
+  // Helper functions
   const getScoreColor = (score) => {
     if (score >= 80) return "#4CAF50"; // Green
     if (score >= 60) return "#FF9800"; // Orange
@@ -178,6 +122,99 @@ export default function ReportPage() {
     return "Needs Improvement";
   };
 
+  const handleSubmitRating = () => {
+    console.log("Rating submitted:", { experienceRating, feedback });
+    setShowSuccessPopup(true);
+  };
+
+  const handleClosePopup = () => {
+    setShowSuccessPopup(false);
+    navigate("/dashboard");
+  };
+
+  // Build score breakdown chart data
+  const scoreChartData = report?.scores ? [
+    { name: "Communication", score: report.scores.communication || 0 },
+    { name: "Clarity", score: report.scores.clarity || 0 },
+    { name: "Structure", score: report.scores.structure || 0 },
+    ...(report.scores.technical_depth ? [{ name: "Technical", score: report.scores.technical_depth }] : []),
+    { name: "Relevance", score: report.scores.relevance || 0 }
+  ] : [];
+
+  // Extract Q&A pairs from transcript
+  const qaData = useMemo(() => {
+    if (!report?.transcript) return [];
+    const pairs = [];
+    for (let i = 0; i < report.transcript.length; i += 2) {
+      if (i + 1 < report.transcript.length) {
+        pairs.push({
+          question: report.transcript[i]?.text || '',
+          answer: report.transcript[i + 1]?.text || '',
+          index: pairs.length + 1
+        });
+      }
+    }
+    return pairs;
+  }, [report]);
+
+  // Loading state
+  if (loading) {
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        minHeight: '100vh',
+        bgcolor: '#fafafa'
+      }}>
+        <Box sx={{ textAlign: 'center' }}>
+          <CircularProgress size={60} sx={{ mb: 2 }} />
+          <Typography variant="h6">Loading your report...</Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <Box sx={{ 
+        p: 4, 
+        maxWidth: 1200, 
+        mx: "auto",
+        minHeight: "100vh",
+        bgcolor: "#fafafa"
+      }}>
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+        <Button variant="contained" onClick={() => navigate("/dashboard")}>
+          Back to Dashboard
+        </Button>
+      </Box>
+    );
+  }
+
+  // No report found
+  if (!report) {
+    return (
+      <Box sx={{ 
+        p: 4, 
+        maxWidth: 1200, 
+        mx: "auto",
+        minHeight: "100vh",
+        bgcolor: "#fafafa"
+      }}>
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Report not found
+        </Alert>
+        <Button variant="contained" onClick={() => navigate("/dashboard")}>
+          Back to Dashboard
+        </Button>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ 
       p: 4, 
@@ -187,7 +224,7 @@ export default function ReportPage() {
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       bgcolor: "#fafafa"
     }}>
-      {/* Clean Header */}
+      {/* Header */}
       <Box sx={{ 
         display: "flex", 
         justifyContent: "space-between", 
@@ -207,7 +244,7 @@ export default function ReportPage() {
               mb: 1
             }}
           >
-            Interview Analysis
+            Interview Report
           </Typography>
           <Typography 
             variant="body1" 
@@ -217,36 +254,86 @@ export default function ReportPage() {
               fontWeight: 400
             }}
           >
-            Comprehensive analysis of your interview performance
+            {report.title}
           </Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 2 }}>
-          <Button
-            variant="contained"
-            onClick={() => navigate("/")}
-            startIcon={<PlayArrow />}
-            sx={{
-              bgcolor: "#1976d2",
-              borderRadius: "8px",
-              textTransform: "none",
-              fontWeight: 600,
-              fontFamily: "'Inter', sans-serif",
-              px: 3,
-              py: 1.5,
-              boxShadow: "0 2px 8px rgba(25, 118, 210, 0.2)",
-              "&:hover": {
-                bgcolor: "#1565c0",
-                boxShadow: "0 4px 12px rgba(25, 118, 210, 0.3)"
-              }
-            }}
-          >
-            Back to Home
-          </Button>
-        </Box>
+        <Button
+          variant="contained"
+          onClick={() => navigate("/dashboard")}
+          startIcon={<PlayArrow />}
+          sx={{
+            bgcolor: "#1976d2",
+            borderRadius: "8px",
+            textTransform: "none",
+            fontWeight: 600,
+            fontFamily: "'Inter', sans-serif",
+            px: 3,
+            py: 1.5,
+            boxShadow: "0 2px 8px rgba(25, 118, 210, 0.2)",
+            "&:hover": {
+              bgcolor: "#1565c0",
+              boxShadow: "0 4px 12px rgba(25, 118, 210, 0.3)"
+            }
+          }}
+        >
+          Back to Dashboard
+        </Button>
       </Box>
 
-      {/* Clean Summary Cards */}
+      {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 5 }}>
+        {/* Overall Score */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ 
+            p: 3, 
+            textAlign: "center",
+            bgcolor: "white",
+            border: "1px solid #e0e0e0",
+            borderRadius: "12px",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
+            transition: "all 0.2s ease",
+            "&:hover": {
+              boxShadow: "0 4px 16px rgba(0, 0, 0, 0.08)",
+              transform: "translateY(-2px)"
+            }
+          }}>
+            <Typography 
+              variant="h2" 
+              sx={{ 
+                fontWeight: 700, 
+                color: getScoreColor(report.overall_score),
+                fontFamily: "'Inter', sans-serif",
+                mb: 1 
+              }}
+            >
+              {report.overall_score}
+            </Typography>
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                color: "#666",
+                fontFamily: "'Inter', sans-serif",
+                fontWeight: 500
+              }}
+            >
+              Overall Score
+            </Typography>
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                color: getScoreColor(report.overall_score),
+                fontFamily: "'Inter', sans-serif",
+                fontWeight: 600,
+                display: "block",
+                mt: 1
+              }}
+            >
+              {getScoreLabel(report.overall_score)}
+            </Typography>
+          </Card>
+        </Grid>
+
+        {/* Duration */}
         <Grid item xs={12} sm={6} md={3}>
           <Card sx={{ 
             p: 3, 
@@ -275,7 +362,7 @@ export default function ReportPage() {
                 mb: 1 
               }}
             >
-              {formatTime(mockSessionData.totalDuration)}
+              {report.duration}
             </Typography>
             <Typography 
               variant="body2" 
@@ -285,11 +372,12 @@ export default function ReportPage() {
                 fontWeight: 500
               }}
             >
-              Total Duration
+              Duration
             </Typography>
           </Card>
         </Grid>
-        
+
+        {/* Questions */}
         <Grid item xs={12} sm={6} md={3}>
           <Card sx={{ 
             p: 3, 
@@ -318,7 +406,7 @@ export default function ReportPage() {
                 mb: 1 
               }}
             >
-              {mockSessionData.questionsAnswered}
+              {report.questions}
             </Typography>
             <Typography 
               variant="body2" 
@@ -328,11 +416,12 @@ export default function ReportPage() {
                 fontWeight: 500
               }}
             >
-              Questions Answered
+              Questions
             </Typography>
           </Card>
         </Grid>
-        
+
+        {/* Interview Type */}
         <Grid item xs={12} sm={6} md={3}>
           <Card sx={{ 
             p: 3, 
@@ -347,21 +436,22 @@ export default function ReportPage() {
               transform: "translateY(-2px)"
             }
           }}>
-            <Chat sx={{ 
+            <Assessment sx={{ 
               fontSize: 40, 
               color: "#388e3c", 
               mb: 2 
             }} />
             <Typography 
-              variant="h4" 
+              variant="h5" 
               sx={{ 
                 fontWeight: 700, 
                 color: "#1a1a1a",
                 fontFamily: "'Inter', sans-serif",
-                mb: 1 
+                mb: 1,
+                textTransform: "capitalize"
               }}
             >
-              {mockSessionData.totalWords}
+              {report.type}
             </Typography>
             <Typography 
               variant="body2" 
@@ -371,446 +461,212 @@ export default function ReportPage() {
                 fontWeight: 500
               }}
             >
-              Total Words
-            </Typography>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ 
-            p: 3, 
-            textAlign: "center",
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
-            transition: "all 0.2s ease",
-            "&:hover": {
-              boxShadow: "0 4px 16px rgba(0, 0, 0, 0.08)",
-              transform: "translateY(-2px)"
-            }
-          }}>
-            <Visibility sx={{ 
-              fontSize: 40, 
-              color: averageMetrics.avgEyeContact >= 80 ? "#4caf50" :
-                     averageMetrics.avgEyeContact >= 60 ? "#ff9800" : "#f44336", 
-              mb: 2 
-            }} />
-            <Typography 
-              variant="h4" 
-              sx={{ 
-                fontWeight: 700, 
-                color: "#1a1a1a",
-                fontFamily: "'Inter', sans-serif",
-                mb: 1 
-              }}
-            >
-              {averageMetrics.avgEyeContact}%
-            </Typography>
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                color: "#666",
-                fontFamily: "'Inter', sans-serif",
-                fontWeight: 500
-              }}
-            >
-              Eye Contact
+              Interview Type
             </Typography>
           </Card>
         </Grid>
       </Grid>
 
-      <Grid container spacing={3}>
-        {/* Performance Charts */}
-        <Grid item xs={12} lg={8}>
-          <Card sx={{ 
-            p: 4,
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
-          }}>
-            <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-              <TrendingUp sx={{ 
-                fontSize: 24, 
-                color: "#1976d2", 
-                mr: 1 
-              }} />
-              <Typography 
-                variant="h6" 
-                sx={{ 
-                  fontWeight: 600,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                Performance Over Time
-              </Typography>
-            </Box>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={mockTimeSeriesData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="time" 
-                  tickFormatter={formatTimeAxis}
-                  label={{ value: 'Time', position: 'insideBottom', offset: -10 }}
-                />
-                <YAxis 
-                  label={{ value: 'Percentage (%)', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  labelFormatter={(value) => `Time: ${formatTime(value)}`}
-                  formatter={(value, name) => [`${value}%`, name]}
-                />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="eyeContact" 
-                  stroke="#2196F3" 
-                  strokeWidth={2}
-                  name="Eye Contact"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="confidence" 
-                  stroke="#4CAF50" 
-                  strokeWidth={2}
-                  name="Confidence"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        </Grid>
-
-        {/* Time Distribution */}
-        <Grid item xs={12} lg={4}>
-          <Card sx={{ 
-            p: 4,
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
-          }}>
-            <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-              <Assessment sx={{ 
-                fontSize: 24, 
-                color: "#1976d2", 
-                mr: 1 
-              }} />
-              <Typography 
-                variant="h6" 
-                sx={{ 
-                  fontWeight: 600,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                Time Distribution
-              </Typography>
-            </Box>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={timeDistributionData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
+      {/* Score Breakdown */}
+      {scoreChartData.length > 0 && (
+        <Grid container spacing={3} sx={{ mb: 5 }}>
+          <Grid item xs={12}>
+            <Card sx={{ 
+              p: 4,
+              bgcolor: "white",
+              border: "1px solid #e0e0e0",
+              borderRadius: "12px",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+            }}>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
+                <TrendingUp sx={{ 
+                  fontSize: 24, 
+                  color: "#1976d2", 
+                  mr: 1 
+                }} />
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 600,
+                    color: "#1a1a1a",
+                    fontFamily: "'Inter', sans-serif"
+                  }}
                 >
-                  {timeDistributionData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatTime(value)} />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
+                  Score Breakdown
+                </Typography>
+              </Box>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={scoreChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis domain={[0, 100]} />
+                  <Tooltip formatter={(value) => `${value}/100`} />
+                  <Bar dataKey="score" fill="#2196F3" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          </Grid>
         </Grid>
+      )}
 
-        {/* Speech Analysis */}
-        <Grid item xs={12} lg={6}>
-          <Card sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Speech Analysis
-            </Typography>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={speechAnalysisData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(value) => [`${value}/100`, "Score"]} />
-                <Bar dataKey="score" fill="#2196F3" />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+      {/* Questions & Answers */}
+      {qaData.length > 0 && (
+        <Grid container spacing={3} sx={{ mb: 5 }}>
+          <Grid item xs={12}>
+            <Card sx={{ 
+              p: 4,
+              bgcolor: "white",
+              border: "1px solid #e0e0e0",
+              borderRadius: "12px",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+            }}>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
+                <Chat sx={{ 
+                  fontSize: 24, 
+                  color: "#1976d2", 
+                  mr: 1 
+                }} />
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 600,
+                    color: "#1a1a1a",
+                    fontFamily: "'Inter', sans-serif"
+                  }}
+                >
+                  Questions & Answers
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {qaData.map((pair, idx) => (
+                  <Accordion key={idx} defaultExpanded={idx === 0}>
+                    <AccordionSummary expandIcon={<ExpandMore />}>
+                      <Box sx={{ display: "flex", gap: 2, alignItems: "center", width: "100%" }}>
+                        <Typography 
+                          sx={{ 
+                            fontWeight: 600,
+                            color: "#1976d2",
+                            minWidth: "30px"
+                          }}
+                        >
+                          Q{pair.index}
+                        </Typography>
+                        <Typography 
+                          sx={{ 
+                            color: "#666",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            flex: 1
+                          }}
+                        >
+                          {pair.question.substring(0, 80)}...
+                        </Typography>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ bgcolor: "#f9f9f9" }}>
+                      <Box>
+                        <Typography 
+                          variant="subtitle2" 
+                          sx={{ 
+                            fontWeight: 700,
+                            color: "#1a1a1a",
+                            mb: 1
+                          }}
+                        >
+                          Question:
+                        </Typography>
+                        <Typography 
+                          sx={{ 
+                            color: "#666",
+                            mb: 3,
+                            lineHeight: 1.6,
+                            whiteSpace: "pre-wrap"
+                          }}
+                        >
+                          {pair.question}
+                        </Typography>
+
+                        <Typography 
+                          variant="subtitle2" 
+                          sx={{ 
+                            fontWeight: 700,
+                            color: "#1a1a1a",
+                            mb: 1
+                          }}
+                        >
+                          Your Answer:
+                        </Typography>
+                        <Typography 
+                          sx={{ 
+                            color: "#666",
+                            lineHeight: 1.6,
+                            whiteSpace: "pre-wrap"
+                          }}
+                        >
+                          {pair.answer}
+                        </Typography>
+                      </Box>
+                    </AccordionDetails>
+                  </Accordion>
+                ))}
+              </Box>
+            </Card>
+          </Grid>
         </Grid>
+      )}
 
-        {/* Detailed Metrics */}
-        <Grid item xs={12} lg={6}>
-          <Card sx={{ 
-            p: 4,
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
-          }}>
-            <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-              <Assessment sx={{ 
-                fontSize: 24, 
-                color: "#1976d2", 
-                mr: 1 
-              }} />
-              <Typography 
-                variant="h6" 
-                sx={{ 
-                  fontWeight: 600,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                Detailed Metrics
-              </Typography>
-            </Box>
-            
-            <Box sx={{ mb: 3 }}>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  color: "#666",
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 500,
-                  mb: 1
-                }}
-              >
-                Average Response Time
-              </Typography>
-              <Typography 
-                variant="h6"
-                sx={{ 
-                  fontWeight: 700,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                {mockSessionData.averageResponseTime}s
-              </Typography>
-            </Box>
+      {/* Recommendations */}
+      {report.recommendations && report.recommendations.length > 0 && (
+        <Grid container spacing={3} sx={{ mb: 5 }}>
+          <Grid item xs={12}>
+            <Card sx={{ 
+              p: 4,
+              bgcolor: "white",
+              border: "1px solid #e0e0e0",
+              borderRadius: "12px",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+            }}>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
+                <CheckCircle sx={{ 
+                  fontSize: 24, 
+                  color: "#1976d2", 
+                  mr: 1 
+                }} />
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 600,
+                    color: "#1a1a1a",
+                    fontFamily: "'Inter', sans-serif"
+                  }}
+                >
+                  Recommendations
+                </Typography>
+              </Box>
 
-            <Box sx={{ mb: 3 }}>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  color: "#666",
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 500,
-                  mb: 1
-                }}
-              >
-                Speaking Rate
-              </Typography>
-              <Typography 
-                variant="h6"
-                sx={{ 
-                  fontWeight: 700,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                {Math.round((mockSessionData.totalWords / mockSessionData.speakingTime) * 60)} words/min
-              </Typography>
-            </Box>
-
-            <Box sx={{ mb: 3 }}>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  color: "#666",
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 500,
-                  mb: 1
-                }}
-              >
-                Average Blink Rate
-              </Typography>
-              <Typography 
-                variant="h6"
-                sx={{ 
-                  fontWeight: 700,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                {mockSessionData.averageBlinkRate} blinks/min
-              </Typography>
-            </Box>
-
-            <Box sx={{ mb: 2 }}>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  color: "#666",
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 500,
-                  mb: 1
-                }}
-              >
-                Overall Performance
-              </Typography>
-              <Typography 
-                variant="h6" 
-                sx={{ color: getScoreColor(averageMetrics.avgConfidence) }}
-              >
-                {getScoreLabel(averageMetrics.avgConfidence)}
-              </Typography>
-            </Box>
-          </Card>
-        </Grid>
-
-        {/* Eye Contact & Presence Section */}
-        <Grid item xs={12}>
-          <Card sx={{ 
-            p: 4,
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
-          }}>
-            <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-              <Visibility sx={{ 
-                fontSize: 24, 
-                color: "#1976d2", 
-                mr: 1 
-              }} />
-              <Typography 
-                variant="h6" 
-                sx={{ 
-                  fontWeight: 600,
-                  color: "#1a1a1a",
-                  fontFamily: "'Inter', sans-serif"
-                }}
-              >
-                Eye Contact & Presence
-              </Typography>
-            </Box>
-            
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
-                <Box sx={{ textAlign: "center", p: 2 }}>
-                  <Typography 
-                    variant="h4" 
-                    sx={{ 
-                      fontWeight: 700,
-                      color: averageMetrics.avgEyeContact >= 70 ? "#4CAF50" : "#FF9800",
-                      fontFamily: "'Inter', sans-serif",
-                      mb: 1
-                    }}
-                  >
-                    {mockSessionData.eyeContactPercentage}%
-                  </Typography>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      color: "#666",
-                      fontFamily: "'Inter', sans-serif"
-                    }}
-                  >
-                    Average Eye Contact
-                  </Typography>
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      color: "#999",
-                      fontFamily: "'Inter', sans-serif",
-                      display: "block",
-                      mt: 1
-                    }}
-                  >
-                    Target: >70%
-                  </Typography>
-                </Box>
-              </Grid>
-              
-              <Grid item xs={12} md={8}>
-                <Box>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      color: "#666",
-                      fontFamily: "'Inter', sans-serif",
-                      mb: 2
-                    }}
-                  >
-                    {averageMetrics.avgEyeContact >= 70 
-                      ? "Good eye contact maintained throughout the interview. Continue this practice."
-                      : "Eye contact was below the recommended threshold. Practice maintaining focus on the camera lens."}
-                  </Typography>
-                  
-                  {averageMetrics.avgEyeContact < 70 && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography 
-                        variant="subtitle2" 
-                        sx={{ 
-                          fontWeight: 600,
-                          color: "#1a1a1a",
-                          fontFamily: "'Inter', sans-serif",
-                          mb: 1
-                        }}
-                      >
-                        Recommendations:
-                      </Typography>
-                      <ul style={{ margin: 0, paddingLeft: "20px", color: "#666" }}>
-                        <li>Position your camera at eye level</li>
-                        <li>Use notes sparingly to maintain eye contact</li>
-                        <li>Practice maintaining focus on the camera lens</li>
-                        <li>Minimize distractions in your environment</li>
-                      </ul>
-                    </Box>
-                  )}
-                </Box>
-              </Grid>
-            </Grid>
-          </Card>
-        </Grid>
-        
-        {/* Recommendations */}
-        <Grid item xs={12}>
-          <Card sx={{ 
-            p: 4,
-            bgcolor: "white",
-            border: "1px solid #e0e0e0",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
-          }}>
-            <Typography 
-              variant="h6" 
-              sx={{ 
-                fontWeight: 600,
-                color: "#1a1a1a",
-                fontFamily: "'Inter', sans-serif",
-                mb: 3
-              }}
-            >
-              Recommendations
-            </Typography>
-            
-            {report?.recommendations && report.recommendations.length > 0 ? (
               <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {report.recommendations.map((rec, idx) => (
                   <Box 
                     key={idx}
                     sx={{ 
-                      p: 2, 
+                      p: 3, 
                       bgcolor: "#f5f5f5",
                       border: "1px solid #e0e0e0",
-                      borderRadius: "8px"
+                      borderRadius: "8px",
+                      display: "flex",
+                      gap: 2
                     }}
                   >
+                    <Box sx={{ 
+                      color: "#2196F3",
+                      fontWeight: "bold",
+                      minWidth: "24px"
+                    }}>
+                      ✓
+                    </Box>
                     <Typography 
-                      variant="body2"
                       sx={{ 
                         color: "#374151",
                         fontFamily: "'Inter', sans-serif",
@@ -822,66 +678,10 @@ export default function ReportPage() {
                   </Box>
                 ))}
               </Box>
-            ) : (
-              <Grid container spacing={2}>
-                {averageMetrics.avgEyeContact < 70 && (
-                  <Grid item xs={12} md={6}>
-                    <Box sx={{ p: 2, bgcolor: "#fff3cd", border: "1px solid #e0e0e0", borderRadius: "8px" }}>
-                      <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1, color: "#856404" }}>
-                        Improve Eye Contact
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#856404" }}>
-                        Try to maintain more consistent eye contact with the camera. 
-                        Practice looking directly at the lens rather than the screen.
-                      </Typography>
-                    </Box>
-                  </Grid>
-                )}
-              
-              {speechAnalysisData.find(d => d.name === "Pace")?.score < 75 && (
-                <Grid item xs={12} md={6}>
-                  <Box sx={{ p: 2, bgcolor: "info.light", borderRadius: 1 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
-                      🗣️ Speaking Pace
-                    </Typography>
-                    <Typography variant="body2">
-                      Consider adjusting your speaking pace. Practice with a metronome 
-                      or record yourself to find your optimal rhythm.
-                    </Typography>
-                  </Box>
-                </Grid>
-              )}
-              
-              {mockSessionData.averageResponseTime > 30 && (
-                <Grid item xs={12} md={6}>
-                  <Box sx={{ p: 2, bgcolor: "success.light", borderRadius: 1 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
-                      ⚡ Response Time
-                    </Typography>
-                    <Typography variant="body2">
-                      Work on thinking aloud and structuring your responses quickly. 
-                      Practice the STAR method for behavioral questions.
-                    </Typography>
-                  </Box>
-                </Grid>
-              )}
-              
-              <Grid item xs={12} md={6}>
-                <Box sx={{ p: 2, bgcolor: "primary.light", borderRadius: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
-                    📚 Continue Practicing
-                  </Typography>
-                  <Typography variant="body2">
-                    Regular practice with mock interviews will help improve your 
-                    confidence and performance metrics over time.
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-            )}
-          </Card>
+            </Card>
+          </Grid>
         </Grid>
-      </Grid>
+      )}
 
       {/* Rating and Feedback Section */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
