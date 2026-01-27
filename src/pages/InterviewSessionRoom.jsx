@@ -46,6 +46,12 @@ export default function InterviewSessionRoom() {
   const [interviewType, setInterviewType] = useState(typeFromUrl || "behavioral");
   const [maxQuestions, setMaxQuestions] = useState(6);
   
+  // Store sessionId in sessionStorage for report page access
+  useEffect(() => {
+    sessionStorage.setItem('interviewSessionId', sessionId);
+    console.log('✅ Stored sessionId in sessionStorage:', sessionId);
+  }, [sessionId]);
+  
   useEffect(() => {
     const config = sessionStorage.getItem("interviewConfig");
     if (config) {
