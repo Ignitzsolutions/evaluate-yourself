@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+// import { useAuth } from "../context/AuthContext";
+import { useUser, useClerk } from "@clerk/clerk-react";
 import { Box, Container, Typography, Button, Card, Grid } from "@mui/material";
 import { PlayArrow, Assessment, Settings } from "@mui/icons-material";
 import { Divider, Stack, Paper } from "@mui/material";
 import "../ui.css";
 
 export default function LandingPage() {
-  const { user, logout } = useAuth();
+  // const { user, logout } = useAuth();
+  const { user, isSignedIn } = useUser();
+  const { signOut } = useClerk();
   const nav = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -53,7 +56,7 @@ export default function LandingPage() {
 
           {/* Right: Action buttons */}
           <div className="nav-right">
-            {!user ? (
+            {!isSignedIn ? (
               <>
                 <Link to="/login" className="btn btn-primary" style={{
                   textDecoration: "none",
@@ -77,7 +80,7 @@ export default function LandingPage() {
                   padding: isScrolled ? "6px 12px" : "8px 14px",
                   transition: "all 0.3s ease-in-out"
                 }}>Go to App</button>
-                <button onClick={logout} className="btn btn-ghost" style={{
+                <button onClick={signOut} className="btn btn-ghost" style={{
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 10px" : "8px 12px",
                   transition: "all 0.3s ease-in-out"
@@ -108,7 +111,7 @@ export default function LandingPage() {
                 </Typography>
 
                 <Box sx={{ display: "flex", gap: 2, pt: 1 }}>
-                  {!user ? (
+                  {!isSignedIn ? (
                     <>
                       <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: 4, fontSize: 16 }}>
                         Start practicing

@@ -54,6 +54,111 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
+#database imports
+from db.database import engine
+from db import models
+from sqlalchemy.orm import Session
+from db.models import User
+from fastapi import Depends
+# from sqlalchemy.orm import Session
+from db.database import get_db
+from db.users import get_or_create_user
+
+# Clerk token verification imports
+from jose import jwt as jose_jwt
+from fastapi import HTTPException
+import logging
+
+CLERK_JWKS_URL = "https://api.clerk.dev/v1/jwks"
+_jwks_cache = None
+
+#region Clerk Token Verification
+def get_clerk_jwks():
+    global _jwks_cache
+    try:
+        if _jwks_cache is None:
+            resp = requests.get(CLERK_JWKS_URL, timeout=5)
+            resp.raise_for_status()
+            _jwks_cache = resp.json()
+        return _jwks_cache
+
+    except requests.exceptions.RequestException as e:
+        logging.exception("❌ Failed to fetch Clerk JWKS")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to fetch Clerk public keys"
+        )
+
+#endregion 
+def verify_clerk_token(token: str) -> dict:
+    try:
+        jwks = get_clerk_jwks()
+
+        try:
+            unverified_header = jose_jwt.get_unverified_header(token)
+        except Exception:
+            logging.exception("❌ Invalid JWT header")
+            raise HTTPException(status_code=401, detail="Invalid JWT header")
+
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=401, detail="Missing kid in token header")
+
+        key = None
+        for jwk in jwks.get("keys", []):
+            if jwk.get("kid") == kid:
+                key = jwk
+                break
+
+        if not key:
+            logging.error(f"❌ No matching JWK found for kid={kid}")
+            raise HTTPException(status_code=401, detail="Invalid token signing key")
+
+        try:
+            payload = jose_jwt.decode(
+                token,
+                key,
+                algorithms=["RS256"],
+                options={
+                    "verify_aud": False,   # Clerk often doesn't use aud
+                    "verify_exp": True,
+                },
+            )
+        except jose_jwt.ExpiredSignatureError:
+            logging.warning("❌ Clerk token expired")
+            raise HTTPException(status_code=401, detail="Token expired")
+        except jose_jwt.JWTError as e:
+            logging.exception("❌ Clerk token decode failed")
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        return payload
+
+    except HTTPException:
+        # Already handled — just rethrow
+        raise
+
+    except Exception as e:
+        logging.exception("❌ Unexpected error verifying Clerk token")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error verifying authentication token"
+        )
+# Helper to extract user ID from Authorization header
+def get_user_id_from_auth(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    try:
+        token = authorization.replace("Bearer ", "")
+        decoded = verify_clerk_token(token)
+        return decoded.get("sub") or decoded.get("user_id")
+    except HTTPException:
+        return None
+    except Exception as e:
+        logging.exception("Unexpected auth error")
+        return None
+
+models.Base.metadata.create_all(bind=engine)
+
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
 try:
@@ -206,6 +311,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+#D
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
@@ -1688,6 +1796,161 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
     except Exception:
         return None
 
+
+# def get_or_create_user(db: Session, decoded: dict):
+#     try:
+#         clerk_user_id = decoded.get("sub")
+#         email = decoded.get("email")
+
+#         if not clerk_user_id:
+#             raise HTTPException(status_code=400, detail="Missing Clerk user id")
+
+#         user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+
+#         if not user:
+#             user = User(
+#                 clerk_user_id=clerk_user_id,
+#                 email=email,
+#             )
+#             db.add(user)
+#             db.commit()
+#             db.refresh(user)
+
+#         return user
+
+#     except HTTPException:
+#         raise
+
+#     except Exception as e:
+#         logging.exception("❌ DB error in get_or_create_user")
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to create or fetch user"
+#         )
+
+# Refactored version of get_or_create_user
+def get_or_create_user_db(
+    db: Session,
+    clerk_user_id: str,
+    email: str | None = None
+):
+    try:
+        user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+
+        if not user:
+            user = User(
+                clerk_user_id=clerk_user_id,
+                email=email,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            print(f"🆕 Created new user in DB: {user.id} {user.email}")
+        else:
+            print(f"👤 Found existing user in DB: {user.id} {user.email}")
+
+        return user
+
+    except Exception as e:
+        db.rollback()
+        print("❌ Error in get_or_create_user_db:", e)
+        raise HTTPException(status_code=500, detail="User database error")
+
+# Dependency to get current user
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Verifies Clerk token and ensures user exists in local DB.
+    Returns User ORM object or None.
+    """
+    if not authorization:
+        return None
+
+    try:
+        token = authorization.replace("Bearer ", "")
+        decoded = verify_clerk_token(token)
+
+        clerk_user_id = decoded.get("sub") or decoded.get("user_id")
+        email = decoded.get("email")
+        full_name = decoded.get("name") or decoded.get("full_name")
+
+        if not clerk_user_id:
+            return None
+
+        # 🔴 THIS IS WHAT YOU WERE MISSING
+        user = get_or_create_user(
+            db=db,
+            clerk_user_id=clerk_user_id,
+            email=email,
+            full_name=full_name
+        )
+
+        return user
+
+    except Exception as e:
+        logging.exception("get_current_user failed")
+        return None
+    
+# def get_current_user(
+#     authorization: Optional[str] = Header(None),
+#     db: Session = Depends(get_db)
+# ):
+    
+#     if not authorization or not authorization.startswith("Bearer "):
+#         raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+#     token = authorization.replace("Bearer ", "").strip()
+#     decoded = verify_clerk_token(token)
+
+#     clerk_user_id = decoded.get("sub")
+#     email = decoded.get("email")
+
+#     if not clerk_user_id:
+#         raise HTTPException(status_code=401, detail="Invalid Clerk token")
+
+#     user = get_or_create_user_db(db, clerk_user_id, email)
+
+#     print(f"✅ Auth user DB: {user.id} {user.email}")
+
+#     return user
+
+# # Dependency to get current user
+# def get_current_user(
+#     authorization: str = Header(None),
+#     db: Session = Depends(get_db),
+# ):
+#     try:
+#         if not authorization:
+#             raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+#         if not authorization.startswith("Bearer "):
+#             raise HTTPException(status_code=401, detail="Invalid Authorization format")
+
+#         token = authorization.replace("Bearer ", "").strip()
+#         if not token:
+#             raise HTTPException(status_code=401, detail="Empty token")
+
+#         decoded = verify_clerk_token(token)
+#         user = get_or_create_user(db, decoded)
+
+#         # TEMP DEBUG (remove later)
+#         print("✅ Clerk sub:", decoded.get("sub"))
+#         print("✅ SQLite user:", user.id, user.email)
+
+#         return user
+
+#     except HTTPException:
+#         raise
+
+#     except Exception as e:
+#         logging.exception("❌ Unexpected error in get_current_user")
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Authentication processing failed"
+#         )
+
 personality_reports: Dict[str, PersonalityReport] = {}
 interview_reports: Dict[str, InterviewReport] = {}
 
@@ -1901,6 +2164,49 @@ def get_user_id(authorization: Optional[str] = Header(None)) -> str:
     
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+# Endpoint to get current authenticated user info
+@app.get("/api/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return {
+        "id": current_user.id,
+        "clerk_user_id": current_user.clerk_user_id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "created_at": current_user.created_at,
+        "last_login_at": current_user.last_login_at,
+    }
+
+# Helper to extract user info from Clerk token
+@app.get("/api/users/me")
+async def get_me(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        user_info = get_user_info(authorization)  
+        # Make this return dict: { clerk_user_id, email, name }
+
+        user = get_or_create_user(
+            db=db,
+            clerk_user_id=user_info["clerk_user_id"],
+            email=user_info.get("email"),
+            full_name=user_info.get("name"),
+        )
+
+        return {
+            "id": user.id,
+            "clerk_user_id": user.clerk_user_id,
+            "email": user.email,
+            "full_name": user.full_name,
+        }
+
+    except Exception as e:
+        print("Error in /api/users/me:", str(e))
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
 @app.post("/api/self-insight/assessments")
 async def create_assessment(request: CreateAssessmentRequest, authorization: Optional[str] = Header(None)):
     user_id = get_user_id(authorization)
@@ -1915,9 +2221,14 @@ async def create_assessment(request: CreateAssessmentRequest, authorization: Opt
     
     return {"reportId": report.id}
 
+# @app.get("/api/self-insight/reports")
+# async def list_reports(authorization: Optional[str] = Header(None)):
+#     user_id = get_user_id(authorization)
 @app.get("/api/self-insight/reports")
-async def list_reports(authorization: Optional[str] = Header(None)):
-    user_id = get_user_id(authorization)
+async def list_reports(
+    current_user: User = Depends(get_current_user)
+):
+    user_id = current_user.id
     
     user_reports = [r for r in personality_reports.values() if r.user_id == user_id]
     user_reports.sort(key=lambda x: x.created_at, reverse=True)
@@ -2091,30 +2402,87 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
         headers={"Content-Disposition": f'attachment; filename="personality-report-{report_id}.pdf"'}
     )
 
+# @app.get("/api/interview/reports")
+# async def list_interview_reports(authorization: Optional[str] = Header(None)):
+#     user_id = None
+#     try:
+#         user_id = get_user_id(authorization)
+#     except HTTPException as e:
+#         # If authentication fails, still return sample reports
+#         # Log the error but don't fail the request
+#         print(f"Authentication failed for reports request: {e.detail}")
+#         user_id = None
+#     except Exception as e:
+#         # Catch any other exceptions
+#         print(f"Error getting user_id: {str(e)}")
+#         user_id = None
+    
+#     # Always include sample reports, plus user's own reports if authenticated
+#     if user_id:
+#         user_reports = [r for r in interview_reports.values() if r.user_id == user_id or r.is_sample]
+#     else:
+#         # If not authenticated, only return sample reports
+#         user_reports = [r for r in interview_reports.values() if r.is_sample]
+    
+#     user_reports.sort(key=lambda x: x.date, reverse=True)
+    
+#     summaries = []
+#     for report in user_reports:
+#         summaries.append(InterviewReportSummary(
+#             id=report.id,
+#             title=report.title,
+#             date=report.date,
+#             type=report.type,
+#             mode=report.mode,
+#             score=report.overall_score,
+#             questions=report.questions,
+#             is_sample=report.is_sample
+#         ))
+    
+#     return summaries
+
+# Revised list_interview_reports to use database
+# @app.get("/api/interview/reports")
+# async def list_interview_reports(
+#     authorization: Optional[str] = Header(None),
+#     user = Depends(get_current_user), # Ensure user is fetched if authenticated
+#     db: Session = Depends(get_db)
+# ):
+#     try:
+#         user_id = get_user_id_from_auth(authorization)
+
+#         if user_id:
+#             reports = db.query(models.InterviewReport).filter(
+#                 (models.InterviewReport.user_id == user_id) |
+#                 (models.InterviewReport.is_sample == True)
+#             ).all()
+#         else:
+#             reports = db.query(models.InterviewReport).filter(
+#                 models.InterviewReport.is_sample == True
+#             ).all()
+
+#         return reports
+
+#     except Exception as e:
+#         logging.exception("Failed to list interview reports")
+#         raise HTTPException(status_code=500, detail="Failed to fetch reports")
+
+# Revised list_interview_reports to use current_user dependency
 @app.get("/api/interview/reports")
-async def list_interview_reports(authorization: Optional[str] = Header(None)):
-    user_id = None
-    try:
-        user_id = get_user_id(authorization)
-    except HTTPException as e:
-        # If authentication fails, still return sample reports
-        # Log the error but don't fail the request
-        print(f"Authentication failed for reports request: {e.detail}")
-        user_id = None
-    except Exception as e:
-        # Catch any other exceptions
-        print(f"Error getting user_id: {str(e)}")
-        user_id = None
-    
-    # Always include sample reports, plus user's own reports if authenticated
-    if user_id:
-        user_reports = [r for r in interview_reports.values() if r.user_id == user_id or r.is_sample]
-    else:
-        # If not authenticated, only return sample reports
-        user_reports = [r for r in interview_reports.values() if r.is_sample]
-    
+async def list_interview_reports(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user.clerk_user_id if current_user else None
+
+    # TODO: Replace this with DB-backed InterviewReport later
+    user_reports = [
+        r for r in interview_reports.values()
+        if r.user_id == user_id or r.is_sample
+    ]
+
     user_reports.sort(key=lambda x: x.date, reverse=True)
-    
+
     summaries = []
     for report in user_reports:
         summaries.append(InterviewReportSummary(
@@ -2127,61 +2495,137 @@ async def list_interview_reports(authorization: Optional[str] = Header(None)):
             questions=report.questions,
             is_sample=report.is_sample
         ))
-    
+
     return summaries
 
-@app.get("/api/interview/reports/{report_id}")
-async def get_interview_report(report_id: str, authorization: Optional[str] = Header(None)):
-    # Handle authentication gracefully (like list endpoint)
-    user_id = None
-    try:
-        user_id = get_user_id(authorization)
-    except HTTPException as e:
-        # If authentication fails, still allow access to sample reports
-        print(f"Authentication failed for report request: {e.detail}")
-        user_id = None
-    except Exception as e:
-        print(f"Error getting user_id: {str(e)}")
-        user_id = None
+# @app.get("/api/interview/reports/{report_id}")
+# async def get_interview_report(report_id: str, authorization: Optional[str] = Header(None)):
+#     # Handle authentication gracefully (like list endpoint)
+#     user_id = None
+#     try:
+#         user_id = get_user_id(authorization)
+#     except HTTPException as e:
+#         # If authentication fails, still allow access to sample reports
+#         print(f"Authentication failed for report request: {e.detail}")
+#         user_id = None
+#     except Exception as e:
+#         print(f"Error getting user_id: {str(e)}")
+#         user_id = None
     
-    if report_id not in interview_reports:
-        raise HTTPException(status_code=404, detail="Report not found")
+#     if report_id not in interview_reports:
+#         raise HTTPException(status_code=404, detail="Report not found")
     
-    report = interview_reports[report_id]
+#     report = interview_reports[report_id]
     
-    # Allow access if:
-    # 1. It's a sample report (anyone can view)
-    # 2. User is authenticated and owns the report
-    # 3. No auth but report exists (for development/testing)
-    if not report.is_sample and user_id and report.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+#     # Allow access if:
+#     # 1. It's a sample report (anyone can view)
+#     # 2. User is authenticated and owns the report
+#     # 3. No auth but report exists (for development/testing)
+#     if not report.is_sample and user_id and report.user_id != user_id:
+#         raise HTTPException(status_code=403, detail="Access denied")
     
-    return report
+#     return report
 
+# Revised get_interview_report to use database
+@app.get("/api/interview/reports/{report_id}")
+async def get_interview_report(
+    report_id: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        user_id = get_user_id_from_auth(authorization)
+
+        report = db.query(models.InterviewReport).filter(
+            models.InterviewReport.id == report_id
+        ).first()
+
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        if not report.is_sample and user_id and report.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        return report
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Failed to get interview report")
+        raise HTTPException(status_code=500, detail="Failed to fetch report")
+
+# @app.post("/api/interview/reports")
+# async def create_interview_report(request: CreateInterviewReportRequest, authorization: Optional[str] = Header(None)):
+#     user_id = get_user_id(authorization)
+    
+#     report_id = str(uuid.uuid4())
+#     report = InterviewReport(
+#         id=report_id,
+#         user_id=user_id,
+#         title=request.title,
+#         date=datetime.now(),
+#         type=request.type,
+#         mode=request.mode,
+#         duration=request.duration,
+#         overall_score=request.overall_score,
+#         scores=request.scores,
+#         transcript=request.transcript,
+#         recommendations=request.recommendations,
+#         questions=request.questions,
+#         is_sample=False
+#     )
+    
+#     interview_reports[report_id] = report
+    
+#     return {"id": report_id}
+
+# Revised create_interview_report to use database
 @app.post("/api/interview/reports")
-async def create_interview_report(request: CreateInterviewReportRequest, authorization: Optional[str] = Header(None)):
-    user_id = get_user_id(authorization)
+async def create_interview_report(
+    request: CreateInterviewReportRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        # user_id = get_user_id_from_auth(authorization)
     
-    report_id = str(uuid.uuid4())
-    report = InterviewReport(
-        id=report_id,
-        user_id=user_id,
-        title=request.title,
-        date=datetime.now(),
-        type=request.type,
-        mode=request.mode,
-        duration=request.duration,
-        overall_score=request.overall_score,
-        scores=request.scores,
-        transcript=request.transcript,
-        recommendations=request.recommendations,
-        questions=request.questions,
-        is_sample=False
-    )
-    
-    interview_reports[report_id] = report
-    
-    return {"id": report_id}
+        # if not user_id:
+        #     raise HTTPException(status_code=401, detail="Authentication required")
+        current_user = get_current_user(authorization=authorization, db=db)
+
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = current_user.clerk_user_id
+
+        report = models.InterviewReport(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=request.title,
+            date=datetime.now(),
+            type=request.type,
+            mode=request.mode,
+            duration=request.duration,
+            overall_score=request.overall_score,
+            scores=json.dumps(request.scores),
+            transcript=json.dumps(request.transcript),
+            recommendations=json.dumps(request.recommendations),
+            questions=json.dumps(request.questions),
+            is_sample=False
+        )
+
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+
+        return {"id": report.id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logging.exception("Failed to create interview report")
+        raise HTTPException(status_code=500, detail="Failed to create report")
 
 @app.post("/api/interview/{session_id}/transcript")
 async def save_interview_transcript(session_id: str, request: Dict):

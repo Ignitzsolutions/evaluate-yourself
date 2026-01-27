@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+// import { useAuth } from "../context/AuthContext";
+import { useUser } from "@clerk/clerk-react";
 import useRealtimeInterview from "../hooks/useRealtimeInterview";
 // Gaze tracking disabled - focusing on core Q&A functionality
 // import { useGazeSocket } from "../hooks/useGazeSocket";
@@ -38,7 +39,9 @@ export default function InterviewSessionRoom() {
   }, [params.sessionId, params.type]);
   const typeFromUrl = params.type; // If coming from /interview/:type route
   const navigate = useNavigate();
-  const { user } = useAuth();
+  // const { user } = useAuth();
+  const { user, isSignedIn } = useUser();
+
   
   // Get interview type from sessionStorage, URL params, or defaults
   const [interviewType, setInterviewType] = useState(typeFromUrl || "behavioral");
