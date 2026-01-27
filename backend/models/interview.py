@@ -40,6 +40,7 @@ class InterviewReportSummary(BaseModel):
     is_sample: bool = False
 
 class CreateInterviewReportRequest(BaseModel):
+    session_id: Optional[str] = None
     title: str
     type: str
     mode: str
