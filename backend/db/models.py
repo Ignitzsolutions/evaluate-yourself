@@ -36,6 +36,7 @@ class InterviewReport(Base):
     questions = Column(Integer, default=0)  # Number of questions asked
     
     metrics = Column(Text)  # JSON: {total_duration, questions_answered, total_words, speaking_time, silence_time, eye_contact_pct, ...}
+    ai_feedback = Column(Text)  # JSON: AI-generated candidate feedback
 
     def set_metrics(self, metrics_dict):
         import json

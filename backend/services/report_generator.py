@@ -86,6 +86,27 @@ def generate_report(
         'eye_contact_pct': eye_contact_pct,
     }
 
+    # Generate AI candidate feedback
+    ai_feedback = None
+    try:
+        from services.llm.chains.candidate_feedback import generate_candidate_feedback
+        transcript_for_ai = [{"speaker": msg.speaker, "text": msg.text} for msg in transcript]
+        scores_for_ai = {
+            "communication": scores.communication,
+            "clarity": scores.clarity,
+            "structure": scores.structure,
+            "relevance": scores.relevance,
+            "overall_score": overall_score
+        }
+        ai_feedback = generate_candidate_feedback(
+            transcript=transcript_for_ai,
+            scores=scores_for_ai,
+            interview_type=interview_type,
+            duration_minutes=duration_minutes
+        )
+    except Exception as e:
+        print(f"⚠️ Failed to generate AI feedback: {e}")
+
     # Create report
     report = InterviewReport(
         id=str(uuid.uuid4()),  # Generate new ID for report (different from session_id)
@@ -101,7 +122,8 @@ def generate_report(
         recommendations=recommendations,
         questions=question_index,
         is_sample=False,
-        metrics=metrics
+        metrics=metrics,
+        ai_feedback=ai_feedback
     )
 
     return report
@@ -137,7 +159,8 @@ def _generate_minimal_report(interview_type: str, duration_minutes: int) -> Inte
         recommendations=["Interview completed. Detailed analysis not available."],
         questions=0,
         is_sample=False,
-        metrics=metrics
+        metrics=metrics,
+        ai_feedback=None
     )
 
 

@@ -654,9 +654,9 @@ async def webrtc_proxy(request: WebRTCRequest):
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.7,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 600,
+                            "threshold": 0.85,
+                            "prefix_padding_ms": 400,
+                            "silence_duration_ms": 1000,
                             "create_response": True,
                             "interrupt_response": False
                         }
@@ -1247,9 +1247,9 @@ Provide only one response per user turn. Never produce multiple responses.
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.7,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 600,
+                            "threshold": 0.85,
+                            "prefix_padding_ms": 400,
+                            "silence_duration_ms": 1000,
                             "create_response": True
                         },
                         "instructions": english_only_instructions
@@ -2615,11 +2615,20 @@ async def get_interview_report(
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
 
-        # If this is not a sample report, require authenticated access and owner match
+        # If this is not a sample report, check access permissions
+        # Allow access if:
+        # 1. It's a sample report
+        # 2. User owns the report
+        # 3. Report was created as "guest" (allows access via UUID as capability token)
         if not report.is_sample:
-            if not user_id:
-                raise HTTPException(status_code=401, detail="Authentication required")
-            if report.user_id != user_id:
+            is_guest_report = report.user_id == "guest"
+            is_owner = user_id and report.user_id == user_id
+            
+            # Allow guest reports to be accessed by anyone with the UUID
+            # (UUID serves as a capability token since it's unguessable)
+            if not is_guest_report and not is_owner:
+                if not user_id:
+                    raise HTTPException(status_code=401, detail="Authentication required")
                 raise HTTPException(status_code=403, detail="Access denied")
 
         # Convert metrics JSON string to dict for API response
@@ -2630,6 +2639,43 @@ async def get_interview_report(
             except Exception:
                 metrics_dict = {}
             report.metrics = metrics_dict
+        
+        # Convert recommendations JSON string to list for API response
+        if hasattr(report, 'recommendations') and report.recommendations:
+            import json
+            try:
+                if isinstance(report.recommendations, str):
+                    report.recommendations = json.loads(report.recommendations)
+            except Exception:
+                report.recommendations = []
+        
+        # Convert scores JSON string to dict for API response
+        if hasattr(report, 'scores') and report.scores:
+            import json
+            try:
+                if isinstance(report.scores, str):
+                    report.scores = json.loads(report.scores)
+            except Exception:
+                report.scores = {}
+        
+        # Convert transcript JSON string to list for API response
+        if hasattr(report, 'transcript') and report.transcript:
+            import json
+            try:
+                if isinstance(report.transcript, str):
+                    report.transcript = json.loads(report.transcript)
+            except Exception:
+                report.transcript = []
+        
+        # Convert ai_feedback JSON string to dict for API response
+        if hasattr(report, 'ai_feedback') and report.ai_feedback:
+            import json
+            try:
+                if isinstance(report.ai_feedback, str):
+                    report.ai_feedback = json.loads(report.ai_feedback)
+            except Exception:
+                report.ai_feedback = None
+        
         return report
 
     except HTTPException:
@@ -2843,7 +2889,8 @@ async def save_interview_transcript(
                     recommendations=json.dumps(report_data.recommendations),
                     questions=report_data.questions,
                     is_sample=False,
-                    metrics=json.dumps(report_data.metrics) if hasattr(report_data, 'metrics') and report_data.metrics is not None else None
+                    metrics=json.dumps(report_data.metrics) if hasattr(report_data, 'metrics') and report_data.metrics is not None else None,
+                    ai_feedback=json.dumps(report_data.ai_feedback) if hasattr(report_data, 'ai_feedback') and report_data.ai_feedback is not None else None
                 )
                 db.add(db_report)
                 db.commit()
