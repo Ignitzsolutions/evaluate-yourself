@@ -15,16 +15,25 @@ def generate_report(
     Generate a comprehensive interview report from session state and evaluations.
     
     Args:
-        session_state: InterviewState instance with all session data
+        session_state: InterviewState instance with all session data (can be None)
         interview_type: Type of interview (behavioral, technical, mixed)
         duration_minutes: Total interview duration in minutes
     
     Returns:
         InterviewReport model instance
     """
-    evaluations = session_state.evaluation_results
-    transcript_history = session_state.transcript_history
-    performance_summary = session_state.get_performance_summary()
+    # Handle missing session_state gracefully
+    if not session_state:
+        return _generate_minimal_report(interview_type, duration_minutes)
+    
+    evaluations = session_state.evaluation_results if hasattr(session_state, 'evaluation_results') else []
+    transcript_history = session_state.transcript_history if hasattr(session_state, 'transcript_history') else []
+    
+    # Handle missing get_performance_summary method
+    if hasattr(session_state, 'get_performance_summary'):
+        performance_summary = session_state.get_performance_summary()
+    else:
+        performance_summary = {"avg_clarity": 0, "avg_depth": 0, "avg_relevance": 0}
     
     # Calculate overall scores
     avg_clarity = performance_summary.get("avg_clarity", 0)
@@ -32,7 +41,7 @@ def generate_report(
     avg_relevance = performance_summary.get("avg_relevance", 0)
     
     # Calculate overall score (0-100)
-    overall_score = int((avg_clarity + avg_depth + avg_relevance) / 3 * 20)
+    overall_score = int((avg_clarity + avg_depth + avg_relevance) / 3 * 20) if (avg_clarity + avg_depth + avg_relevance) > 0 else 50
     
     # Build score breakdown
     scores = ScoreBreakdown(
@@ -60,6 +69,23 @@ def generate_report(
     # Generate recommendations
     recommendations = _generate_recommendations(evaluations, performance_summary, interview_type, session_state)
     
+    # Get question index from session
+    question_index = session_state.question_index if hasattr(session_state, 'question_index') else 0
+    
+    # Compute real metrics
+    total_words = sum(len(msg.text.split()) for msg in transcript)
+    speaking_time = getattr(session_state, 'speaking_time', 0)
+    silence_time = getattr(session_state, 'silence_time', 0)
+    eye_contact_pct = getattr(session_state, 'eye_contact_pct', None)
+    metrics = {
+        'total_duration': duration_minutes,
+        'questions_answered': question_index,
+        'total_words': total_words,
+        'speaking_time': speaking_time,
+        'silence_time': silence_time,
+        'eye_contact_pct': eye_contact_pct,
+    }
+
     # Create report
     report = InterviewReport(
         id=str(uuid.uuid4()),  # Generate new ID for report (different from session_id)
@@ -73,11 +99,46 @@ def generate_report(
         scores=scores,
         transcript=transcript,
         recommendations=recommendations,
-        questions=session_state.question_index,
-        is_sample=False
+        questions=question_index,
+        is_sample=False,
+        metrics=metrics
     )
-    
+
     return report
+
+
+def _generate_minimal_report(interview_type: str, duration_minutes: int) -> InterviewReport:
+    """Generate a minimal report when session_state is not available."""
+    metrics = {
+        'total_duration': duration_minutes,
+        'questions_answered': 0,
+        'total_words': 0,
+        'speaking_time': 0,
+        'silence_time': 0,
+        'eye_contact_pct': None,
+    }
+    return InterviewReport(
+        id=str(uuid.uuid4()),
+        user_id="",
+        title=f"{interview_type.capitalize()} Interview - {datetime.now().strftime('%B %d, %Y')}",
+        date=datetime.now(),
+        type=interview_type.capitalize(),
+        mode="Voice-Only Realtime",
+        duration=f"{duration_minutes} minutes",
+        overall_score=50,
+        scores=ScoreBreakdown(
+            communication=50,
+            clarity=50,
+            structure=50,
+            technical_depth=50 if interview_type in ["technical", "mixed"] else None,
+            relevance=50
+        ),
+        transcript=[],
+        recommendations=["Interview completed. Detailed analysis not available."],
+        questions=0,
+        is_sample=False,
+        metrics=metrics
+    )
 
 
 def _calculate_structure_score(evaluations: List[Dict[str, Any]]) -> int:

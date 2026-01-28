@@ -62,8 +62,7 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Clerk: signOut used for logout; user/isSignedIn available for future display
-  const { user: _user, isSignedIn: _isSignedIn } = useUser();
+  // Clerk: signOut used for logout
   const { signOut } = useClerk();
 
   const handleNavigation = (path) => {

@@ -168,16 +168,42 @@ def _verify_clerk_token_jwks(token: str) -> dict:
         )
 # Helper to extract user ID from Authorization header
 def get_user_id_from_auth(authorization: Optional[str]) -> Optional[str]:
+    """Extract Clerk user id from Authorization header.
+
+    - Returns the Clerk user id string, or None if verification fails.
+    - For local development, if the environment variable `DEV_USER_ID` is set,
+      it will be returned when no valid token is presented (convenience only).
+    """
+    # Dev-time convenience: allow overriding user for local testing
+    dev_user = os.getenv("DEV_USER_ID")
+
     if not authorization:
+        if dev_user:
+            logging.info("DEV_USER_ID active - returning dev user id for unauthenticated request")
+            return dev_user
         return None
+
     try:
         token = authorization.replace("Bearer ", "")
         decoded = verify_clerk_token(token)
+
+        # Defensive: verify_clerk_token may return None on verification failure
+        if not decoded:
+            logging.warning("Clerk token verification failed: token could not be decoded/validated")
+            return None
+
         return decoded.get("sub") or decoded.get("user_id")
+
     except HTTPException:
         return None
     except Exception as e:
-        logging.exception("Unexpected auth error")
+        # Provide a more actionable log message for common causes
+        logging.exception("Unexpected auth error: %s", e)
+        if "iat" in str(e) or "not yet valid" in str(e):
+            logging.warning("Token 'iat' validation failed - check server clock/ntp sync on the backend host")
+        if "public key" in str(e) or "JWKS" in str(e):
+            logging.warning("Failed to fetch/parse Clerk JWKS - verify CLERK_JWKS_URL and CLERK_PUBLISHABLE_KEY env variables")
+        # As a safe default, return None (unauthenticated)
         return None
 
 models.Base.metadata.create_all(bind=engine)
@@ -628,9 +654,9 @@ async def webrtc_proxy(request: WebRTCRequest):
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.6,
+                            "threshold": 0.7,
                             "prefix_padding_ms": 300,
-                            "silence_duration_ms": 1200,
+                            "silence_duration_ms": 600,
                             "create_response": True,
                             "interrupt_response": False
                         }
@@ -1217,13 +1243,13 @@ Provide only one response per user turn. Never produce multiple responses.
                         "voice": "alloy",
                         "audio": {
                             "voice": "alloy",
-                            "speed": 0.6  # Slow, clear speech rate (0.6 = 60% of normal speed - clear and understandable)
+                            "speed": 1.0
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.6,
+                            "threshold": 0.7,
                             "prefix_padding_ms": 300,
-                            "silence_duration_ms": 1200,
+                            "silence_duration_ms": 600,
                             "create_response": True
                         },
                         "instructions": english_only_instructions
@@ -2501,15 +2527,23 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
 # Revised list_interview_reports to use current_user dependency
 @app.get("/api/interview/reports")
 async def list_interview_reports(
-    current_user: User = Depends(get_current_user),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    user_id = current_user.clerk_user_id if current_user else None
+    """List interview reports.
+
+    - If no auth provided: return only sample reports.
+    - If auth provided and valid: return user's reports plus sample reports.
+    """
+    try:
+        user_id = get_user_id_from_auth(authorization)
+    except Exception:
+        user_id = None
 
     # TODO: Replace this with DB-backed InterviewReport later
     user_reports = [
         r for r in interview_reports.values()
-        if r.user_id == user_id or r.is_sample
+        if (user_id and r.user_id == user_id) or r.is_sample
     ]
 
     user_reports.sort(key=lambda x: x.date, reverse=True)
@@ -2581,9 +2615,21 @@ async def get_interview_report(
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
 
-        if not report.is_sample and user_id and report.user_id != user_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # If this is not a sample report, require authenticated access and owner match
+        if not report.is_sample:
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            if report.user_id != user_id:
+                raise HTTPException(status_code=403, detail="Access denied")
 
+        # Convert metrics JSON string to dict for API response
+        if hasattr(report, 'metrics') and report.metrics:
+            import json
+            try:
+                metrics_dict = json.loads(report.metrics)
+            except Exception:
+                metrics_dict = {}
+            report.metrics = metrics_dict
         return report
 
     except HTTPException:
@@ -2618,7 +2664,7 @@ async def get_interview_report(
 #     return {"id": report_id}
 
 # Revised create_interview_report to use database
-@app.post("/api/interview/reports")
+@app.post("/api/interview/reports", status_code=201)
 async def create_interview_report(
     request: CreateInterviewReportRequest,
     authorization: Optional[str] = Header(None),
@@ -2676,10 +2722,15 @@ async def save_interview_transcript(
     """Save interview transcript to file and generate report in database."""
     try:
         transcript = request.get("transcript", [])
-        
+        # Optionally accept other session data (questions, metrics, etc.)
+        questions = request.get("questions", [])
+        metrics = request.get("metrics", {})
+        interview_type = request.get("interview_type", "mixed")
+        duration_minutes = request.get("duration_minutes", 0)
+
         if not transcript:
             return {"message": "No transcript data provided", "session_id": session_id}
-        
+
         # Get user info from auth (optional - can work without auth for testing)
         user_id = None
         try:
@@ -2690,19 +2741,44 @@ async def save_interview_transcript(
         except Exception as auth_err:
             print(f"⚠️ Auth optional for transcript save: {auth_err}")
             user_id = "guest"  # Fallback to guest if no auth
-        
+
         if not user_id:
             user_id = "guest"
-        
-        # Create transcripts directory if it doesn't exist
+
+        # Update or reconstruct the in-memory session state
+        from services.interview_state import InterviewState
+        session_state = interview_sessions.get(session_id)
+        if not session_state:
+            # Reconstruct minimal session state if missing
+            session_state = InterviewState(
+                session_id=session_id,
+                interview_type=interview_type,
+                difficulty="mid",
+                max_questions=len(questions) if questions else 6
+            )
+            interview_sessions[session_id] = session_state
+
+        # Update session state with posted data
+        session_state.transcript_history = []
+        for idx, entry in enumerate(transcript):
+            q = entry.get("question") or entry.get("speaker")
+            a = entry.get("answer") or entry.get("text")
+            session_state.transcript_history.append({
+                "question": q,
+                "answer": a,
+                "question_index": idx,
+                "timestamp": entry.get("timestamp", datetime.now().isoformat())
+            })
+        # Optionally update metrics if provided
+        if metrics:
+            for k, v in metrics.items():
+                setattr(session_state, k, v)
+
+        # Save transcript as before (unchanged)
         transcripts_dir = os.path.join(os.path.dirname(__file__), "transcripts")
         os.makedirs(transcripts_dir, exist_ok=True)
-        
-        # Generate filename with session ID and timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename_base = f"transcript_{session_id}_{timestamp}"
-        
-        # Save as JSON (structured data)
         json_filename = os.path.join(transcripts_dir, f"{filename_base}.json")
         with open(json_filename, 'w', encoding='utf-8') as f:
             json.dump({
@@ -2710,20 +2786,15 @@ async def save_interview_transcript(
                 "timestamp": datetime.now().isoformat(),
                 "transcript": transcript
             }, f, indent=2, ensure_ascii=False)
-        
-        # Save as readable text file
         text_filename = os.path.join(transcripts_dir, f"{filename_base}.txt")
         with open(text_filename, 'w', encoding='utf-8') as f:
             f.write(f"Interview Transcript - Session ID: {session_id}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
-            
             for entry in transcript:
                 speaker = entry.get("speaker", "Unknown")
                 text = entry.get("text", "")
                 timestamp_str = entry.get("timestamp", "")
-                
-                # Format timestamp if it's an ISO string
                 if timestamp_str:
                     try:
                         if isinstance(timestamp_str, str):
@@ -2731,38 +2802,28 @@ async def save_interview_transcript(
                             timestamp_str = dt.strftime('%H:%M:%S')
                     except:
                         pass
-                
                 f.write(f"[{timestamp_str}] {speaker.upper()}:\n")
                 f.write(f"{text}\n\n")
-        
         print(f"✅ Transcript saved for session {session_id}")
         print(f"   JSON: {json_filename}")
         print(f"   Text: {text_filename}")
-        
+
         # Generate and save interview report to database
         try:
-            # Check if report already exists for this session
             existing_report = db.query(models.InterviewReport).filter(
                 models.InterviewReport.session_id == session_id
             ).first()
-            
+            report_id = None
             if not existing_report:
-                # Generate report using the report generator service
                 from services.report_generator import generate_report as generate_interview_report
-                
-                # Convert transcript to format expected by report generator
-                transcript_messages = [
-                    TranscriptMessage(
-                        speaker=entry.get("speaker", "unknown"),
-                        text=entry.get("text", ""),
-                        timestamp=entry.get("timestamp", datetime.now().isoformat())
-                    ) for entry in transcript
-                ]
-                
-                # Generate the report
-                report_data = generate_interview_report(transcript_messages)
-                
-                # Save to database
+                # Use updated session_state for report
+                if session_state.start_time:
+                    duration_minutes = int((datetime.now() - session_state.start_time).total_seconds() / 60)
+                if not interview_type:
+                    interview_type = session_state.interview_type or "mixed"
+                if duration_minutes <= 0:
+                    duration_minutes = 1
+                report_data = generate_interview_report(session_state, interview_type, duration_minutes)
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
@@ -2774,29 +2835,32 @@ async def save_interview_transcript(
                     duration=report_data.duration,
                     overall_score=report_data.overall_score,
                     scores=json.dumps(report_data.scores.dict() if hasattr(report_data.scores, 'dict') else report_data.scores),
-                    transcript=json.dumps([t.dict() if hasattr(t, 'dict') else t for t in transcript_messages]),
+                    transcript=json.dumps([{
+                        "speaker": t.speaker if hasattr(t, 'speaker') else t.get("speaker", "unknown"),
+                        "text": t.text if hasattr(t, 'text') else t.get("text", ""),
+                        "timestamp": (t.timestamp.isoformat() if isinstance(t.timestamp, datetime) else t.timestamp) if hasattr(t, 'timestamp') else t.get("timestamp", "")
+                    } for t in report_data.transcript]),
                     recommendations=json.dumps(report_data.recommendations),
                     questions=report_data.questions,
-                    is_sample=False
+                    is_sample=False,
+                    metrics=json.dumps(report_data.metrics) if hasattr(report_data, 'metrics') and report_data.metrics is not None else None
                 )
-                
                 db.add(db_report)
                 db.commit()
                 db.refresh(db_report)
-                
+                report_id = db_report.id
                 print(f"✅ Report generated and saved to database: {db_report.id}")
             else:
-                print(f"ℹ️ Report already exists for session {session_id}, skipping generation")
-        
+                report_id = existing_report.id
+                print(f"ℹ️ Report already exists for session {session_id}, skipping generation (id={report_id})")
         except Exception as report_err:
             print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")
             import traceback
             traceback.print_exc()
-            # Don't fail the whole request if report generation fails
-        
         return {
             "message": "Transcript saved successfully",
             "session_id": session_id,
+            "report_id": report_id,
             "files": {
                 "json": json_filename,
                 "text": text_filename

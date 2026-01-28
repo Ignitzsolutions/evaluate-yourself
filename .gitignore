@@ -37,3 +37,10 @@ yarn-error.log*
 # Interview transcripts (contains sensitive data)
 backend/transcripts/
 transcripts/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+backend/venv/
+*.db

@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '@clerk/clerk-react';
+import { authFetch } from '../utils/apiClient';
 
 // Support both Create React App (process.env) and Vite (import.meta.env)
 const API_BASE_URL =
@@ -11,6 +13,7 @@ const DEBUG =
   process.env.REACT_APP_REALTIME_DEBUG === 'true';
 
 export default function useRealtimeInterview(sessionId, interviewType = null) {
+  const { getToken, isSignedIn } = useAuth();
   // WebRTC refs
   const pcRef = useRef(null);
   const dcRef = useRef(null);
@@ -42,17 +45,9 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
   const [userTranscript, setUserTranscript] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [questionCount, setQuestionCount] = useState(0);
-  const [reportId, setReportId] = useState(null);
+  const [reportId] = useState(null);
   const [showAudioPrompt, setShowAudioPrompt] = useState(false);
   const [lastError, setLastError] = useState(null);
-
-  // Set reportId to sessionId when hook initializes
-  useEffect(() => {
-    if (sessionId && !reportId) {
-      setReportId(sessionId);
-      console.log('✅ Set reportId to sessionId:', sessionId);
-    }
-  }, [sessionId, reportId]);
 
   // Debug logging helper
   const debugLog = useCallback((eventType, data) => {
@@ -83,38 +78,37 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
 
   // Handle DataChannel messages (Event Contract) - defined before startInterview to avoid use-before-define
   const handleDataChannelMessage = useCallback((msg) => {
-    try {
-      debugLog('Message received', { type: msg.type });
-      
-      // Enhanced logging for transcript-related events
-      if (msg.type && (
-        msg.type.includes('text') || 
-        msg.type.includes('transcription') || 
-        msg.type.includes('response') ||
-        msg.type.includes('conversation')
-      )) {
-        console.log('📝 Transcript event:', msg.type, msg);
-      }
+    debugLog('Message received', { type: msg.type });
+    
+    // Enhanced logging for transcript-related events
+    if (msg.type && (
+      msg.type.includes('text') || 
+      msg.type.includes('transcription') || 
+      msg.type.includes('response') ||
+      msg.type.includes('conversation')
+    )) {
+      console.log('📝 Transcript event:', msg.type, msg);
+    }
 
-      // Session lifecycle events
-      if (msg.type === 'session.created') {
-        debugLog('Session created', { session_id: msg.session?.id });
-      } else if (msg.type === 'session.updated') {
-        debugLog('Session updated', {});
-      } else if (msg.type === 'error') {
-        // Enhanced error logging - show full payload
-        console.error('❌ Error from Azure Realtime API:', msg);
-        console.error('❌ Azure error JSON:', JSON.stringify(msg, null, 2));
-        if (msg.error) {
-          console.error('❌ Azure error.details:', msg.error);
-          console.error('❌ Azure error.message:', msg.error.message);
-          console.error('❌ Azure error.code:', msg.error.code);
-          console.error('❌ Azure error.type:', msg.error.type);
-        }
-        const errorMessage = msg.error?.message || msg.error?.code || 'Unknown error from Azure';
-        setLastError({ type: 'azure_error', error: errorMessage, fullError: msg });
-        setInterviewState(prev => ({ ...prev, status: 'error', error: errorMessage }));
+    // Session lifecycle events
+    if (msg.type === 'session.created') {
+      debugLog('Session created', { session_id: msg.session?.id });
+    } else if (msg.type === 'session.updated') {
+      debugLog('Session updated', {});
+    } else if (msg.type === 'error') {
+      // Enhanced error logging - show full payload
+      console.error('❌ Error from Azure Realtime API:', msg);
+      console.error('❌ Azure error JSON:', JSON.stringify(msg, null, 2));
+      if (msg.error) {
+        console.error('❌ Azure error.details:', msg.error);
+        console.error('❌ Azure error.message:', msg.error.message);
+        console.error('❌ Azure error.code:', msg.error.code);
+        console.error('❌ Azure error.type:', msg.error.type);
       }
+      const errorMessage = msg.error?.message || msg.error?.code || 'Unknown error from Azure';
+      setLastError({ type: 'azure_error', error: errorMessage, fullError: msg });
+      setInterviewState(prev => ({ ...prev, status: 'error', error: errorMessage }));
+    }
     
     // Model output events (Sonia's speech)
     // Handle text-based responses
@@ -153,7 +147,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         setInterviewState(prev => ({ ...prev, aiSpeaking: true }));
       }
     } else if (msg.type === 'response.output_audio_transcript.done') {
-      // Full transcript is available - PRIMARY CAPTURE POINT (ONLY THIS ONE)
+      // Full transcript is available - PRIMARY CAPTURE POINT
       const fullText = msg.transcript || currentQuestion;
       const responseId = msg.response_id;
       const transcriptKey = `${responseId}_${fullText}`;
@@ -173,14 +167,76 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         setInterviewState(prev => ({ ...prev, aiSpeaking: false, status: prev.status === 'connected' || prev.status === 'listening' ? 'listening' : prev.status }));
       }
     } else if (msg.type === 'response.content_part.done') {
-      // DISABLED - Skip to avoid duplicates
-      // Only the audio transcript event above should capture AI responses
+      // Skip - already captured from response.output_audio_transcript.done
+      // Only capture here if we missed it above
+      const transcript = msg.part?.transcript || msg.content?.transcript || msg.transcript;
+      const responseId = msg.response_id;
+      const transcriptKey = `${responseId}_${transcript}`;
+      
+      if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
+        console.log('✅ Adding AI transcript (content_part fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
+        capturedTranscriptsRef.current.add(transcriptKey);
+        const newEntry = {
+          text: transcript,
+          timestamp: new Date().toISOString(),
+          speaker: 'interviewer'
+        };
+        aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
+        setAiTranscript(prev => [...prev, newEntry]);
+      }
     } else if (msg.type === 'conversation.item.done' || msg.type === 'response.output_item.done') {
-      // DISABLED - Skip to avoid duplicates  
-      // Only the audio transcript event above should capture AI responses
+      // Skip - already captured from response.output_audio_transcript.done
+      // Only use as fallback if primary capture missed
+      const item = msg.item || msg;
+      if (item.content && Array.isArray(item.content)) {
+        item.content.forEach(content => {
+          if (content.type === 'output_audio' && content.transcript) {
+            const transcript = content.transcript;
+            const itemId = item.id || msg.item_id;
+            const transcriptKey = `${itemId}_${transcript}`;
+            
+            if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
+              console.log('✅ Adding AI transcript (item.done fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
+              capturedTranscriptsRef.current.add(transcriptKey);
+              const newEntry = {
+                text: transcript,
+                timestamp: new Date().toISOString(),
+                speaker: 'interviewer'
+              };
+              aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
+              setAiTranscript(prev => [...prev, newEntry]);
+            }
+          }
+        });
+      }
     } else if (msg.type === 'response.done') {
-      // DISABLED transcript capture - Only update state
-      // Transcripts are captured from response.output_audio_transcript.done above
+      // Skip - already captured from response.output_audio_transcript.done
+      // Only use as fallback
+      if (msg.response?.output && Array.isArray(msg.response.output)) {
+        msg.response.output.forEach(outputItem => {
+          if (outputItem.content && Array.isArray(outputItem.content)) {
+            outputItem.content.forEach(content => {
+              if (content.type === 'output_audio' && content.transcript) {
+                const transcript = content.transcript;
+                const responseId = msg.response?.id || msg.response_id;
+                const transcriptKey = `${responseId}_${transcript}`;
+                
+                if (transcript && transcript.trim() && !capturedTranscriptsRef.current.has(transcriptKey)) {
+                  console.log('✅ Adding AI transcript (response.done fallback):', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
+                  capturedTranscriptsRef.current.add(transcriptKey);
+                  const newEntry = {
+                    text: transcript,
+                    timestamp: new Date().toISOString(),
+                    speaker: 'interviewer'
+                  };
+                  aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
+                  setAiTranscript(prev => [...prev, newEntry]);
+                }
+              }
+            });
+          }
+        });
+      }
       soniaSpeakingRef.current = false;
       setInterviewState(prev => ({ 
         ...prev, 
@@ -189,7 +245,21 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
       }));
       setQuestionCount(prev => prev + 1);
     } else if (msg.type === 'response.completed') {
-      // Legacy handler - just update state
+      // Legacy handler
+      if (msg.response?.output_text || msg.text || msg.content) {
+        const fullText = msg.response?.output_text || msg.text || msg.content;
+        if (fullText) {
+          console.log('✅ Adding AI transcript (response.completed):', fullText.substring(0, 50) + (fullText.length > 50 ? '...' : ''));
+          const newEntry = {
+            text: fullText,
+            timestamp: new Date().toISOString(),
+            speaker: 'interviewer'
+          };
+          aiTranscriptRef.current = [...aiTranscriptRef.current, newEntry];
+          // Don't update state - internal storage only
+          // setAiTranscript(prev => [...prev, newEntry]);
+        }
+      }
       soniaSpeakingRef.current = false;
       setInterviewState(prev => ({ ...prev, aiSpeaking: false }));
       setQuestionCount(prev => prev + 1);
@@ -320,18 +390,18 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         console.log('🔍 Unhandled transcript-related event:', msg.type, JSON.stringify(msg, null, 2));
       }
     }
-    } catch (handlerError) {
-      console.error('❌ Critical error in handleDataChannelMessage:', handlerError);
-      console.error('❌ Error message:', handlerError.message);
-      console.error('❌ Error stack:', handlerError.stack);
-      console.error('❌ Message that caused error:', msg);
-      setLastError({ type: 'message_handler_error', error: handlerError.message, fullError: handlerError });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- Using refs instead of state deps to avoid infinite recreations
-  }, [debugLog]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- aiTranscript/userTranscript used in closure for transcript logging
+  }, [currentQuestion, debugLog, aiTranscript, userTranscript]);
 
   // Start interview - WebRTC connection
   const startInterview = useCallback(async () => {
+    if (!isSignedIn) {
+      const msg = 'Please sign in to start the interview.';
+      setInterviewState(prev => ({ ...prev, status: 'error', error: msg }));
+      setLastError({ type: 'auth_error', error: msg });
+      return;
+    }
+
     if (startedRef.current || isConnectingRef.current) {
       console.warn('⚠️ Interview already started or connecting');
       return;
@@ -398,35 +468,45 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         isConnectedRef.current = true;
         setInterviewState(prev => ({ ...prev, status: 'connected' }));
         
-        // Note: turn_detection is configured by the backend during WebRTC setup
-        // Azure doesn't allow updating turn_detection via session.update in WebRTC mode
-        // If you need to adjust turn detection, configure it in the backend's session.update
-        // sendEvent({
-        //   type: 'session.update',
-        //   session: {
-        //     type: 'realtime',
-        //     turn_detection: { ... }  // ❌ Not supported in WebRTC session.update
-        //   }
-        // });
+        // SEND SESSION.UPDATE FIRST with turn_detection (working values: 0.7 threshold, 600ms silence)
+        // Include session.type: 'realtime' as required by Azure Realtime API
+        try {
+          sendEvent({
+            type: 'session.update',
+            session: {
+              type: 'realtime',
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.7,
+                silence_duration_ms: 600
+              }
+            }
+          });
+          debugLog('Sent session.update (turn_detection)', {});
+        } catch (err) {
+          console.error('Error sending session.update:', err);
+        }
 
-        // Send response.create ONCE to trigger initial greeting
-        // ✅ REMOVED: modalities belong in session.update, not response.create
-        sendEvent({
-          type: 'response.create',
-          response: {
-            instructions: "You MUST speak ONLY in English. Introduce yourself as Sonia in English: 'Hello, I'm Sonia, and I'll be conducting your interview today.' Then ask the first interview question in English only."
-          }
-        });
+        // SEND RESPONSE.CREATE SECOND (without modalities - they're configured in backend session)
+        try {
+          sendEvent({
+            type: 'response.create',
+            response: {
+              instructions: "You MUST speak ONLY in English. Introduce yourself as Sonia in English: 'Hello, I'm Sonia, and I'll be conducting your interview today.' Then ask the first interview question in English only."
+            }
+          });
+          debugLog('Sent response.create', {});
+        } catch (err) {
+          console.error('Error sending response.create:', err);
+        }
       };
 
       dc.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
           handleDataChannelMessage(msg);
-        } catch (parseError) {
-          console.error('❌ Error parsing DataChannel message:', parseError);
-          console.error('❌ Parse error message:', parseError.message);
-          console.error('❌ Raw data:', e.data);
+        } catch (error) {
+          console.error('Error parsing DataChannel message:', error);
           if (DEBUG) {
             console.log('[Realtime Debug] Raw message:', e.data);
           }
@@ -459,8 +539,9 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         }
       }
 
-      // Step 8: Send to backend for SDP negotiation
-      const resp = await fetch(`${API_BASE_URL}/api/realtime/webrtc`, {
+      // Step 8: Send to backend for SDP negotiation (with Clerk auth)
+      const token = getToken ? await getToken() : null;
+      const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -564,7 +645,7 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         pcRef.current = null;
       }
     }
-  }, [sessionId, interviewType, debugLog, sendEvent, handleDataChannelMessage]);
+  }, [sessionId, interviewType, debugLog, sendEvent, handleDataChannelMessage, getToken, isSignedIn]);
 
   // Helper function to save transcript to backend
   // Uses refs to ensure we always have the latest transcripts
