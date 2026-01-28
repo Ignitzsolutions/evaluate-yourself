@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-// import { useAuth } from "../context/AuthContext";
-import { useUser } from "@clerk/clerk-react";
-import useRealtimeInterview from "../hooks/useRealtimeInterview";
-// Gaze tracking disabled - focusing on core Q&A functionality
-// import { useGazeSocket } from "../hooks/useGazeSocket";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@clerk/clerk-react';
+import { authFetch } from '../utils/apiClient';
 import {
-  Stop,
   ExitToApp,
   Dashboard as DashboardIcon,
-} from "@mui/icons-material";
+  Assessment,
+} from '@mui/icons-material';
 import {
   Dialog,
   DialogTitle,
@@ -19,1157 +17,933 @@ import {
   Typography,
   Avatar,
   Box,
-} from "@mui/material";
-import "../ui.css";
+  CircularProgress,
+} from '@mui/material';
+import '../ui.css';
 
-// Gaze tracking disabled - focusing on core Q&A functionality
-// const GAZE_WS_URL = process.env.REACT_APP_GAZE_WS_URL || process.env.VITE_GAZE_WS_URL || "ws://localhost:8000/ws";
+// Support both Create React App (process.env) and Vite (import.meta.env)
+const API_BASE_URL =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL) ||
+  process.env.REACT_APP_API_URL ||
+  "http://localhost:8000";
 
 export default function InterviewSessionRoom() {
   const params = useParams();
-  // Generate sessionId if not provided - support both route patterns
+  const navigate = useNavigate();
+  const { user } = useUser();
+  const { getToken } = useAuth();
+
+  // Generate sessionId
   const sessionId = useMemo(() => {
     if (params.sessionId) return params.sessionId;
     if (params.type) {
-      // Coming from /interview/:type - generate sessionId
       return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
-    // Fallback - should not happen but handle gracefully
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }, [params.sessionId, params.type]);
-  const typeFromUrl = params.type; // If coming from /interview/:type route
-  const navigate = useNavigate();
-  const { user, isSignedIn: _isSignedIn } = useUser();
 
-  
+  const typeFromUrl = params.type;
+
   // Get interview type from sessionStorage, URL params, or defaults
-  const [interviewType, setInterviewType] = useState(typeFromUrl || "behavioral");
+  const [interviewType, setInterviewType] = useState(typeFromUrl || 'behavioral');
   const [maxQuestions, setMaxQuestions] = useState(6);
-  
-  // Store sessionId in sessionStorage for report page access
+
   useEffect(() => {
-    sessionStorage.setItem('interviewSessionId', sessionId);
-    console.log('✅ Stored sessionId in sessionStorage:', sessionId);
-  }, [sessionId]);
-  
-  useEffect(() => {
-    const config = sessionStorage.getItem("interviewConfig");
+    const config = sessionStorage.getItem('interviewConfig');
     if (config) {
       try {
         const parsed = JSON.parse(config);
-        setInterviewType(parsed.type || typeFromUrl || "behavioral");
+        setInterviewType(parsed.type || typeFromUrl || 'behavioral');
         setMaxQuestions(parsed.duration ? parseInt(parsed.duration) : 6);
       } catch (e) {
-        console.error("Error parsing config:", e);
+        console.error('Error parsing config:', e);
       }
     } else if (typeFromUrl) {
-      // If no config but type in URL, use it
       setInterviewType(typeFromUrl);
     }
   }, [typeFromUrl]);
 
-  // Permission states
-  const [hasVideoPermission, setHasVideoPermission] = useState(false);
-  // eslint-disable-next-line no-unused-vars
-  const [hasAudioPermission, setHasAudioPermission] = useState(false);
-  // isVideoOn and isAudioOn kept for state management but always true when permission granted
-  // eslint-disable-next-line no-unused-vars
-  const [isVideoOn, setIsVideoOn] = useState(false);
-  // eslint-disable-next-line no-unused-vars
-  const [isAudioOn, setIsAudioOn] = useState(false);
+  // WebRTC refs
+  const pcRef = useRef(null);
+  const dcRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const audioElementRef = useRef(null);
+
+  // State
+  const [status, setStatus] = useState('idle');
+  const [micActive, setMicActive] = useState(false);
+  const [aiSpeaking, setAiSpeaking] = useState(false);
+  const [transcript, setTranscript] = useState([]);
+  const [error, setError] = useState(null);
+  const [hasJoined, setHasJoined] = useState(false);
+  const [reportAvailable, setReportAvailable] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportId, setReportId] = useState(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionError, setPermissionError] = useState(null);
-  const [hasJoined, setHasJoined] = useState(false);
-  const [uiError, setUiError] = useState(null);
-  
-  // Stream refs
-  const videoStreamRef = useRef(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  
-  // Get configuration from sessionStorage
-  const [config, setConfig] = useState(null);
-  useEffect(() => {
-    const configStr = sessionStorage.getItem("interviewConfig");
-    if (configStr) {
-      try {
-        setConfig(JSON.parse(configStr));
-      } catch (e) {
-        console.error("Error parsing config:", e);
-      }
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [questionCount, setQuestionCount] = useState(0);
+
+  // Collect all AI and user messages for saving
+  const aiMessagesRef = useRef([]);
+  const userMessagesRef = useRef([]);
+  // Track last AI output item id to associate following conversation items as user replies
+  const lastAIItemRef = useRef(null);
+  // Track last committed input item id (optional)
+  const lastCommittedInputItemRef = useRef(null);
+
+  // Add transcript entry
+  const addTranscript = useCallback((speaker, text) => {
+    setTranscript(prev => [...prev, {
+      speaker,
+      text,
+      timestamp: new Date().toISOString()
+    }]);
+
+    // Also collect for saving
+    if (speaker === 'ai') {
+      aiMessagesRef.current.push({ text, timestamp: new Date().toISOString() });
+    } else if (speaker === 'user') {
+      userMessagesRef.current.push({ text, timestamp: new Date().toISOString() });
     }
   }, []);
 
-  // Interview hook
-  const {
-    interviewState,
-    aiTranscript,
-    userTranscript,
-    currentQuestion,
-    questionCount,
-    reportId,
-    showAudioPrompt,
-    // eslint-disable-next-line no-unused-vars
-    lastError,
-    startInterview,
-    stopInterview,
-    enableAudio,
-  } = useRealtimeInterview(sessionId, interviewType);
-  
-  // Captions visibility (from config)
-  const [captionsVisible, setCaptionsVisible] = useState(true);
-  useEffect(() => {
-    if (config?.captionsEnabled !== undefined) {
-      setCaptionsVisible(config.captionsEnabled);
-    }
-  }, [config]);
-  
-  // Gaze tracking disabled - focusing on core Q&A functionality
-  // const { connected: gazeConnected, connect: connectGaze, disconnect: disconnectGaze, sendFrame, metrics: gazeMetrics } = useGazeSocket(GAZE_WS_URL);
-  // Gaze tracking disabled - focusing on core Q&A functionality
-  // const rollingWindow = 30000; // 30 seconds
-  // 
-  // useEffect(() => {
-  //   if (gazeMetrics?.eyeContact !== undefined) {
-  //     setGazeHistory(prev => {
-  //       const newHistory = [...prev, {
-  //         eyeContact: gazeMetrics.eyeContact,
-  //         timestamp: Date.now()
-  //       }].filter(item => Date.now() - item.timestamp < rollingWindow);
-  //       return newHistory;
-  //     });
-  //   }
-  // }, [gazeMetrics]);
-  // 
-  // const eyeContactPct = useMemo(() => {
-  //   if (gazeHistory.length === 0) return 0;
-  //   const inContact = gazeHistory.filter(g => g.eyeContact).length;
-  //   return Math.round((inContact / gazeHistory.length) * 100);
-  // }, [gazeHistory]);
-  // 
-  // const attentionStatus = useMemo(() => {
-  //   if (gazeHistory.length === 0) return "Unknown";
-  //   const recent = gazeHistory.slice(-10); // Last 10 samples
-  //   const inContact = recent.filter(g => g.eyeContact).length;
-  //   return inContact >= 7 ? "On screen" : "Away";
-  // }, [gazeHistory]);
-  
   // Timer
-  const [timeElapsed, setTimeElapsed] = useState(0);
   useEffect(() => {
     let interval;
-    if (hasJoined && (interviewState.status === 'connected' || interviewState.status === 'listening' || interviewState.status === 'responding')) {
+    if (hasJoined && (status === 'connected' || status === 'ready')) {
       interval = setInterval(() => {
-        setTimeElapsed((prev) => prev + 1);
+        setTimeElapsed(prev => prev + 1);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [hasJoined, interviewState.status]);
-  
-  // Request permissions on "Join Interview" click
-  const handleJoinInterview = async () => {
-    // Guard: prevent multiple calls
-    if (hasJoined || interviewState.status === 'connecting' || interviewState.status === 'connected' || interviewState.status === 'listening' || interviewState.status === 'responding') {
-      console.warn('⚠️ Interview already started or in progress, ignoring duplicate call');
+  }, [hasJoined, status]);
+
+  // Connect to Realtime API (proven logic from RealtimeTestPage)
+  const handleConnect = useCallback(async () => {
+    if (status === 'connecting' || status === 'connected' || status === 'ready') {
       return;
     }
-    
+
+    if (!user) {
+      setError('Please sign in first.');
+      return;
+    }
+
+    setStatus('connecting');
+    setError(null);
+    setTranscript([]);
+    aiMessagesRef.current = [];
+    userMessagesRef.current = [];
+
     try {
-      setHasJoined(true);
-      // The hook will handle permissions internally
-      await startInterview();
-      
-      // Gaze tracking disabled - focusing on core Q&A functionality
-      // connectGaze();
-      
-    } catch (err) {
-      setPermissionError(err);
-      
-      // Check what was denied
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        // Try to get audio only as fallback
-        try {
-          await navigator.mediaDevices.getUserMedia({ audio: true });
-          setHasAudioPermission(true);
-          setIsAudioOn(true);
-          setHasVideoPermission(false);
-          setIsVideoOn(false);
-          setHasJoined(true);
-          await startInterview();
-          setShowPermissionModal(false);
-        } catch (audioErr) {
-          // Both denied - show modal
+      // Step 1: Get user media
+      addTranscript('system', 'Requesting microphone permission...');
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        });
+      } catch (mediaError) {
+        if (mediaError.name === 'NotAllowedError' || mediaError.name === 'PermissionDeniedError') {
+          const errorMsg = 'Microphone permission denied. Please allow microphone access in your browser settings and try again.';
+          setError(errorMsg);
+          addTranscript('system', errorMsg);
+          setStatus('error');
           setShowPermissionModal(true);
+          setPermissionError(mediaError);
+          return;
+        } else if (mediaError.name === 'NotFoundError' || mediaError.name === 'DevicesNotFoundError') {
+          const errorMsg = 'No microphone found. Please connect a microphone and try again.';
+          setError(errorMsg);
+          addTranscript('system', errorMsg);
+          setStatus('error');
+          return;
+        } else {
+          throw mediaError;
         }
-      } else {
-        // Other error (e.g., NotFoundError) - show modal
-        setShowPermissionModal(true);
       }
-    }
-  };
-  
-  // Handle permission modal actions
-  const handleTryAgain = () => {
-    setShowPermissionModal(false);
-    setPermissionError(null);
-    handleJoinInterview();
-  };
-  
-  const handleContinueWithoutVideo = async () => {
-    // Guard: prevent multiple calls
-    if (hasJoined || interviewState.status === 'connecting' || interviewState.status === 'connected' || interviewState.status === 'listening' || interviewState.status === 'responding') {
-      console.warn('⚠️ Interview already started or in progress, ignoring duplicate call');
-      return;
-    }
-    
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      setHasAudioPermission(true);
-      setIsAudioOn(true);
-      setHasVideoPermission(false);
-      setIsVideoOn(false);
-      setHasJoined(true);
-      await startInterview();
-      setShowPermissionModal(false);
+
+      localStreamRef.current = stream;
+      setMicActive(true);
+      addTranscript('system', 'Microphone access granted');
+
+      // Step 2: Create RTCPeerConnection
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+
+      // Track connection state
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        addTranscript('system', `Connection state: ${state}`);
+
+        if (state === 'connected') {
+          setStatus('ready');
+        } else if (state === 'failed' || state === 'disconnected') {
+          setStatus('error');
+          setError(`Connection ${state}`);
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const iceState = pc.iceConnectionState;
+        addTranscript('system', `ICE state: ${iceState}`);
+      };
+
+      // Step 3: Add local audio tracks
+      stream.getAudioTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      // Step 4: Handle remote audio (AI voice)
+      const audioElement = new Audio();
+      audioElementRef.current = audioElement;
+
+      pc.ontrack = async (event) => {
+        console.log('Remote track received', event);
+        audioElement.srcObject = event.streams[0];
+        try {
+          await audioElement.play();
+          addTranscript('system', 'Audio playback started');
+        } catch (err) {
+          console.error('Audio play error:', err);
+          setError(`Audio playback failed: ${err.message}`);
+        }
+      };
+
+      // Step 5: Create DataChannel
+      const dc = pc.createDataChannel('oai-events');
+      dcRef.current = dc;
+
+      dc.onopen = () => {
+        addTranscript('system', 'DataChannel opened');
+        setStatus('connected');
+
+        // Send session.update with turn detection
+        if (dc.readyState === 'open') {
+          try {
+            dc.send(JSON.stringify({
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                audio: {
+                  input: {
+                    turn_detection: {
+                      type: 'server_vad',
+                      threshold: 0.7,
+                      prefix_padding_ms: 300,
+                      silence_duration_ms: 600,
+                      create_response: true,
+                      interrupt_response: false
+                    }
+                  },
+                  output: {
+                    voice: 'alloy'
+                  }
+                }
+              }
+            }));
+            addTranscript('system', 'Sent session.update (audio.input.turn_detection + voice)');
+          } catch (err) {
+            console.error('Error sending session.update:', err);
+          }
+
+          // Send initial response.create (no modalities - configured on session)
+          try {
+            dc.send(JSON.stringify({
+              type: 'response.create',
+              response: {
+                instructions: "You MUST speak ONLY in English. Introduce yourself as Sonia in English: 'Hello, I'm Sonia, and I'll be conducting your interview today.' Then ask the first interview question in English only."
+              }
+            }));
+            addTranscript('system', 'Sent response.create');
+          } catch (err) {
+            console.error('Error sending response.create:', err);
+          }
+        }
+      };
+
+      dc.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          console.log('Message received:', msg.type, msg);
+
+          // Handle messages
+          if (msg.type === 'session.created') {
+            addTranscript('system', 'Azure session created');
+          } else if (msg.type === 'session.updated') {
+            addTranscript('system', 'Session updated');
+          } else if (msg.type === 'error') {
+            // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI
+            const errMsg = msg.error?.message || 'Azure API error';
+            if (errMsg.includes("response.modalities")) {
+              console.warn('Ignored Azure warning:', errMsg);
+            } else {
+              setError(errMsg);
+              addTranscript('system', `Error: ${errMsg}`);
+            }
+          } else if (msg.type === 'response.output_text.delta') {
+            if (msg.delta) {
+              setAiSpeaking(true);
+              setTranscript(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.speaker === 'ai' && !last.final) {
+                  const combined = last.text + msg.delta;
+                  // update aiMessagesRef last entry if exists
+                  if (aiMessagesRef.current.length > 0) {
+                    aiMessagesRef.current[aiMessagesRef.current.length - 1].text = combined;
+                    aiMessagesRef.current[aiMessagesRef.current.length - 1].timestamp = new Date().toISOString();
+                  } else {
+                    aiMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
+                  }
+                  return [...prev.slice(0, -1), { ...last, text: combined }];
+                }
+                const entry = { speaker: 'ai', text: msg.delta, final: false, timestamp: new Date().toISOString() };
+                aiMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
+                return [...prev, entry];
+              });
+            }
+          } else if (msg.type === 'response.output_text.done') {
+            setAiSpeaking(false);
+            setTranscript(prev => {
+              const last = prev[prev.length - 1];
+              if (last && last.speaker === 'ai') {
+                const finalText = msg.text || last.text;
+                // update aiMessagesRef last entry to final
+                if (aiMessagesRef.current.length > 0) {
+                  aiMessagesRef.current[aiMessagesRef.current.length - 1].text = finalText;
+                } else {
+                  aiMessagesRef.current.push({ text: finalText, timestamp: new Date().toISOString() });
+                }
+                return [...prev.slice(0, -1), { ...last, text: finalText, final: true }];
+              }
+              return prev;
+            });
+          } else if (msg.type === 'response.output_item.added') {
+            // Remember the last AI output item id so we can detect the user reply that follows
+            try {
+              const item = msg.item || {};
+              const itemId = item.id || item.item_id || item.itemId || msg.item_id || msg.itemId || null;
+              if (itemId) lastAIItemRef.current = itemId;
+            } catch (e) {
+              console.warn('Failed to capture output item id:', e);
+            }
+          } else if (msg.type === 'response.output_audio_transcript.delta') {
+            // Many SDKs send audio-based transcript events with the partial transcript text
+            const text = msg.delta || msg.transcript || msg.text || msg.transcript_delta || null;
+            if (text) {
+              setAiSpeaking(true);
+              setTranscript(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.speaker === 'ai' && !last.final) {
+                  const combined = last.text + text;
+                  // update aiMessagesRef last entry if exists
+                  if (aiMessagesRef.current.length > 0) {
+                    aiMessagesRef.current[aiMessagesRef.current.length - 1].text = combined;
+                    aiMessagesRef.current[aiMessagesRef.current.length - 1].timestamp = new Date().toISOString();
+                  } else {
+                    aiMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
+                  }
+                  return [...prev.slice(0, -1), { ...last, text: combined }];
+                }
+                const entry = { speaker: 'ai', text: text, final: false, timestamp: new Date().toISOString() };
+                aiMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
+                return [...prev, entry];
+              });
+            }
+          } else if (msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.output_audio_transcript.completed') {
+            setAiSpeaking(false);
+            setTranscript(prev => {
+              const last = prev[prev.length - 1];
+              if (last && last.speaker === 'ai') {
+                const finalText = msg.text || msg.transcript || last.text;
+                if (aiMessagesRef.current.length > 0) {
+                  aiMessagesRef.current[aiMessagesRef.current.length - 1].text = finalText;
+                } else {
+                  aiMessagesRef.current.push({ text: finalText, timestamp: new Date().toISOString() });
+                }
+                return [...prev.slice(0, -1), { ...last, text: finalText, final: true }];
+              }
+              return prev;
+            });
+          } else if (msg.type === 'response.completed') {
+            setAiSpeaking(false);
+            setQuestionCount(prev => prev + 1);
+          }
+
+          // Handle user transcription events (fallbacks + conversation items)
+          else if (msg.type === 'input_audio_transcription.completed' || msg.type === 'input_audio_transcription.done') {
+            const text = msg.text || msg.transcript;
+            if (text) {
+              addTranscript('user', text);
+              setMicActive(false);
+            }
+          } else if (msg.type && msg.type.startsWith('input_audio_transcription') && msg.delta) {
+            // partial transcription while user is speaking
+            const partial = msg.delta || msg.text || msg.transcript;
+            if (partial) {
+              // show partial as 'system' typing indicator or temporary user line
+              setTranscript(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.speaker === 'user' && !last.final) {
+                  // append
+                  const combined = last.text + partial;
+                  // update userMessagesRef
+                  if (userMessagesRef.current.length > 0) {
+                    userMessagesRef.current[userMessagesRef.current.length - 1].text = combined;
+                    userMessagesRef.current[userMessagesRef.current.length - 1].timestamp = new Date().toISOString();
+                  } else {
+                    userMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
+                  }
+                  return [...prev.slice(0, -1), { ...last, text: combined }];
+                }
+                const entry = { speaker: 'user', text: partial, final: false, timestamp: new Date().toISOString() };
+                userMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
+                return [...prev, entry];
+              });
+            }
+          } else if (msg.type === 'conversation.item.added' || msg.type === 'conversation.item.done') {
+            // Some events include user contributions as conversation items
+            const item = msg.item || msg;
+            try {
+              // Extract text robustly from several possible shapes
+              let text = null;
+              if (item.content && Array.isArray(item.content) && item.content.length > 0) {
+                text = item.content.map(c => {
+                  if (typeof c === 'string') return c;
+                  if (c.text) return c.text;
+                  if (c.parts && Array.isArray(c.parts)) return c.parts.map(p => p.text || p).join('');
+                  return null;
+                }).filter(Boolean).join(' ');
+              }
+              if (!text && item.text) text = item.text;
+              if (!text && item.content_text) text = item.content_text;
+
+              // Determine if this conversation item is a user reply by checking role or relation to last AI item
+              const role = item.role || (item.metadata && item.metadata.role) || item.author?.role || null;
+              const prevId = msg.previous_item_id || item.previous_item_id || null;
+              const itemId = item.id || item.item_id || item.itemId || msg.item_id || null;
+
+              const isUserReply = (role && (role === 'user' || role === 'candidate')) || (prevId && lastAIItemRef.current && prevId === lastAIItemRef.current) || (itemId && lastCommittedInputItemRef.current && itemId === lastCommittedInputItemRef.current);
+
+              if (isUserReply && text) {
+                // avoid duplicates
+                const last = transcript[transcript.length - 1];
+                if (!last || last.speaker !== 'user' || last.text !== text) {
+                  addTranscript('user', text);
+                }
+              }
+            } catch (e) {
+              console.warn('Error extracting conversation item text:', e);
+            }
+          } else if (msg.type === 'input_audio_buffer.speech_started') {
+            setMicActive(true);
+            addTranscript('system', 'User started speaking');
+          } else if (msg.type === 'input_audio_buffer.speech_stopped') {
+            setMicActive(false);
+            addTranscript('system', 'User stopped speaking');
+          }
+        } catch (err) {
+          console.error('Error parsing message:', err);
+          addTranscript('system', `Error parsing message: ${err.message}`);
+        }
+      };
+
+      dc.onerror = (err) => {
+        console.error('DataChannel error:', err);
+        setError('DataChannel error occurred');
+      };
+
+      dc.onclose = () => {
+        addTranscript('system', 'DataChannel closed');
+        setStatus('disconnected');
+      };
+
+      // Step 6: Create SDP offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      addTranscript('system', 'SDP offer created');
+
+      // Step 7: Send to backend with Clerk auth
+      addTranscript('system', `Sending SDP offer to backend...`);
+      const token = await getToken();
+      const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sdpOffer: offer.sdp,
+          sessionId: sessionId,
+          interviewType: interviewType || 'mixed',
+          difficulty: 'mid'
+        })
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        let errorMessage = `HTTP ${resp.status} from backend`;
+
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          errorMessage = text || errorMessage;
+        }
+
+        if (resp.status === 404 && !text.includes('Realtime API')) {
+          errorMessage = `Backend route not found (404). Check if server is running and route exists.`;
+        }
+
+        addTranscript('system', `Backend error: ${errorMessage}`);
+        throw new Error(errorMessage);
+      }
+
+      const data = await resp.json();
+      if (!data.sdpAnswer) {
+        throw new Error('No SDP answer in response');
+      }
+
+      addTranscript('system', 'SDP answer received from backend');
+
+      await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
+      addTranscript('system', 'Remote description set, connection establishing...');
+
     } catch (err) {
-      setShowPermissionModal(true);
-    }
-  };
-  
-  const handleUseTextInstead = () => {
-    // Guard: prevent multiple calls
-    if (hasJoined || interviewState.status === 'connecting' || interviewState.status === 'connected' || interviewState.status === 'listening' || interviewState.status === 'responding') {
-      console.warn('⚠️ Interview already started or in progress, ignoring duplicate call');
-      return;
-    }
-    
-    setHasJoined(true);
-    startInterview();
-    setShowPermissionModal(false);
-    // TODO: Implement text mode
-  };
-  
-  // Mic and camera toggles removed - always enabled
-  // Toggle mic - disabled (always on)
-  // const handleToggleMic = () => {
-  //   // No-op - mic always enabled
-  // };
-  
-  // Toggle camera - disabled (always on)
-  // const handleToggleCamera = () => {
-  //   // No-op - camera always enabled when permission granted
-  // };
-  
-  // Gaze tracking disabled - focusing on core Q&A functionality
-  // Send frames for gaze tracking
-  // useEffect(() => {
-  //   if (!isVideoOn || !gazeConnected || !videoRef.current) return;
-  //   
-  //   let raf = 0;
-  //   let last = 0;
-  //   const fps = 8;
-  //   const interval = 1000 / fps;
-  //   
-  //   const loop = (t) => {
-  //     raf = requestAnimationFrame(loop);
-  //     if (t - last < interval) return;
-  //     last = t;
-  //     
-  //     const video = videoRef.current;
-  //     const canvas = canvasRef.current;
-  //     if (!video || !canvas) return;
-  //     
-  //     const ctx = canvas.getContext("2d");
-  //     const W = 320;
-  //     const H = 240;
-  //     canvas.width = W;
-  //     canvas.height = H;
-  //     ctx.drawImage(video, 0, 0, W, H);
-  //     const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
-  //     sendFrame(dataUrl);
-  //   };
-  //   
-  //   raf = requestAnimationFrame(loop);
-  //   return () => cancelAnimationFrame(raf);
-  // }, [isVideoOn, gazeConnected, sendFrame]);
-  
-  // Auto-start removed - interview starts explicitly via startInterview() call
-  
-  // Gaze tracking disabled - focusing on core Q&A functionality
-  // Send gaze metrics when user transcript updates (answer completed)
-  // const lastTranscriptLengthRef = useRef(0);
-  // useEffect(() => {
-  //   if (userTranscript.length > lastTranscriptLengthRef.current && gazeHistory.length > 0 && sendGazeMetrics) {
-  //     // New answer completed - calculate metrics for the period since last answer
-  //     const recentGaze = gazeHistory.slice(-30); // Last 30 samples (roughly last answer period)
-  //     const awayEvents = recentGaze.filter((g, idx) => 
-  //       idx > 0 && !g.eyeContact && recentGaze[idx - 1].eyeContact
-  //     ).length;
-  //     
-  //     const awayDurations = [];
-  //     let currentAwayStart = null;
-  //     recentGaze.forEach((g) => {
-  //       if (!g.eyeContact && currentAwayStart === null) {
-  //         currentAwayStart = g.timestamp;
-  //       } else if (g.eyeContact && currentAwayStart !== null) {
-  //         awayDurations.push(g.timestamp - currentAwayStart);
-  //         currentAwayStart = null;
-  //       }
-  //     });
-  //     // Handle case where away period extends to end
-  //     if (currentAwayStart !== null && recentGaze.length > 0) {
-  //       awayDurations.push(Date.now() - currentAwayStart);
-  //     }
-  //     const longestAwayDuration = awayDurations.length > 0 ? Math.max(...awayDurations) : 0;
-  //     
-  //     const avgEyeContact = recentGaze.length > 0
-  //       ? Math.round((recentGaze.filter(g => g.eyeContact).length / recentGaze.length) * 100)
-  //       : 0;
-  //     
-  //     // Send to backend
-  //     sendGazeMetrics({
-  //       eyeContactPct: avgEyeContact,
-  //       awayEvents: awayEvents,
-  //       longestAwayDuration: longestAwayDuration
-  //     });
-  //     
-  //     lastTranscriptLengthRef.current = userTranscript.length;
-  //   }
-  // }, [userTranscript.length, gazeHistory, sendGazeMetrics]);
-  
-  // Don't auto-navigate - let user click "End Interview" button
-  // The reportId is set for tracking purposes but navigation is manual
-  
-  // Cleanup on unmount
-  useEffect(() => {
-    const videoStream = videoStreamRef.current;
-    return () => {
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
+      console.error('Connection error:', err);
+      setStatus('error');
+
+      let errorMessage = err.message || 'Connection failed';
+      if (err.message && err.message.includes('Permission denied')) {
+        errorMessage = 'Microphone permission denied. Please allow microphone access in your browser settings and try again.';
+      } else if (err.message && err.message.includes('NotAllowedError')) {
+        errorMessage = 'Microphone access was denied. Please check your browser permissions and try again.';
+      } else if (err.message && err.message.includes('NotFoundError')) {
+        errorMessage = 'No microphone found. Please connect a microphone and try again.';
       }
-      // Gaze tracking disabled - focusing on core Q&A functionality
-      // disconnectGaze();
-      stopInterview();
-    };
-  }, [stopInterview]);
-  
+
+      setError(errorMessage);
+      addTranscript('system', `Error: ${errorMessage}`);
+
+      // Cleanup on error
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+    }
+  }, [status, addTranscript, getToken, user, sessionId, interviewType]);
+
+  // Save transcript and generate report
+  const saveAndGenerateReport = useCallback(async () => {
+    try {
+      // Combine transcripts
+      const combined = [
+        ...aiMessagesRef.current.map(t => ({
+          speaker: 'interviewer',
+          text: t.text,
+          timestamp: t.timestamp
+        })),
+        ...userMessagesRef.current.map(t => ({
+          speaker: 'candidate',
+          text: t.text,
+          timestamp: t.timestamp
+        }))
+      ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+      // Save transcript
+      const saveResp = await fetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: combined })
+      });
+
+      if (!saveResp.ok) {
+        console.error('Failed to save transcript');
+        const errText = await saveResp.text().catch(() => null);
+        return { ok: false, error: errText };
+      }
+
+      const data = await saveResp.json().catch(() => ({}));
+      console.log('✅ Transcript saved - interview data preserved', data);
+      return data; 
+    } catch (err) {
+      console.error('Error saving/generating report:', err);
+    }
+  }, [sessionId]);
+
+  // Disconnect
+  const handleDisconnect = useCallback(async () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    if (dcRef.current) {
+      dcRef.current.close();
+      dcRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.srcObject = null;
+      audioElementRef.current = null;
+    }
+    setStatus('idle');
+    setMicActive(false);
+    setAiSpeaking(false);
+    setError(null);
+
+    // Show Report button immediately and start report generation
+    setReportAvailable(true);
+    setReportLoading(true);
+    try {
+      const resp = await saveAndGenerateReport();
+      if (resp && resp.report_id) {
+        setReportId(resp.report_id);
+      }
+    } catch (e) {
+      console.error('Error saving/generating report:', e);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [saveAndGenerateReport]);
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-  
-  const getUserInitials = () => {
-    if (user?.username) {
-      return user.username.substring(0, 2).toUpperCase();
-    }
-    return "U";
-  };
-  
-  const handleEndInterview = async () => {
-    // Stop the interview and save transcript
-    await stopInterview();
-    
-    // Navigate to report page with sessionId
-    if (sessionId) {
-      navigate(`/report/${sessionId}`);
-    } else {
-      // Fallback to dashboard if no sessionId
-      navigate("/dashboard");
-    }
-  };
-  
-  // Mic and camera toggles (now functional)
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
-  
-  const handleToggleMic = () => {
-    // TODO: Implement mic mute/unmute via WebRTC
-    setMicEnabled(!micEnabled);
-  };
-  
-  const handleToggleCamera = () => {
-    setCameraEnabled(!cameraEnabled);
-  };
-  
-  // Combine transcripts for display
-  const conversationThread = useMemo(() => {
-    const thread = [];
-    const maxLen = Math.max(aiTranscript.length, userTranscript.length);
-    
-    for (let i = 0; i < maxLen; i++) {
-      // Ensure text is always string
-      if (aiTranscript[i] && typeof aiTranscript[i].text === 'string') {
-        thread.push({
-          speaker: "ai",
-          text: aiTranscript[i].text,
-          timestamp: aiTranscript[i].timestamp,
-        });
-      }
-      if (userTranscript[i] && typeof userTranscript[i].text === 'string') {
-        thread.push({
-          speaker: "user",
-          text: userTranscript[i].text,
-          timestamp: userTranscript[i].timestamp,
-        });
-      }
-    }
-    
-    // Add current question if being spoken (ensure it's a string)
-    if (currentQuestion && typeof currentQuestion === 'string') {
-      thread.push({
-        speaker: "ai",
-        text: currentQuestion,
-        timestamp: new Date(),
-      });
-    }
-    
-    return thread;
-  }, [aiTranscript, userTranscript, currentQuestion]);
 
-  // Log conversation thread updates
-  useEffect(() => {
-    console.log('💬 Conversation thread updated:', {
-      length: conversationThread.length,
-      items: conversationThread.map(m => ({
-        speaker: m.speaker,
-        text: m.text?.substring(0, 50) + (m.text?.length > 50 ? '...' : ''),
-        timestamp: m.timestamp
-      }))
-    });
-  }, [conversationThread]);
-  
+  if (!user) {
+    return (
+      <Box sx={{ p: 4 }}>
+        <Typography variant="h6">Please sign in to access the interview.</Typography>
+      </Box>
+    );
+  }
+
   return (
     <div
       style={{
-        height: "100vh",
-        width: "100vw",
-        background: "#ffffff",
-        display: "flex",
-        flexDirection: "column",
+        height: '100vh',
+        width: '100vw',
+        background: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
         fontFamily: 'Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        overflow: "hidden",
+        overflow: 'hidden',
       }}
     >
       {/* Top Bar */}
       <div
         style={{
-          height: "60px",
-          borderBottom: "1px solid #e0e0e0",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 24px",
-          background: "#fafafa",
+          height: '60px',
+          borderBottom: '1px solid #e0e0e0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 24px',
+          background: '#fafafa',
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <Typography style={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>
-            {config?.role ? `${config.role} Interview` : 'Evaluate Yourself'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <Typography style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>
+            Interview Session
           </Typography>
-          {config?.company && (
-            <span style={{ fontSize: "14px", color: "#6b7280" }}>
-              @ {config.company}
-            </span>
-          )}
-          <span style={{ fontSize: "14px", color: "#6b7280", textTransform: "capitalize" }}>
+          <span style={{ fontSize: '14px', color: '#6b7280', textTransform: 'capitalize' }}>
             {interviewType}
           </span>
         </div>
-        
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <span style={{ fontSize: "14px", color: "#374151" }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <span style={{ fontSize: '14px', color: '#374151' }}>
             {formatTime(timeElapsed)}
           </span>
-          <span style={{ fontSize: "14px", color: "#6b7280" }}>
+          <span style={{ fontSize: '14px', color: '#6b7280' }}>
             Q{questionCount} / {maxQuestions}
           </span>
-          <span style={{ 
-            fontSize: "12px", 
-            color: interviewState.status === 'connected' || interviewState.status === 'listening' ? "#4ade80" : "#9ca3af",
-            display: "flex",
-            alignItems: "center",
-            gap: "4px"
-          }}>
-            <span style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              background: interviewState.status === 'connected' || interviewState.status === 'listening' ? "#4ade80" : "#9ca3af"
-            }} />
-            {interviewState.status === 'connected' || interviewState.status === 'listening' ? 'Connected' : interviewState.status}
-          </span>
-        </div>
-        
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button
-            onClick={() => navigate("/dashboard")}
+          <span
             style={{
-              background: "transparent",
-              border: "1px solid #e0e0e0",
-              borderRadius: "6px",
-              padding: "6px 12px",
-              fontSize: "14px",
-              color: "#374151",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
+              fontSize: '12px',
+              color: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
             }}
           >
-            <DashboardIcon style={{ fontSize: "16px" }} />
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af'
+              }}
+            />
+            {status}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {reportAvailable && sessionId && (
+            <button
+              onClick={() => navigate(reportId ? `/report/${reportId}` : `/report/${sessionId}`)}
+              style={{
+                background: 'transparent',
+                border: '1px solid #e0e0e0',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                fontSize: '14px',
+                color: '#374151',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <Assessment style={{ fontSize: '16px' }} />
+              {reportLoading ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Generating...</span>
+                  <CircularProgress size={16} />
+                </span>
+              ) : (
+                'Report'
+              )}
+            </button>
+          )}
+
+          <button
+            onClick={() => navigate('/dashboard')}
+            style={{
+              background: 'transparent',
+              border: '1px solid #e0e0e0',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              fontSize: '14px',
+              color: '#374151',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <DashboardIcon style={{ fontSize: '16px' }} />
             Dashboard
           </button>
           <button
-            onClick={() => navigate("/dashboard")}
+            onClick={() => navigate('/')}
             style={{
-              background: "transparent",
-              border: "1px solid #e0e0e0",
-              borderRadius: "6px",
-              padding: "6px 12px",
-              fontSize: "14px",
-              color: "#374151",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
+              background: 'transparent',
+              border: '1px solid #e0e0e0',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              fontSize: '14px',
+              color: '#374151',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
             }}
           >
-            <ExitToApp style={{ fontSize: "16px" }} />
+            <ExitToApp style={{ fontSize: '16px' }} />
             Exit
           </button>
         </div>
       </div>
-      
-      {/* Audio Prompt Banner */}
-      {showAudioPrompt && (
-        <div
-          style={{
-            background: "#fff3cd",
-            borderBottom: "1px solid #ffc107",
-            padding: "12px 24px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span style={{ fontSize: "14px", color: "#856404" }}>
-            Click to enable audio playback
-          </span>
-          <button
-            onClick={enableAudio}
-            style={{
-              background: "#ffc107",
-              color: "#000",
-              border: "none",
-              borderRadius: "4px",
-              padding: "6px 12px",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Enable Audio
-          </button>
-        </div>
-      )}
 
-      {/* Main Content Area */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "row", overflow: "hidden" }}>
-        {/* Video Tiles Grid */}
-        <div
-          style={{
-            flex: captionsVisible ? "0 0 70%" : 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "24px",
-              padding: "24px",
-              minHeight: 0,
-            }}
-          >
-          {/* User Video Tile (Left) */}
-          <div
-            style={{
-              border: "1px solid #e0e0e0",
-              borderRadius: "8px",
-              background: "#fafafa",
-              display: "flex",
-              flexDirection: "column",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                padding: "16px",
-                borderBottom: "1px solid #e0e0e0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <Typography style={{ fontSize: "14px", fontWeight: 600, color: "#111827" }}>
-                You
-              </Typography>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: interviewState.micActive ? "#4ade80" : "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                  }}
-                >
-                  {interviewState.micActive ? "Speaking..." : micEnabled ? "Mic On" : "Muted"}
-                </span>
-                {interviewState.aiSpeaking && (
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "#3b82f6",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "6px",
-                        height: "6px",
-                        borderRadius: "50%",
-                        background: "#3b82f6",
-                        animation: "pulse 2s infinite",
-                      }}
-                    />
-                    Sonia speaking
-                  </span>
-                )}
+      {/* Main Content - Two Panel Layout */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', padding: '24px', gap: '24px', minHeight: 0 }}>
+        {/* Left Panel: Video Tiles */}
+        <div style={{ flex: '0 0 60%', display: 'flex', flexDirection: 'column', gap: '24px', minHeight: 0 }}>
+          {/* Video Tiles Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
+            {/* User Tile */}
+            <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', background: '#fafafa', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>You</Typography>
+                <span style={{ fontSize: '12px', color: micActive ? '#4ade80' : '#9ca3af' }}>{micActive ? '🎤 Mic On' : '🔇 Mic Off'}</span>
+              </div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                  <Avatar style={{ width: '80px', height: '80px', background: '#e0e0e0', color: '#6b7280', fontSize: '32px', fontWeight: 600 }}>U</Avatar>
+                  <Typography style={{ fontSize: '14px', color: '#6b7280' }}>Camera off</Typography>
+                </div>
               </div>
             </div>
-            
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-              {hasVideoPermission && videoStreamRef.current ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
-                />
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
-                  <Avatar
-                    style={{
-                      width: "80px",
-                      height: "80px",
-                      background: "#e0e0e0",
-                      color: "#6b7280",
-                      fontSize: "32px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {getUserInitials()}
-                  </Avatar>
-                  <Typography style={{ fontSize: "14px", color: "#6b7280" }}>
-                    Camera off
-                  </Typography>
+
+            {/* Sonia Tile */}
+            <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', background: '#fafafa', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>Sonia</Typography>
+                  <span style={{ fontSize: '11px', background: '#4ade80', color: '#ffffff', padding: '2px 8px', borderRadius: '12px' }}>Live</span>
                 </div>
+                {aiSpeaking && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80', animation: 'pulse 2s infinite' }} />}
+              </div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', padding: '40px 20px' }}>
+                <div style={{ width: '120px', height: '120px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '48px' }}>
+                  👤
+                </div>
+                <Typography style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center' }}>
+                  {aiSpeaking ? 'Sonia is speaking...' : 'Ready to interview'}
+                </Typography>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          {!hasJoined ? (
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center', paddingTop: '16px' }}>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  setHasJoined(true);
+                  // hide previous report until this interview ends
+                  setReportAvailable(false);
+                  handleConnect();
+                }}
+                disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
+                sx={{ minWidth: '160px', borderRadius: '6px', backgroundColor: '#ff6b35', '&:hover': { backgroundColor: '#ff5722' }, fontSize: '16px', fontWeight: 600, padding: '10px 24px' }}
+              >
+                Join Interview
+              </Button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', paddingTop: '16px' }}>
+              <Button
+                variant="contained"
+                color="error"
+                onClick={handleDisconnect}
+                disabled={status === 'idle' || status === 'disconnected'}
+                sx={{ minWidth: '140px', borderRadius: '6px', color: '#ffffff', backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' } }}
+              >
+                End Call
+              </Button>
+              
+              {micActive && (
+                <Typography style={{ fontSize: '13px', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  🎤 Listening
+                </Typography>
               )}
               
-              {/* Gaze tracking disabled - focusing on core Q&A functionality */}
-              {/* Gaze Metrics Widget */}
-              {/* {hasVideoPermission && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "16px",
-                    left: "16px",
-                    background: "#ffffff",
-                    border: "1px solid #e0e0e0",
-                    borderRadius: "6px",
-                    padding: "8px 12px",
-                    fontSize: "12px",
-                    color: "#374151",
-                  }}
-                >
-                  <div>Eye Contact: {eyeContactPct}%</div>
-                  <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
-                    Status: {attentionStatus}
-                  </div>
-                </div>
-              )} */}
-            </div>
-            
-            <canvas ref={canvasRef} style={{ display: "none" }} />
-          </div>
-          
-          {/* AI Interviewer Tile (Right) */}
-          <div
-            style={{
-              border: "1px solid #e0e0e0",
-              borderRadius: "8px",
-              background: "#fafafa",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <div
-              style={{
-                padding: "16px",
-                borderBottom: "1px solid #e0e0e0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Typography style={{ fontSize: "14px", fontWeight: 600, color: "#111827" }}>
-                Sonia (Interviewer)
-              </Typography>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    background: "#4ade80",
-                    color: "#ffffff",
-                    padding: "2px 8px",
-                    borderRadius: "12px",
-                  }}
-                >
-                  Live
-                </span>
-              </div>
-              {currentQuestion && (
-                <div
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    background: "#4ade80",
-                    animation: "pulse 2s infinite",
-                  }}
-                />
+              {aiSpeaking && (
+                <Typography style={{ fontSize: '13px', color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  🔊 Speaking
+                </Typography>
               )}
+              
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: '#6b7280' }}>Status:</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', color: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af' }} />
+                  {status}
+                </span>
+              </span>
             </div>
-            
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexDirection: "column",
-                gap: "16px",
-                padding: "40px",
-              }}
-            >
-              <div
-                style={{
-                  width: "120px",
-                  height: "120px",
-                  borderRadius: "50%",
-                  background: "#f3f4f6",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Typography style={{ fontSize: "48px" }}>👤</Typography>
-              </div>
-              <Typography
-                style={{
-                  fontSize: "13px",
-                  color: "#6b7280",
-                  textAlign: "center",
-                  maxWidth: "300px",
-                }}
-              >
-                Ask to repeat or rephrase anytime.
-              </Typography>
-            </div>
-          </div>
-          </div>
+          )}
         </div>
-        
-        {/* Captions Panel (Right Side, Collapsible) */}
-        {captionsVisible && (
-          <div
-            style={{
-              flex: "0 0 30%",
-              borderLeft: "1px solid #e0e0e0",
-              display: "flex",
-              flexDirection: "column",
-              background: "#ffffff",
-            }}
-          >
-            <div
-              style={{
-                padding: "12px 16px",
-                borderBottom: "1px solid #e0e0e0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                background: "#fafafa",
-              }}
-            >
-              <Typography style={{ fontSize: "14px", fontWeight: 600, color: "#111827" }}>
-                Live Transcript
-              </Typography>
+
+        {/* Right Panel: Transcript */}
+        <div style={{ flex: '0 0 40%', border: '1px solid #e0e0e0', borderRadius: '8px', display: 'flex', flexDirection: 'column', background: '#ffffff', minHeight: 0 }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', background: '#fafafa', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>Live Transcript</Typography>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button
-                onClick={() => setCaptionsVisible(false)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  fontSize: "12px",
-                  color: "#6b7280",
-                  cursor: "pointer",
+                onClick={() => {
+                  const lines = transcript.filter(m => m.speaker !== 'system').map(m => `${m.speaker === 'user' ? 'You' : 'Sonia'}: ${m.text}`);
+                  navigator.clipboard.writeText(lines.join('\n'))
+                    .then(() => { addTranscript('system', 'Transcript copied to clipboard'); })
+                    .catch(() => { addTranscript('system', 'Failed to copy transcript'); });
                 }}
+                style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '13px' }}
               >
-                Hide
+                Copy
               </button>
             </div>
-            <div
-              style={{
-                flex: 1,
-                padding: "16px",
-                overflowY: "auto",
-                background: "#ffffff",
-              }}
-            >
-          {conversationThread.length === 0 ? (
-            <Typography style={{ fontSize: "14px", color: "#9ca3af", textAlign: "center" }}>
-              Conversation will appear here...
-            </Typography>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {conversationThread.map((msg, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: "flex",
-                    justifyContent: msg.speaker === "ai" ? "flex-start" : "flex-end",
-                  }}
-                >
+          </div>
+          <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {transcript.filter(m => m.speaker !== 'system').length === 0 ? (
+              <Typography style={{ fontSize: '14px', color: '#9ca3af', textAlign: 'center', fontStyle: 'italic', marginTop: '20px' }}>
+                Conversation will appear here...
+              </Typography>
+            ) : (
+              transcript.filter(m => m.speaker !== 'system').map((msg, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: msg.speaker === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div
                     style={{
-                      maxWidth: "70%",
-                      padding: "10px 14px",
-                      borderRadius: "8px",
-                      background: msg.speaker === "ai" ? "#f5f5f5" : "#ffffff",
-                      border: msg.speaker === "user" ? "1px solid #e0e0e0" : "none",
-                      fontSize: "14px",
-                      color: "#111827",
+                      maxWidth: '85%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: msg.speaker === 'ai' ? '#f5f5f5' : msg.speaker === 'user' ? '#e3f2fd' : '#ffffff',
+                      border: msg.speaker === 'user' ? '1px solid #e0e0e0' : msg.speaker === 'ai' ? '1px solid #e0e0e0' : 'none',
+                      fontSize: '14px',
+                      color: '#111827'
                     }}
                   >
-                    <div>{typeof msg.text === 'string' ? msg.text : String(msg.text || '')}</div>
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "#9ca3af",
-                        marginTop: "4px",
-                      }}
-                    >
-                      {new Date(msg.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                    {msg.speaker === 'user' && <div style={{ fontSize: '12px', fontWeight: 600, color: '#1976d2', marginBottom: '4px' }}>You</div>}
+                    {msg.speaker === 'ai' && <div style={{ fontSize: '12px', fontWeight: 600, color: '#666', marginBottom: '4px' }}>Sonia</div>}
+                    <div>{msg.text}</div>
+                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-            </div>
-          </div>
-        )}
-        
-        {/* Show Captions Button (when hidden) */}
-        {!captionsVisible && (
-          <button
-            onClick={() => setCaptionsVisible(true)}
-            style={{
-              position: "absolute",
-              right: "16px",
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "#ffffff",
-              border: "1px solid #e0e0e0",
-              borderRadius: "6px",
-              padding: "8px 12px",
-              fontSize: "12px",
-              color: "#374151",
-              cursor: "pointer",
-              boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-            }}
-          >
-            Show Captions
-          </button>
-        )}
-      </div>
-      
-      {/* Bottom Controls */}
-      <div
-        style={{
-          height: "80px",
-          borderTop: "1px solid #e0e0e0",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "16px",
-          background: "#fafafa",
-          padding: "0 24px",
-        }}
-      >
-        {!hasJoined ? (
-          <button
-            onClick={handleJoinInterview}
-            disabled={interviewState.status === 'connecting' || interviewState.status === 'connected' || interviewState.status === 'listening' || interviewState.status === 'responding'}
-            style={{
-              background: interviewState.status === 'connecting' ? "#9ca3af" : "rgb(251,101,30)",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              padding: "12px 24px",
-              fontSize: "15px",
-              fontWeight: 600,
-              cursor: interviewState.status === 'connecting' ? "not-allowed" : "pointer",
-              opacity: interviewState.status === 'connecting' ? 0.6 : 1,
-            }}
-          >
-            {interviewState.status === 'connecting' ? 'Connecting...' : 'Join Interview'}
-          </button>
-        ) : (
-          <>
-            {/* Control Buttons */}
-            <button
-              onClick={handleToggleMic}
-              style={{
-                background: micEnabled ? "#ffffff" : "#fef2f2",
-                border: `1px solid ${micEnabled ? "#e0e0e0" : "#fecaca"}`,
-                borderRadius: "50%",
-                width: "48px",
-                height: "48px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: micEnabled ? "#374151" : "#dc2626",
-              }}
-              title={micEnabled ? "Mute microphone" : "Unmute microphone"}
-            >
-              🎤
-            </button>
-            
-            <button
-              onClick={handleToggleCamera}
-              style={{
-                background: cameraEnabled ? "#ffffff" : "#f3f4f6",
-                border: "1px solid #e0e0e0",
-                borderRadius: "50%",
-                width: "48px",
-                height: "48px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: cameraEnabled ? "#374151" : "#9ca3af",
-              }}
-              title={cameraEnabled ? "Turn off camera" : "Turn on camera"}
-            >
-              📹
-            </button>
-            
-            <button
-              onClick={() => setCaptionsVisible(!captionsVisible)}
-              style={{
-                background: captionsVisible ? "#ffffff" : "#f3f4f6",
-                border: "1px solid #e0e0e0",
-                borderRadius: "50%",
-                width: "48px",
-                height: "48px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: captionsVisible ? "#374151" : "#9ca3af",
-              }}
-              title={captionsVisible ? "Hide captions" : "Show captions"}
-            >
-              📝
-            </button>
-            
-            <div style={{ width: "1px", height: "32px", background: "#e0e0e0", margin: "0 8px" }} />
-            
-            <button
-              onClick={handleEndInterview}
-              style={{
-                background: "#dc2626",
-                border: "none",
-                borderRadius: "6px",
-                padding: "10px 20px",
-                fontSize: "14px",
-                color: "#ffffff",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                fontWeight: 600,
-              }}
-            >
-              <Stop style={{ fontSize: "16px" }} />
-              End Call
-            </button>
-            
-            <div
-              style={{
-                marginLeft: "auto",
-                fontSize: "12px",
-                color: "#6b7280",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              {interviewState.status === 'connecting' && 'Connecting...'}
-              {interviewState.status === 'connected' && 'Connected'}
-              {interviewState.status === 'listening' && (
-                <>
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      background: interviewState.micActive ? "#4ade80" : "#9ca3af",
-                    }}
-                  />
-                  {interviewState.micActive ? "Listening..." : "Ready"}
-                  {interviewState.micActive && <span style={{ marginLeft: "8px", fontSize: "11px", color: "#6b7280" }}>Mic: Live</span>}
-                </>
-              )}
-              {interviewState.status === 'responding' && (
-                <>
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      background: "#3b82f6",
-                    }}
-                  />
-                  AI Speaking...
-                </>
-              )}
-              {interviewState.status === 'error' && `Error: ${interviewState.error || 'Connection error'}`}
-              {interviewState.status === 'idle' && !hasJoined && 'Not connected'}
-              {interviewState.status === 'closed' && 'Interview ended'}
-            </div>
-          </>
-        )}
-      </div>
-      
-      {/* Permission Denial Modal */}
-      <Dialog 
-        open={showPermissionModal} 
-        onClose={() => setShowPermissionModal(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ fontSize: "18px", fontWeight: 600, color: "#111827" }}>
-          Camera and microphone access
-        </DialogTitle>
-        <DialogContent>
-          <Typography sx={{ color: "#374151", lineHeight: 1.6 }}>
-            To run a real interview simulation, we need access to your camera and microphone.
-            {permissionError && (
-              <Box sx={{ mt: 2, p: 2, background: "#fef2f2", borderRadius: 1 }}>
-                <Typography variant="caption" sx={{ color: "#991b1b" }}>
-                  Error: {permissionError.message || permissionError.name}
-                </Typography>
-              </Box>
+              ))
             )}
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ padding: "16px 24px", gap: 1 }}>
-          <Button 
-            onClick={handleTryAgain}
-            variant="contained"
-            sx={{
-              background: "rgb(251,101,30)",
-              "&:hover": { background: "rgb(251,101,30)", opacity: 0.9 },
-            }}
-          >
-            Try again
-          </Button>
-          <Button onClick={handleContinueWithoutVideo} variant="outlined">
-            Continue without video
-          </Button>
-          <Button onClick={handleUseTextInstead} variant="outlined">
-            Use text instead
-          </Button>
-        </DialogActions>
-      </Dialog>
-      
-      {/* Error Display */}
-      {(interviewState.error || uiError) && (
-        <div
-          style={{
-            position: "fixed",
-            top: "60px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: "6px",
-            padding: "12px 24px",
-            color: "#991b1b",
-            fontSize: "14px",
-            zIndex: 1000,
-            maxWidth: "90%",
-            textAlign: "center",
-          }}
-        >
-          {interviewState.error || uiError}
-          <button
-            onClick={() => {
-              setUiError(null);
-              if (interviewState.status === 'idle' || interviewState.status === 'closed') {
-                startInterview();
-              }
-            }}
-            style={{
-              marginLeft: "12px",
-              background: "transparent",
-              border: "1px solid #991b1b",
-              borderRadius: "4px",
-              padding: "4px 8px",
-              color: "#991b1b",
-              cursor: "pointer",
-              fontSize: "12px",
-            }}
-          >
-            Retry
-          </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px 24px', fontSize: '14px', color: '#991b1b', borderBottom: '1px solid #e0e0e0' }}>
+          ⚠️ {error}
         </div>
       )}
-      
+
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
       `}</style>
+
+      {/* Permission Modal */}
+      <Dialog
+        open={showPermissionModal}
+        onClose={() => setShowPermissionModal(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Microphone Permission Required</DialogTitle>
+        <DialogContent>
+          <Typography>
+            To conduct the interview, we need access to your microphone.
+            {permissionError && (
+              <Box sx={{ mt: 2, p: 2, background: '#fef2f2', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ color: '#991b1b' }}>
+                  Error: {permissionError.message || permissionError.name}
+                </Typography>
+              </Box>
+            )}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowPermissionModal(false)}>Close</Button>
+          <Button onClick={() => setShowPermissionModal(false)} variant="contained">
+            Try Again
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

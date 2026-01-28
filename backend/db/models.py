@@ -35,6 +35,17 @@ class InterviewReport(Base):
     recommendations = Column(Text)  # JSON: Array of recommendation strings
     questions = Column(Integer, default=0)  # Number of questions asked
     
+    metrics = Column(Text)  # JSON: {total_duration, questions_answered, total_words, speaking_time, silence_time, eye_contact_pct, ...}
+
+    def set_metrics(self, metrics_dict):
+        import json
+        self.metrics = json.dumps(metrics_dict)
+
+    def get_metrics(self):
+        import json
+        if self.metrics:
+            return json.loads(self.metrics)
+        return {}
     is_sample = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

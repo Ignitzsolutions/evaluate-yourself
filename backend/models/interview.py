@@ -25,8 +25,9 @@ class InterviewReport(BaseModel):
     overall_score: int
     scores: ScoreBreakdown
     transcript: List[TranscriptMessage]
-    recommendations: List[str]
-    questions: int
+    recommendations: List[str] = None
+    questions: int = 0
+    metrics: Optional[dict] = None  # {"total_duration": int, "questions_answered": int, ...}
     is_sample: bool = False
 
 class InterviewReportSummary(BaseModel):
