@@ -623,6 +623,117 @@ export default function ReportPage() {
           </Card>
         </Grid>
         
+        {/* AI Candidate Feedback */}
+        {report?.ai_feedback && (
+          <Grid item xs={12}>
+            <Card sx={{ 
+              p: 4,
+              bgcolor: "white",
+              border: "1px solid #e0e0e0",
+              borderRadius: "12px",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)"
+            }}>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  fontWeight: 600,
+                  color: "#1a1a1a",
+                  fontFamily: "'Inter', sans-serif",
+                  mb: 3,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1
+                }}
+              >
+                🤖 AI Interview Coach Feedback
+              </Typography>
+              
+              {/* Overall Summary */}
+              <Box sx={{ mb: 4, p: 3, bgcolor: "#f0f9ff", borderRadius: "8px", border: "1px solid #bae6fd" }}>
+                <Typography variant="body1" sx={{ color: "#0369a1", fontFamily: "'Inter', sans-serif", lineHeight: 1.7 }}>
+                  {report.ai_feedback.overall_summary}
+                </Typography>
+              </Box>
+              
+              <Grid container spacing={3}>
+                {/* Strengths */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#166534", mb: 2, fontFamily: "'Inter', sans-serif" }}>
+                    ✅ Your Strengths
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                    {report.ai_feedback.strengths?.map((strength, idx) => (
+                      <Box key={idx} sx={{ p: 2, bgcolor: "#f0fdf4", borderRadius: "6px", border: "1px solid #bbf7d0" }}>
+                        <Typography variant="body2" sx={{ color: "#166534", fontFamily: "'Inter', sans-serif" }}>
+                          {strength}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Grid>
+                
+                {/* Areas for Improvement */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#9a3412", mb: 2, fontFamily: "'Inter', sans-serif" }}>
+                    📈 Areas for Improvement
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                    {report.ai_feedback.areas_for_improvement?.map((area, idx) => (
+                      <Box key={idx} sx={{ p: 2, bgcolor: "#fff7ed", borderRadius: "6px", border: "1px solid #fed7aa" }}>
+                        <Typography variant="body2" sx={{ color: "#9a3412", fontFamily: "'Inter', sans-serif" }}>
+                          {area}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Grid>
+                
+                {/* Communication Feedback */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#1e40af", mb: 2, fontFamily: "'Inter', sans-serif" }}>
+                    🗣️ Communication Feedback
+                  </Typography>
+                  <Box sx={{ p: 2, bgcolor: "#eff6ff", borderRadius: "6px", border: "1px solid #bfdbfe" }}>
+                    <Typography variant="body2" sx={{ color: "#1e40af", fontFamily: "'Inter', sans-serif", lineHeight: 1.6 }}>
+                      {report.ai_feedback.communication_feedback}
+                    </Typography>
+                  </Box>
+                </Grid>
+                
+                {/* Content Feedback */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#7c2d12", mb: 2, fontFamily: "'Inter', sans-serif" }}>
+                    📝 Content Feedback
+                  </Typography>
+                  <Box sx={{ p: 2, bgcolor: "#fef3c7", borderRadius: "6px", border: "1px solid #fde68a" }}>
+                    <Typography variant="body2" sx={{ color: "#7c2d12", fontFamily: "'Inter', sans-serif", lineHeight: 1.6 }}>
+                      {report.ai_feedback.content_feedback}
+                    </Typography>
+                  </Box>
+                </Grid>
+                
+                {/* Tips for Next Interview */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#4c1d95", mb: 2, fontFamily: "'Inter', sans-serif" }}>
+                    💡 Tips for Your Next Interview
+                  </Typography>
+                  <Grid container spacing={2}>
+                    {report.ai_feedback.tips_for_next_interview?.map((tip, idx) => (
+                      <Grid item xs={12} sm={6} md={3} key={idx}>
+                        <Box sx={{ p: 2, bgcolor: "#faf5ff", borderRadius: "6px", border: "1px solid #e9d5ff", height: "100%" }}>
+                          <Typography variant="body2" sx={{ color: "#4c1d95", fontFamily: "'Inter', sans-serif" }}>
+                            {tip}
+                          </Typography>
+                        </Box>
+                      </Grid>
+                    ))}
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Card>
+          </Grid>
+        )}
+        
         {/* Recommendations */}
         <Grid item xs={12}>
           <Card sx={{ 

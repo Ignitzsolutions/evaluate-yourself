@@ -541,6 +541,7 @@ export default function InterviewSessionRoom() {
   }, [status, addTranscript, getToken, user, sessionId, interviewType]);
 
   // Save transcript and generate report
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveAndGenerateReport = useCallback(async () => {
     try {
       // Combine transcripts
@@ -557,10 +558,21 @@ export default function InterviewSessionRoom() {
         }))
       ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
+      // Get auth token to associate report with user
+      let headers = { 'Content-Type': 'application/json' };
+      try {
+        const token = await getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      } catch (authErr) {
+        console.warn('Could not get auth token for transcript save:', authErr);
+      }
+
       // Save transcript
       const saveResp = await fetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify({ transcript: combined })
       });
 
@@ -576,7 +588,7 @@ export default function InterviewSessionRoom() {
     } catch (err) {
       console.error('Error saving/generating report:', err);
     }
-  }, [sessionId]);
+  }, [sessionId, getToken]);
 
   // Disconnect
   const handleDisconnect = useCallback(async () => {
@@ -609,13 +621,20 @@ export default function InterviewSessionRoom() {
       const resp = await saveAndGenerateReport();
       if (resp && resp.report_id) {
         setReportId(resp.report_id);
+        // Automatically navigate to the report page
+        navigate(`/report/${resp.report_id}`);
+      } else {
+        // Fallback to sessionId if report_id is not available
+        navigate(`/report/${sessionId}`);
       }
     } catch (e) {
       console.error('Error saving/generating report:', e);
+      // Navigate to report page with sessionId even on error
+      navigate(`/report/${sessionId}`);
     } finally {
       setReportLoading(false);
     }
-  }, [saveAndGenerateReport]);
+  }, [saveAndGenerateReport, navigate, sessionId]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -760,10 +779,10 @@ export default function InterviewSessionRoom() {
         </div>
       </div>
 
-      {/* Main Content - Two Panel Layout */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', padding: '24px', gap: '24px', minHeight: 0 }}>
-        {/* Left Panel: Video Tiles */}
-        <div style={{ flex: '0 0 60%', display: 'flex', flexDirection: 'column', gap: '24px', minHeight: 0 }}>
+      {/* Main Content - Single Panel Layout */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', padding: '24px', gap: '24px', minHeight: 0, justifyContent: 'center' }}>
+        {/* Video Tiles Panel */}
+        <div style={{ flex: '0 0 80%', maxWidth: '1000px', display: 'flex', flexDirection: 'column', gap: '24px', minHeight: 0 }}>
           {/* Video Tiles Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
             {/* User Tile */}
@@ -852,55 +871,8 @@ export default function InterviewSessionRoom() {
           )}
         </div>
 
-        {/* Right Panel: Transcript */}
-        <div style={{ flex: '0 0 40%', border: '1px solid #e0e0e0', borderRadius: '8px', display: 'flex', flexDirection: 'column', background: '#ffffff', minHeight: 0 }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', background: '#fafafa', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>Live Transcript</Typography>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button
-                onClick={() => {
-                  const lines = transcript.filter(m => m.speaker !== 'system').map(m => `${m.speaker === 'user' ? 'You' : 'Sonia'}: ${m.text}`);
-                  navigator.clipboard.writeText(lines.join('\n'))
-                    .then(() => { addTranscript('system', 'Transcript copied to clipboard'); })
-                    .catch(() => { addTranscript('system', 'Failed to copy transcript'); });
-                }}
-                style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '13px' }}
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-          <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {transcript.filter(m => m.speaker !== 'system').length === 0 ? (
-              <Typography style={{ fontSize: '14px', color: '#9ca3af', textAlign: 'center', fontStyle: 'italic', marginTop: '20px' }}>
-                Conversation will appear here...
-              </Typography>
-            ) : (
-              transcript.filter(m => m.speaker !== 'system').map((msg, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: msg.speaker === 'user' ? 'flex-end' : 'flex-start' }}>
-                  <div
-                    style={{
-                      maxWidth: '85%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: msg.speaker === 'ai' ? '#f5f5f5' : msg.speaker === 'user' ? '#e3f2fd' : '#ffffff',
-                      border: msg.speaker === 'user' ? '1px solid #e0e0e0' : msg.speaker === 'ai' ? '1px solid #e0e0e0' : 'none',
-                      fontSize: '14px',
-                      color: '#111827'
-                    }}
-                  >
-                    {msg.speaker === 'user' && <div style={{ fontSize: '12px', fontWeight: 600, color: '#1976d2', marginBottom: '4px' }}>You</div>}
-                    {msg.speaker === 'ai' && <div style={{ fontSize: '12px', fontWeight: 600, color: '#666', marginBottom: '4px' }}>Sonia</div>}
-                    <div>{msg.text}</div>
-                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        {/* Right Panel: Transcript - Hidden for cleaner UI */}
+        {/* Transcript data is still collected in the background for report generation */}
       </div>
 
       {/* Error Banner */}

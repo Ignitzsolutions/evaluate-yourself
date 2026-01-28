@@ -28,6 +28,7 @@ class InterviewReport(BaseModel):
     recommendations: List[str] = None
     questions: int = 0
     metrics: Optional[dict] = None  # {"total_duration": int, "questions_answered": int, ...}
+    ai_feedback: Optional[dict] = None  # AI-generated candidate feedback
     is_sample: bool = False
 
 class InterviewReportSummary(BaseModel):
