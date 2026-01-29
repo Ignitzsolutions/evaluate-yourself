@@ -91,6 +91,8 @@ export default function InterviewSessionRoom() {
   const lastAIItemRef = useRef(null);
   // Track last committed input item id (optional)
   const lastCommittedInputItemRef = useRef(null);
+  // Track counted response IDs to avoid double-counting questions
+  const countedResponseIdsRef = useRef(new Set());
 
   // Add transcript entry
   const addTranscript = useCallback((speaker, text) => {
@@ -371,9 +373,29 @@ export default function InterviewSessionRoom() {
               }
               return prev;
             });
+            // Count question if we haven't seen response.completed for this response_id
+            const responseId = msg.response_id;
+            const finalText = msg.text || msg.transcript;
+            if (finalText && finalText.trim().length > 10 && responseId && !countedResponseIdsRef.current.has(responseId)) {
+              countedResponseIdsRef.current.add(responseId);
+              setQuestionCount(prev => {
+                const newCount = prev + 1;
+                console.log(`📊 Question count incremented to ${newCount} (from response.output_audio_transcript.done, response_id: ${responseId})`);
+                return newCount;
+              });
+            }
           } else if (msg.type === 'response.completed') {
             setAiSpeaking(false);
-            setQuestionCount(prev => prev + 1);
+            // Increment question count - this is the primary event for question completion
+            const responseId = msg.response_id || msg.response?.id;
+            if (responseId && !countedResponseIdsRef.current.has(responseId)) {
+              countedResponseIdsRef.current.add(responseId);
+              setQuestionCount(prev => {
+                const newCount = prev + 1;
+                console.log(`📊 Question count incremented to ${newCount} (from response.completed, response_id: ${responseId})`);
+                return newCount;
+              });
+            }
           }
 
           // Handle user transcription events (fallbacks + conversation items)
@@ -558,6 +580,14 @@ export default function InterviewSessionRoom() {
         }))
       ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
+      // Calculate metrics
+      const totalWords = combined.reduce((sum, entry) => {
+        return sum + (entry.text ? entry.text.split(/\s+/).length : 0);
+      }, 0);
+      
+      // Calculate duration in minutes (from timeElapsed state)
+      const durationMinutes = Math.max(1, Math.round(timeElapsed / 60));
+
       // Get auth token to associate report with user
       let headers = { 'Content-Type': 'application/json' };
       try {
@@ -569,11 +599,24 @@ export default function InterviewSessionRoom() {
         console.warn('Could not get auth token for transcript save:', authErr);
       }
 
-      // Save transcript
+      // Save transcript with metrics
       const saveResp = await fetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({ transcript: combined })
+          body: JSON.stringify({ 
+          transcript: combined,
+          interview_type: interviewType || 'mixed',
+          duration_minutes: durationMinutes,
+          questions_answered: questionCount,  // Send as questions_answered for backend
+          metrics: {
+            questions_answered: questionCount,
+            total_words: totalWords,
+            total_duration: durationMinutes,
+            speaking_time: durationMinutes * 60, // Approximate speaking time in seconds
+            silence_time: 0, // Not tracked currently
+            eye_contact_pct: null // Not tracked currently
+          }
+        })
       });
 
       if (!saveResp.ok) {

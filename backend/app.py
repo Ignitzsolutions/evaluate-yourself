@@ -2769,7 +2769,8 @@ async def save_interview_transcript(
     try:
         transcript = request.get("transcript", [])
         # Optionally accept other session data (questions, metrics, etc.)
-        questions = request.get("questions", [])
+        questions = request.get("questions", [])  # Can be list or integer
+        questions_answered = request.get("questions_answered")  # Explicit count
         metrics = request.get("metrics", {})
         interview_type = request.get("interview_type", "mixed")
         duration_minutes = request.get("duration_minutes", 0)
@@ -2815,6 +2816,19 @@ async def save_interview_transcript(
                 "question_index": idx,
                 "timestamp": entry.get("timestamp", datetime.now().isoformat())
             })
+        
+        # Set question_index based on questions_answered or questions count
+        if questions_answered is not None:
+            session_state.question_index = int(questions_answered)
+        elif isinstance(questions, int):
+            session_state.question_index = questions
+        elif isinstance(questions, list) and len(questions) > 0:
+            session_state.question_index = len(questions)
+        else:
+            # Estimate from transcript (count interviewer messages as questions)
+            interviewer_messages = [t for t in transcript if t.get("speaker", "").lower() in ["interviewer", "ai", "sonia"]]
+            session_state.question_index = len(interviewer_messages)
+        
         # Optionally update metrics if provided
         if metrics:
             for k, v in metrics.items():
@@ -2855,11 +2869,12 @@ async def save_interview_transcript(
         print(f"   Text: {text_filename}")
 
         # Generate and save interview report to database
+        report_id = None  # Ensure defined even if report generation fails
         try:
             existing_report = db.query(models.InterviewReport).filter(
                 models.InterviewReport.session_id == session_id
             ).first()
-            report_id = None
+
             if not existing_report:
                 from services.report_generator import generate_report as generate_interview_report
                 # Use updated session_state for report
@@ -2869,6 +2884,7 @@ async def save_interview_transcript(
                     interview_type = session_state.interview_type or "mixed"
                 if duration_minutes <= 0:
                     duration_minutes = 1
+
                 report_data = generate_interview_report(session_state, interview_type, duration_minutes)
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
@@ -2901,6 +2917,7 @@ async def save_interview_transcript(
                 report_id = existing_report.id
                 print(f"ℹ️ Report already exists for session {session_id}, skipping generation (id={report_id})")
         except Exception as report_err:
+            # Don't fail the entire request if report generation fails; transcript is still saved
             print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")
             import traceback
             traceback.print_exc()

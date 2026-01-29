@@ -121,8 +121,19 @@ def generate_candidate_feedback(
             max_tokens=1200,
         )
         raw = (resp.choices or [{}])[0].message.content or ""
+    except TypeError as e:
+        # Handle library version mismatches (e.g., unexpected keyword arguments)
+        error_msg = str(e)
+        if "unexpected keyword argument" in error_msg:
+            print(f"⚠️ OpenAI library version mismatch or configuration error: {error_msg}")
+            print("   Falling back to basic feedback generation")
+        else:
+            print(f"❌ CandidateFeedbackChain TypeError: {e}")
+        return _generate_fallback_feedback(scores)
     except Exception as e:
         print(f"❌ CandidateFeedbackChain error: {e}")
+        import traceback
+        traceback.print_exc()
         return _generate_fallback_feedback(scores)
 
     # Parse JSON from response (allow wrapped in markdown code block)
