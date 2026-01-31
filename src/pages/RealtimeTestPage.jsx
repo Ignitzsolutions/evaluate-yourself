@@ -7,7 +7,7 @@ import { authFetch } from "../utils/apiClient";
 const API_BASE_URL =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL) ||
   process.env.REACT_APP_API_URL ||
-  "http://localhost:8000";
+  "";
 
 export default function RealtimeTestPage() {
   const { getToken } = useAuth();

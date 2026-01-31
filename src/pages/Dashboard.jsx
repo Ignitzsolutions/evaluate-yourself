@@ -5,7 +5,7 @@ import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
 
-const API_BASE = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "";
 
 export default function Dashboard() {
   const nav = useNavigate();
