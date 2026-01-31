@@ -566,72 +566,119 @@ export default function InterviewSessionRoom() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveAndGenerateReport = useCallback(async () => {
     try {
-      // Combine transcripts
-      const combined = [
+      // Build ordered message stream
+      const ordered = [
         ...aiMessagesRef.current.map(t => ({
-          speaker: 'interviewer',
+          speaker: 'ai',
           text: t.text,
           timestamp: t.timestamp
         })),
         ...userMessagesRef.current.map(t => ({
-          speaker: 'candidate',
+          speaker: 'user',
           text: t.text,
           timestamp: t.timestamp
         }))
       ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-      // Calculate metrics
-      const totalWords = combined.reduce((sum, entry) => {
+      // Build Q/A pairs
+      const qaTranscript = [];
+      let pendingQuestion = null;
+
+      for (const m of ordered) {
+        if (!m.text) continue;
+
+        if (m.speaker === 'ai') {
+          pendingQuestion = m.text;
+        }
+
+        if (m.speaker === 'user' && pendingQuestion) {
+          qaTranscript.push({
+            question: pendingQuestion,
+            answer: m.text,
+            timestamp: m.timestamp
+          });
+          pendingQuestion = null;
+        }
+      }
+
+      console.log("📤 QA pairs built:", qaTranscript.length);
+
+      // Calculate metrics from ordered stream
+      const totalWords = ordered.reduce((sum, entry) => {
         return sum + (entry.text ? entry.text.split(/\s+/).length : 0);
       }, 0);
-      
-      // Calculate duration in minutes (from timeElapsed state)
+
       const durationMinutes = Math.max(1, Math.round(timeElapsed / 60));
 
-      // Get auth token to associate report with user
+      // Auth header
       let headers = { 'Content-Type': 'application/json' };
       try {
         const token = await getToken();
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
+        if (token) headers['Authorization'] = `Bearer ${token}`;
       } catch (authErr) {
-        console.warn('Could not get auth token for transcript save:', authErr);
+        console.warn('Could not get auth token:', authErr);
       }
 
-      // Save transcript with metrics
-      const saveResp = await fetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, {
+      // Send transcript in QA format
+      const token = await getToken();
+
+      const saveResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, token, {
         method: 'POST',
         headers: headers,
-          body: JSON.stringify({ 
-          transcript: combined,
+        body: JSON.stringify({
+          transcript: qaTranscript,
           interview_type: interviewType || 'mixed',
           duration_minutes: durationMinutes,
-          questions_answered: questionCount,  // Send as questions_answered for backend
+          questions_answered: qaTranscript.length,
           metrics: {
-            questions_answered: questionCount,
+            questions_answered: qaTranscript.length,
             total_words: totalWords,
             total_duration: durationMinutes,
-            speaking_time: durationMinutes * 60, // Approximate speaking time in seconds
-            silence_time: 0, // Not tracked currently
-            eye_contact_pct: null // Not tracked currently
+            speaking_time: durationMinutes * 60,
+            silence_time: 0,
+            eye_contact_pct: null
           }
         })
       });
 
       if (!saveResp.ok) {
-        console.error('Failed to save transcript');
         const errText = await saveResp.text().catch(() => null);
-        return { ok: false, error: errText };
+        console.error('❌ Transcript save failed:', errText);
+        return { ok: false };
       }
 
-      const data = await saveResp.json().catch(() => ({}));
-      console.log('✅ Transcript saved - interview data preserved', data);
-      return data; 
+      // const data = await saveResp.json().catch(() => ({}));
+      // console.log('✅ Transcript saved — QA format', data);
+      // if (data.report_id) {
+      //   setReportId(data.report_id);
+      //   console.log("📄 Report ID:", data.report_id);
+      // }
+      // return data;
+      // 🔍 DEBUG: read raw backend response first
+      const raw = await saveResp.text();
+      console.log("📦 RAW transcript response:", raw);
+
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        console.error("❌ Failed to parse JSON from backend");
+      }
+
+      console.log('✅ Parsed transcript response:', data);
+
+      if (data.report_id) {
+        setReportId(data.report_id);
+        console.log("📄 Report ID:", data.report_id);
+      }
+
+      return data;
+
+
     } catch (err) {
-      console.error('Error saving/generating report:', err);
+      console.error('❌ Error saving report:', err);
     }
-  }, [sessionId, getToken]);
+  }, [sessionId, getToken, interviewType, timeElapsed]);
 
   // Disconnect
   const handleDisconnect = useCallback(async () => {
@@ -652,33 +699,36 @@ export default function InterviewSessionRoom() {
       audioElementRef.current.srcObject = null;
       audioElementRef.current = null;
     }
+  
     setStatus('idle');
     setMicActive(false);
     setAiSpeaking(false);
     setError(null);
-
-    // Show Report button immediately and start report generation
+  
     setReportAvailable(true);
     setReportLoading(true);
+  
     try {
       const resp = await saveAndGenerateReport();
+  
+      console.log("📦 Backend response:", resp);
+  
       if (resp && resp.report_id) {
-        setReportId(resp.report_id);
-        // Automatically navigate to the report page
         navigate(`/report/${resp.report_id}`);
       } else {
-        // Fallback to sessionId if report_id is not available
-        navigate(`/report/${sessionId}`);
+        alert("❌ Backend did not return report_id — check backend logs");
+        console.error("Missing report_id:", resp);
       }
+  
     } catch (e) {
-      console.error('Error saving/generating report:', e);
-      // Navigate to report page with sessionId even on error
-      navigate(`/report/${sessionId}`);
+      console.error('Report generation error:', e);
+      alert("❌ Report generation failed — see console");
     } finally {
       setReportLoading(false);
     }
-  }, [saveAndGenerateReport, navigate, sessionId]);
-
+  }, [saveAndGenerateReport, navigate]);
+  
+  
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;

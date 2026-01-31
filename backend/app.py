@@ -2805,17 +2805,29 @@ async def save_interview_transcript(
             )
             interview_sessions[session_id] = session_state
 
-        # Update session state with posted data
+       # ✅ Update session state with posted Q/A transcript (correct format)
         session_state.transcript_history = []
+
         for idx, entry in enumerate(transcript):
-            q = entry.get("question") or entry.get("speaker")
-            a = entry.get("answer") or entry.get("text")
+            question = entry.get("question")
+            answer = entry.get("answer")
+
+            # Skip invalid rows
+            if not question and not answer:
+                continue
+
             session_state.transcript_history.append({
-                "question": q,
-                "answer": a,
+                "question": question or "",
+                "answer": answer or "",
                 "question_index": idx,
                 "timestamp": entry.get("timestamp", datetime.now().isoformat())
             })
+
+        # ✅ ensure question_index reflects answers count
+        session_state.question_index = len(session_state.transcript_history)
+
+        print(f"📊 Transcript Q/A pairs loaded: {session_state.question_index}")
+
         
         # Set question_index based on questions_answered or questions count
         if questions_answered is not None:
