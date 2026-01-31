@@ -352,17 +352,42 @@ async def startup_event():
     except Exception as e:
         print(f"🔐 Clerk JWKS log skip: {e}")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://localhost:3001", 
+# Configure CORS origins from ALLOWED_ORIGINS (comma-separated) environment variable.
+# If ALLOWED_ORIGINS is not set, fall back to a safe local development default.
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+_env_value = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))).strip().lower()
+is_production = _env_value == "production"
+
+if allowed_origins_env:
+    if allowed_origins_env == "*":
+        if is_production:
+            # Disallow wildcard in production — fail fast to avoid accidental open CORS
+            raise RuntimeError("ALLOWED_ORIGINS='*' is not allowed in production. Set ALLOWED_ORIGINS to the list of authorized origins.")
+        else:
+            print("⚠️ WARNING: ALLOWED_ORIGINS='*' - this allows all origins. Use only for short-term debugging.")
+            allow_origins = ["*"]
+    else:
+        allow_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+        print(f"🔐 ALLOWED_ORIGINS set: {allow_origins}")
+else:
+    # Default local dev origins (safe for local development only)
+    if is_production:
+        # In production we must not use permissive defaults — require explicit ALLOWED_ORIGINS
+        raise RuntimeError("ALLOWED_ORIGINS is not set and the environment indicates production. Set ALLOWED_ORIGINS to a comma-separated list of allowed origins.")
+    allow_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
         "http://localhost:5173",  # Vite default
         "http://localhost:8080",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080"
-    ],
+        "http://127.0.0.1:8080",
+    ]
+    print("ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1294,15 +1319,18 @@ Provide only one response per user turn. Never produce multiple responses.
                                 data = await websocket.receive_text()
                                 msg = json.loads(data)
                                 msg_type = msg.get("type")
-                                
+
                                 # Handle control messages
                                 if msg_type == "input_audio_buffer.append":
                                     # Forward audio to Azure - log chunk size for debugging
                                     audio_data = msg.get("audio", "")
                                     if audio_data:
                                         audio_bytes = len(base64.b64decode(audio_data))
+                                        print(f"[AUDIO DEBUG] Received audio chunk from frontend: {audio_bytes} bytes")
                                         if audio_bytes % 2 != 0:
                                             print(f"⚠️ Warning: Odd PCM chunk size: {audio_bytes} bytes")
+                                    else:
+                                        print("[AUDIO DEBUG] Received input_audio_buffer.append with NO audio data!")
                                     await azure_ws.send(data)
                                 elif msg_type == "conversation.item.create":
                                     # User wants to start speaking - forward as-is
@@ -1355,10 +1383,29 @@ Provide only one response per user turn. Never produce multiple responses.
                                     # Text message
                                     event = json.loads(data)
                                     event_type = event.get("type")
-                                    
+
+                                    # Patch: Attach transcript to outgoing user events (extract from content array if present)
+                                    patched_event = dict(event)
+                                    # For user message events, extract transcript from item.content[0].transcript if present
+                                    if event_type in ["conversation.item.added", "conversation.item.done"]:
+                                        item = event.get("item", {})
+                                        if item.get("role") == "user":
+                                            content = item.get("content", [])
+                                            if content and isinstance(content, list):
+                                                first = content[0]
+                                                transcript = first.get("transcript") if isinstance(first, dict) else None
+                                                if transcript:
+                                                    patched_event["user_transcript"] = transcript
+
+                                    # Also keep previous patch for other event types if needed
+                                    if event_type in ["conversation.item.input_audio_transcription.completed", "conversation.item.completed", "input_audio_buffer.committed"]:
+                                        transcript = event.get("transcript", None)
+                                        if transcript:
+                                            patched_event["user_transcript"] = transcript
+
                                     # Forward to client
-                                    await websocket.send_text(data)
-                                    
+                                    await websocket.send_text(json.dumps(patched_event))
+
                                     # Log transcript-related messages
                                     if event_type in ["response.text.delta", "response.text.done", 
                                                       "conversation.item.input_audio_transcription.completed"]:
@@ -1369,14 +1416,14 @@ Provide only one response per user turn. Never produce multiple responses.
                                         if "delta" in event:
                                             delta_text = str(event.get("delta", ""))[:100]
                                             print(f"   Text delta: {delta_text}")
-                                    
+
                                     # Handle interview logic
                                     if event_type == "response.text.delta":
                                         # AI is speaking - accumulate text
                                         delta = event.get("delta", "")
                                         if delta:
                                             current_ai_text.append(delta)
-                                    
+
                                     elif event_type == "response.text.done":
                                         # AI finished speaking - this is a question
                                         full_text = "".join(current_ai_text)
@@ -1384,26 +1431,26 @@ Provide only one response per user turn. Never produce multiple responses.
                                             session_state.add_question(full_text)
                                             current_ai_text = []
                                             waiting_for_response = True
-                                    
+
                                     elif event_type == "input_audio_buffer.committed":
                                         # User audio committed - transcript may be in this event or separate
                                         transcript = event.get("transcript", "")
                                         if transcript and waiting_for_response:
                                             current_user_text.append(transcript)
-                                    
+
                                     elif event_type == "conversation.item.input_audio_transcription.completed":
                                         # User transcript is complete - accumulate
                                         transcript = event.get("transcript", "")
                                         if transcript and waiting_for_response:
                                             current_user_text.append(transcript)
-                                    
+
                                     elif event_type == "conversation.item.completed":
                                         # User finished speaking - evaluate the complete answer
                                         if current_user_text and waiting_for_response and session_state.current_question:
                                             full_answer = " ".join(current_user_text).strip()
                                             if full_answer and len(full_answer) > 10:  # Minimum answer length
                                                 session_state.add_answer(full_answer)
-                                                
+
                                                 # Evaluate response
                                                 evaluation = evaluate_response(
                                                     full_answer,
@@ -1411,19 +1458,19 @@ Provide only one response per user turn. Never produce multiple responses.
                                                     {"question": session_state.current_question}
                                                 )
                                                 session_state.add_evaluation(evaluation)
-                                                
+
                                                 # Determine next action
                                                 next_action = session_state.get_next_action(evaluation)
-                                                
+
                                                 # Generate next question or end
                                                 if session_state.should_end():
                                                     await _end_interview(azure_ws, session_state, websocket, user_id)
                                                 else:
                                                     await _handle_next_action(azure_ws, session_state, next_action, evaluation)
-                                            
+
                                             current_user_text = []
                                             waiting_for_response = False
-                                    
+
                                     elif event_type == "error":
                                         await websocket.send_text(json.dumps({
                                             "type": "error",

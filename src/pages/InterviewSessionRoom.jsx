@@ -25,7 +25,7 @@ import '../ui.css';
 const API_BASE_URL =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL) ||
   process.env.REACT_APP_API_URL ||
-  "http://localhost:8000";
+  "";
 
 export default function InterviewSessionRoom() {
   const params = useParams();
@@ -96,17 +96,20 @@ export default function InterviewSessionRoom() {
 
   // Add transcript entry
   const addTranscript = useCallback((speaker, text) => {
+    const ts = new Date().toISOString();
+    console.log(`[addTranscript] speaker: ${speaker}, text:`, text);
     setTranscript(prev => [...prev, {
       speaker,
       text,
-      timestamp: new Date().toISOString()
+      timestamp: ts
     }]);
 
     // Also collect for saving
     if (speaker === 'ai') {
-      aiMessagesRef.current.push({ text, timestamp: new Date().toISOString() });
+      aiMessagesRef.current.push({ text, timestamp: ts });
     } else if (speaker === 'user') {
-      userMessagesRef.current.push({ text, timestamp: new Date().toISOString() });
+      userMessagesRef.current.push({ text, timestamp: ts });
+      console.log(`[addTranscript] userMessagesRef now:`, JSON.stringify(userMessagesRef.current, null, 2));
     }
   }, []);
 
@@ -401,9 +404,12 @@ export default function InterviewSessionRoom() {
           // Handle user transcription events (fallbacks + conversation items)
           else if (msg.type === 'input_audio_transcription.completed' || msg.type === 'input_audio_transcription.done') {
             const text = msg.text || msg.transcript;
-            if (text) {
+            console.log('[input_audio_transcription.completed] text:', text);
+            if (text && text.trim().length > 0) {
               addTranscript('user', text);
               setMicActive(false);
+            } else {
+              console.warn('[input_audio_transcription.completed] No user text found in message:', msg);
             }
           } else if (msg.type && msg.type.startsWith('input_audio_transcription') && msg.delta) {
             // partial transcription while user is speaking
@@ -430,6 +436,8 @@ export default function InterviewSessionRoom() {
               });
             }
           } else if (msg.type === 'conversation.item.added' || msg.type === 'conversation.item.done') {
+                        // Debug: log the full message object for diagnosis
+                        console.log('[DEBUG][conversation.item.*] FULL MSG:', JSON.stringify(msg, null, 2));
             // Some events include user contributions as conversation items
             const item = msg.item || msg;
             try {
@@ -445,6 +453,10 @@ export default function InterviewSessionRoom() {
               }
               if (!text && item.text) text = item.text;
               if (!text && item.content_text) text = item.content_text;
+              // Fallback: check for user_transcript field added by backend patch
+              if ((!text || text.trim().length === 0) && msg.user_transcript) {
+                text = msg.user_transcript;
+              }
 
               // Determine if this conversation item is a user reply by checking role or relation to last AI item
               const role = item.role || (item.metadata && item.metadata.role) || item.author?.role || null;
@@ -453,12 +465,22 @@ export default function InterviewSessionRoom() {
 
               const isUserReply = (role && (role === 'user' || role === 'candidate')) || (prevId && lastAIItemRef.current && prevId === lastAIItemRef.current) || (itemId && lastCommittedInputItemRef.current && itemId === lastCommittedInputItemRef.current);
 
-              if (isUserReply && text) {
+              // Log the full item object for user turns for debugging
+              if (isUserReply) {
+                console.log('[conversation.item.*][FULL USER ITEM]', JSON.stringify(item, null, 2));
+              }
+
+              console.log('[conversation.item.*] text:', text, '| isUserReply:', isUserReply, '| role:', role, '| prevId:', prevId, '| lastAIItemRef:', lastAIItemRef.current);
+
+              if (isUserReply && text && text.trim().length > 0) {
                 // avoid duplicates
                 const last = transcript[transcript.length - 1];
                 if (!last || last.speaker !== 'user' || last.text !== text) {
                   addTranscript('user', text);
                 }
+              } else if (text && text.trim().length > 0) {
+                // Fallback: if text exists but isUserReply is false, still log it for debugging
+                console.warn('[conversation.item.*] Text found but not classified as user reply:', text, item);
               }
             } catch (e) {
               console.warn('Error extracting conversation item text:', e);
@@ -566,6 +588,10 @@ export default function InterviewSessionRoom() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveAndGenerateReport = useCallback(async () => {
     try {
+      // Debug: Log message refs before building Q/A pairs
+      console.log('🟦 aiMessagesRef:', JSON.stringify(aiMessagesRef.current, null, 2));
+      console.log('🟩 userMessagesRef:', JSON.stringify(userMessagesRef.current, null, 2));
+
       // Build ordered message stream
       const ordered = [
         ...aiMessagesRef.current.map(t => ({
@@ -579,6 +605,9 @@ export default function InterviewSessionRoom() {
           timestamp: t.timestamp
         }))
       ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+      // Debug: Log ordered array
+      console.log('🟨 ordered:', JSON.stringify(ordered, null, 2));
 
       // Build Q/A pairs
       const qaTranscript = [];
@@ -602,6 +631,11 @@ export default function InterviewSessionRoom() {
       }
 
       console.log("📤 QA pairs built:", qaTranscript.length);
+
+      if (qaTranscript.length === 0) {
+        alert("❌ You must answer at least one question to generate a report. Please complete part of the interview before ending the call.");
+        return { ok: false };
+      }
 
       // Calculate metrics from ordered stream
       const totalWords = ordered.reduce((sum, entry) => {
@@ -647,13 +681,6 @@ export default function InterviewSessionRoom() {
         return { ok: false };
       }
 
-      // const data = await saveResp.json().catch(() => ({}));
-      // console.log('✅ Transcript saved — QA format', data);
-      // if (data.report_id) {
-      //   setReportId(data.report_id);
-      //   console.log("📄 Report ID:", data.report_id);
-      // }
-      // return data;
       // 🔍 DEBUG: read raw backend response first
       const raw = await saveResp.text();
       console.log("📦 RAW transcript response:", raw);
@@ -673,7 +700,6 @@ export default function InterviewSessionRoom() {
       }
 
       return data;
-
 
     } catch (err) {
       console.error('❌ Error saving report:', err);
@@ -805,9 +831,9 @@ export default function InterviewSessionRoom() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {reportAvailable && sessionId && (
+          {reportAvailable && reportId && (
             <button
-              onClick={() => navigate(reportId ? `/report/${reportId}` : `/report/${sessionId}`)}
+              onClick={() => navigate(`/report/${reportId}`)}
               style={{
                 background: 'transparent',
                 border: '1px solid #e0e0e0',
