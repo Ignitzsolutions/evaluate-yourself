@@ -74,43 +74,70 @@ def _get_openai_client():
 
 
 def generate_candidate_feedback(
-    transcript: List[Dict[str, Any]],
-    scores: Dict[str, int],
+    transcript: Optional[List[Dict[str, Any]]] = None,
+    scores: Optional[Dict[str, int]] = None,
     interview_type: str = "behavioral",
-    duration_minutes: int = 0
+    duration_minutes: int = 0,
+    # New parameters (PHASE 2)
+    transcript_text: Optional[str] = None,
+    llm_context: Optional[Any] = None,  # LLMContext
+    score_summary: Optional[Dict[str, int]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Generate AI-powered feedback for the interview candidate.
     
     Args:
-        transcript: List of transcript messages with speaker and text
-        scores: Dict with communication, clarity, structure, relevance, overall_score
+        transcript: (Legacy) List of transcript messages with speaker and text
+        scores: (Legacy) Dict with communication, clarity, structure, relevance, overall_score
         interview_type: Type of interview (behavioral, technical, mixed)
         duration_minutes: Interview duration
+        transcript_text: (New) Direct transcript text string
+        llm_context: (New) LLMContext object (session_id, role, locale)
+        score_summary: (New) Score summary dict
     
     Returns:
         Dict with overall_summary, strengths, areas_for_improvement, 
         communication_feedback, content_feedback, tips_for_next_interview
         Returns None on failure.
     """
-    transcript_str = _build_transcript_string(transcript)
+    # Backward compatibility: handle both old and new parameter styles
+    if transcript_text:
+        transcript_str = transcript_text
+    elif transcript:
+        transcript_str = _build_transcript_string(transcript)
+    else:
+        transcript_str = "No transcript available"
+    
+    # Use new score_summary if provided, else fall back to legacy scores
+    active_scores = score_summary if score_summary else (scores if scores else {})
+    
+    # Backward compatibility: handle both old and new parameter styles
+    if transcript_text:
+        transcript_str = transcript_text
+    elif transcript:
+        transcript_str = _build_transcript_string(transcript)
+    else:
+        transcript_str = "No transcript available"
+    
+    # Use new score_summary if provided, else fall back to legacy scores
+    active_scores = score_summary if score_summary else (scores if scores else {})
     
     # Build the prompt
     prompt = CANDIDATE_FEEDBACK_PROMPT.format(
         interview_type=interview_type.capitalize(),
         duration=duration_minutes,
         transcript=transcript_str,
-        communication_score=scores.get("communication", 50),
-        clarity_score=scores.get("clarity", 50),
-        structure_score=scores.get("structure", 50),
-        relevance_score=scores.get("relevance", 50),
-        overall_score=scores.get("overall_score", 50)
+        communication_score=active_scores.get("communication", 50),
+        clarity_score=active_scores.get("clarity", 50),
+        structure_score=active_scores.get("structure", 50),
+        relevance_score=active_scores.get("relevance", 50),
+        overall_score=active_scores.get("overall_score", 50)
     )
 
     client, model_or_deploy = _get_openai_client()
     if not client:
         print("⚠️ No OpenAI client available for candidate feedback generation")
-        return _generate_fallback_feedback(scores)
+        return _generate_fallback_feedback(active_scores)
 
     try:
         print(f"🤖 Generating AI candidate feedback using {model_or_deploy}...")
@@ -129,12 +156,12 @@ def generate_candidate_feedback(
             print("   Falling back to basic feedback generation")
         else:
             print(f"❌ CandidateFeedbackChain TypeError: {e}")
-        return _generate_fallback_feedback(scores)
+        return _generate_fallback_feedback(active_scores)
     except Exception as e:
         print(f"❌ CandidateFeedbackChain error: {e}")
         import traceback
         traceback.print_exc()
-        return _generate_fallback_feedback(scores)
+        return _generate_fallback_feedback(active_scores)
 
     # Parse JSON from response (allow wrapped in markdown code block)
     raw = raw.strip()
@@ -148,7 +175,7 @@ def generate_candidate_feedback(
         return feedback
     except json.JSONDecodeError as e:
         print(f"⚠️ Failed to parse AI feedback JSON: {e}")
-        return _generate_fallback_feedback(scores)
+        return _generate_fallback_feedback(active_scores)
 
 
 def _generate_fallback_feedback(scores: Dict[str, int]) -> Dict[str, Any]:

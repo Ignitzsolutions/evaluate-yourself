@@ -393,6 +393,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============================================================================
+# Register WebSocket Realtime Router (PHASE 3)
+# ============================================================================
+try:
+    from api.realtime import router as realtime_router
+    app.include_router(realtime_router, prefix="/ws", tags=["websocket"])
+    logging.info("✅ WebSocket realtime router registered at /ws/interview/{session_id}")
+except Exception as e:
+    logging.warning(f"⚠️ Could not register realtime router: {e}")
 
 #D
 
@@ -2814,7 +2823,9 @@ async def save_interview_transcript(
 ):
     """Save interview transcript to file and generate report in database."""
     try:
-        transcript = request.get("transcript", [])
+        # Handle both legacy and canonical transcript formats
+        transcript_input = request.get("transcript", [])
+        
         # Optionally accept other session data (questions, metrics, etc.)
         questions = request.get("questions", [])  # Can be list or integer
         questions_answered = request.get("questions_answered")  # Explicit count
@@ -2822,7 +2833,48 @@ async def save_interview_transcript(
         interview_type = request.get("interview_type", "mixed")
         duration_minutes = request.get("duration_minutes", 0)
 
-        if not transcript:
+        # Parse canonical transcript format (mode, qa_pairs, unpaired, raw_messages)
+        # or legacy format (list of {question, answer})
+        transcript = []
+        raw_messages = []
+        
+        if isinstance(transcript_input, dict):
+            # Canonical format: {mode, qa_pairs, unpaired, raw_messages}
+            mode = transcript_input.get("mode", "structured")
+            qa_pairs = transcript_input.get("qa_pairs", [])
+            unpaired = transcript_input.get("unpaired", [])
+            raw_messages = transcript_input.get("raw_messages", [])
+            
+            print(f"📦 Canonical transcript received: mode={mode}, qa_pairs={len(qa_pairs)}, unpaired={len(unpaired)}, raw={len(raw_messages)}")
+            
+            # Use qa_pairs as the primary transcript
+            transcript = qa_pairs
+            
+            # If no qa_pairs but we have raw_messages, try to build pairs
+            if not transcript and raw_messages:
+                print(f"⚠️ No QA pairs, building from {len(raw_messages)} raw messages")
+                pending_question = None
+                for msg in raw_messages:
+                    if msg.get("speaker") == "ai":
+                        pending_question = msg.get("text")
+                    elif msg.get("speaker") == "user" and pending_question:
+                        transcript.append({
+                            "question": pending_question,
+                            "answer": msg.get("text"),
+                            "timestamp": msg.get("timestamp")
+                        })
+                        pending_question = None
+        
+        elif isinstance(transcript_input, list):
+            # Legacy format: list of {question, answer}
+            transcript = transcript_input
+            print(f"📦 Legacy transcript format: {len(transcript)} QA pairs")
+        
+        else:
+            print(f"❌ Unexpected transcript type: {type(transcript_input)}")
+            return {"message": "Invalid transcript format", "session_id": session_id}
+
+        if not transcript and not raw_messages:
             return {"message": "No transcript data provided", "session_id": session_id}
 
         # Get user info from auth (optional - can work without auth for testing)
@@ -2898,22 +2950,31 @@ async def save_interview_transcript(
         os.makedirs(transcripts_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename_base = f"transcript_{session_id}_{timestamp}"
+        
+        # Save complete canonical payload for audit
         json_filename = os.path.join(transcripts_dir, f"{filename_base}.json")
         with open(json_filename, 'w', encoding='utf-8') as f:
             json.dump({
                 "session_id": session_id,
                 "timestamp": datetime.now().isoformat(),
-                "transcript": transcript
+                "transcript": transcript,  # QA pairs
+                "raw_messages": raw_messages if raw_messages else None,  # Raw messages if available
+                "format": "canonical" if isinstance(transcript_input, dict) else "legacy"
             }, f, indent=2, ensure_ascii=False)
+        
+        # Save human-readable text version
         text_filename = os.path.join(transcripts_dir, f"{filename_base}.txt")
         with open(text_filename, 'w', encoding='utf-8') as f:
             f.write(f"Interview Transcript - Session ID: {session_id}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
-            for entry in transcript:
-                speaker = entry.get("speaker", "Unknown")
-                text = entry.get("text", "")
+            
+            # Write QA pairs
+            for idx, entry in enumerate(transcript, 1):
+                question = entry.get("question", "")
+                answer = entry.get("answer", "")
                 timestamp_str = entry.get("timestamp", "")
+                
                 if timestamp_str:
                     try:
                         if isinstance(timestamp_str, str):
@@ -2921,8 +2982,11 @@ async def save_interview_transcript(
                             timestamp_str = dt.strftime('%H:%M:%S')
                     except:
                         pass
-                f.write(f"[{timestamp_str}] {speaker.upper()}:\n")
-                f.write(f"{text}\n\n")
+                
+                f.write(f"Q{idx} [{timestamp_str}]:\n{question}\n\n")
+                f.write(f"A{idx} [{timestamp_str}]:\n{answer}\n\n")
+                f.write("-" * 80 + "\n\n")
+        
         print(f"✅ Transcript saved for session {session_id}")
         print(f"   JSON: {json_filename}")
         print(f"   Text: {text_filename}")
