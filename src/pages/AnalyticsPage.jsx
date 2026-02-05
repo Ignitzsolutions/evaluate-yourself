@@ -1,5 +1,5 @@
 import { Analytics as AnalyticsIcon, PieChart, BarChart } from '@mui/icons-material';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Container,
@@ -31,6 +31,8 @@ import {
   Visibility as ViewIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
+import { authFetch } from '../utils/apiClient';
 import {
   LineChart,
   Line,
@@ -41,74 +43,25 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-// Mock data for dashboard
-const mockUserStats = {
-  totalSessions: 24,
-  avgScore: 78,
-  improvementRate: 12,
-  totalHours: 8.5
-};
-
-const mockPerformanceData = [
-  { date: '2025-09-10', score: 65, eyeContact: 58, confidence: 70 },
-  { date: '2025-09-12', score: 72, eyeContact: 64, confidence: 75 },
-  { date: '2025-09-14', score: 68, eyeContact: 61, confidence: 72 },
-  { date: '2025-09-16', score: 81, eyeContact: 75, confidence: 83 },
-  { date: '2025-09-18', score: 78, eyeContact: 72, confidence: 80 }
-];
-
-const mockRecentSessions = [
-  {
-    id: 1,
-    date: '2025-09-18',
-    type: 'Technical',
-    duration: '25 min',
-    score: 78,
-    status: 'completed'
-  },
-  {
-    id: 2,
-    date: '2025-09-16',
-    type: 'Behavioral',
-    duration: '18 min',
-    score: 81,
-    status: 'completed'
-  },
-  {
-    id: 3,
-    date: '2025-09-14',
-    type: 'Mixed',
-    duration: '22 min',
-    score: 68,
-    status: 'completed'
-  },
-  {
-    id: 4,
-    date: '2025-09-12',
-    type: 'Technical',
-    duration: '30 min',
-    score: 72,
-    status: 'completed'
-  }
-];
-
-const skillsData = [
-  { name: 'Communication', value: 85, color: '#4CAF50' },
-  { name: 'Technical Knowledge', value: 78, color: '#2196F3' },
-  { name: 'Problem Solving', value: 82, color: '#FF9800' },
-  { name: 'Confidence', value: 75, color: '#9C27B0' }
-];
-
 export default function AnalyticsPage() {
   const navigate = useNavigate();
+  const { getToken } = useAuth();
     const [anchorEl, setAnchorEl] = useState(null);
+    const [selectedSession, setSelectedSession] = useState(null);
+    const [summary, setSummary] = useState(null);
+    const [trends, setTrends] = useState([]);
+    const [skills, setSkills] = useState(null);
+    const [recent, setRecent] = useState([]);
+    const [loading, setLoading] = useState(true);
   
     const handleMenuClick = (event, session) => {
+      setSelectedSession(session);
       setAnchorEl(event.currentTarget);
     };
   
     const handleMenuClose = () => {
       setAnchorEl(null);
+      setSelectedSession(null);
     };
   
     const getScoreColor = (score) => {
@@ -120,6 +73,51 @@ export default function AnalyticsPage() {
     const getTrendIcon = (rate) => {
       return rate > 0 ? <TrendingUp color="success" /> : <TrendingDown color="error" />;
     };
+
+    const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || '';
+
+    useEffect(() => {
+      let mounted = true;
+      const load = async () => {
+        try {
+          const token = await getToken();
+          const [summaryResp, trendsResp, skillsResp, reportsResp] = await Promise.all([
+            authFetch(`${API_BASE_URL}/api/analytics/summary`, token),
+            authFetch(`${API_BASE_URL}/api/analytics/trends`, token),
+            authFetch(`${API_BASE_URL}/api/analytics/skills`, token),
+            authFetch(`${API_BASE_URL}/api/interview/reports`, token),
+          ]);
+
+          if (!mounted) return;
+
+          if (summaryResp.ok) setSummary(await summaryResp.json());
+          if (trendsResp.ok) setTrends(await trendsResp.json());
+          if (skillsResp.ok) setSkills(await skillsResp.json());
+          if (reportsResp.ok) {
+            const reportList = await reportsResp.json();
+            setRecent(reportList.slice(0, 5));
+          }
+        } catch (e) {
+          console.error('Analytics load failed:', e);
+        } finally {
+          if (mounted) setLoading(false);
+        }
+      };
+      load();
+      return () => { mounted = false; };
+    }, [getToken, API_BASE_URL]);
+
+    const skillsData = useMemo(() => {
+      if (!skills) return [];
+      return [
+        { name: 'Communication', value: skills.communication || 0, color: '#4CAF50' },
+        { name: 'Technical Knowledge', value: skills.technical || 0, color: '#2196F3' },
+        { name: 'Problem Solving', value: skills.problem_solving || 0, color: '#FF9800' },
+        { name: 'Confidence', value: skills.confidence || 0, color: '#9C27B0' },
+      ];
+    }, [skills]);
+
+    const userStats = summary || { total_sessions: 0, avg_score: 0, improvement_pct: 0, practice_hours: 0 };
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
@@ -180,7 +178,7 @@ export default function AnalyticsPage() {
                     Total Sessions
                   </Typography>
                   <Typography variant="h4">
-                    {mockUserStats.totalSessions}
+                    {userStats.total_sessions}
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'primary.main' }}>
@@ -200,7 +198,7 @@ export default function AnalyticsPage() {
                     Average Score
                   </Typography>
                   <Typography variant="h4">
-                    {mockUserStats.avgScore}%
+                    {userStats.avg_score}%
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'success.main' }}>
@@ -221,9 +219,9 @@ export default function AnalyticsPage() {
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Typography variant="h4">
-                      +{mockUserStats.improvementRate}%
+                      {userStats.improvement_pct > 0 ? '+' : ''}{userStats.improvement_pct}%
                     </Typography>
-                    {getTrendIcon(mockUserStats.improvementRate)}
+                    {getTrendIcon(userStats.improvement_pct)}
                   </Box>
                 </Box>
                 <Avatar sx={{ bgcolor: 'info.main' }}>
@@ -243,7 +241,7 @@ export default function AnalyticsPage() {
                     Practice Hours
                   </Typography>
                   <Typography variant="h4">
-                    {mockUserStats.totalHours}h
+                    {userStats.practice_hours}h
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'warning.main' }}>
@@ -264,7 +262,7 @@ export default function AnalyticsPage() {
                 Performance Trends
               </Typography>
               <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={mockPerformanceData}>
+                <LineChart data={trends}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
@@ -361,7 +359,7 @@ export default function AnalyticsPage() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {mockRecentSessions.map((session) => (
+                    {recent.map((session) => (
                       <TableRow key={session.id} hover>
                         <TableCell>{session.date}</TableCell>
                         <TableCell>
@@ -372,7 +370,7 @@ export default function AnalyticsPage() {
                               session.type === 'Behavioral' ? 'secondary' : 'default'}
                           />
                         </TableCell>
-                        <TableCell>{session.duration}</TableCell>
+                        <TableCell>{session.duration || session.mode || '-'}</TableCell>
                         <TableCell>
                           <Chip
                             label={`${session.score}%`}
@@ -382,7 +380,7 @@ export default function AnalyticsPage() {
                         </TableCell>
                         <TableCell>
                           <Chip
-                            label={session.status}
+                            label={session.status || 'completed'}
                             color="success"
                             size="small"
                             variant="outlined"
@@ -412,7 +410,11 @@ export default function AnalyticsPage() {
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
       >
-        <MenuItem onClick={() => { navigate('/report'); handleMenuClose(); }}>
+        <MenuItem onClick={() => { 
+          if (selectedSession?.id) navigate(`/report/${selectedSession.id}`);
+          else navigate('/report');
+          handleMenuClose(); 
+        }}>
           <ViewIcon sx={{ mr: 1 }} />
           View Report
         </MenuItem>

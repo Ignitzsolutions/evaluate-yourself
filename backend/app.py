@@ -2631,6 +2631,139 @@ async def list_interview_reports(
 
     return summaries
 
+def _parse_duration_minutes(duration_str: Optional[str], metrics: Optional[dict]) -> int:
+    if metrics and isinstance(metrics, dict) and metrics.get("total_duration") is not None:
+        try:
+            return int(metrics.get("total_duration"))
+        except Exception:
+            pass
+    if not duration_str:
+        return 0
+    try:
+        # Expect formats like "20 minutes"
+        parts = str(duration_str).split()
+        return int(parts[0])
+    except Exception:
+        return 0
+
+def _safe_json(value, default):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, (dict, list)):
+            return value
+        return json.loads(value)
+    except Exception:
+        return default
+
+@app.get("/api/analytics/summary")
+async def analytics_summary(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Return summary analytics for the current user."""
+    user_id = get_user_id_from_auth(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    reports = db.query(models.InterviewReport).filter(
+        models.InterviewReport.user_id == user_id,
+        models.InterviewReport.is_sample == False
+    ).order_by(models.InterviewReport.date.asc()).all()
+
+    total_sessions = len(reports)
+    avg_score = 0
+    improvement_pct = 0
+    total_minutes = 0
+
+    if reports:
+        scores = [r.overall_score or 0 for r in reports]
+        avg_score = int(sum(scores) / max(1, len(scores)))
+        if len(scores) >= 2:
+            prev = scores[-2] or 1
+            improvement_pct = int(round(((scores[-1] - prev) / max(1, prev)) * 100))
+
+        for r in reports:
+            metrics = _safe_json(r.metrics, {})
+            total_minutes += _parse_duration_minutes(r.duration, metrics)
+
+    return {
+        "total_sessions": total_sessions,
+        "avg_score": avg_score,
+        "improvement_pct": improvement_pct,
+        "practice_hours": round(total_minutes / 60, 1)
+    }
+
+@app.get("/api/analytics/trends")
+async def analytics_trends(
+    authorization: Optional[str] = Header(None),
+    range: str = "30d",
+    db: Session = Depends(get_db)
+):
+    """Return trend data for charts."""
+    user_id = get_user_id_from_auth(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Simple: return last 20 sessions ordered by date
+    reports = db.query(models.InterviewReport).filter(
+        models.InterviewReport.user_id == user_id,
+        models.InterviewReport.is_sample == False
+    ).order_by(models.InterviewReport.date.asc()).limit(20).all()
+
+    data = []
+    for r in reports:
+        metrics = _safe_json(r.metrics, {})
+        scores = _safe_json(r.scores, {})
+        data.append({
+            "date": r.date.strftime("%Y-%m-%d") if r.date else None,
+            "score": r.overall_score or 0,
+            "eyeContact": metrics.get("eye_contact_pct") or 0,
+            "confidence": scores.get("communication") or scores.get("clarity") or r.overall_score or 0
+        })
+    return data
+
+@app.get("/api/analytics/skills")
+async def analytics_skills(
+    authorization: Optional[str] = Header(None),
+    range: str = "30d",
+    db: Session = Depends(get_db)
+):
+    """Return skill breakdown averages."""
+    user_id = get_user_id_from_auth(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    reports = db.query(models.InterviewReport).filter(
+        models.InterviewReport.user_id == user_id,
+        models.InterviewReport.is_sample == False
+    ).all()
+
+    if not reports:
+        return {
+            "communication": 0,
+            "technical": 0,
+            "problem_solving": 0,
+            "confidence": 0
+        }
+
+    comm = tech = struct = conf = 0
+    count = 0
+    for r in reports:
+        scores = _safe_json(r.scores, {})
+        comm += scores.get("communication") or scores.get("clarity") or 0
+        tech += scores.get("technical_depth") or 0
+        struct += scores.get("structure") or scores.get("relevance") or 0
+        conf += scores.get("communication") or 0
+        count += 1
+
+    return {
+        "communication": int(comm / count),
+        "technical": int(tech / count),
+        "problem_solving": int(struct / count),
+        "confidence": int(conf / count)
+    }
+
 # @app.get("/api/interview/reports/{report_id}")
 # async def get_interview_report(report_id: str, authorization: Optional[str] = Header(None)):
 #     # Handle authentication gracefully (like list endpoint)
@@ -2751,6 +2884,77 @@ async def get_interview_report(
     except Exception as e:
         logging.exception("Failed to get interview report")
         raise HTTPException(status_code=500, detail="Failed to fetch report")
+
+@app.get("/api/interview/reports/{report_id}/download")
+async def download_interview_report(
+    report_id: str,
+    format: str = "pdf",
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Download interview report as PDF."""
+    if format.lower() != "pdf":
+        raise HTTPException(status_code=400, detail="Unsupported format. Use ?format=pdf")
+
+    # Reuse report access checks
+    report = await get_interview_report(report_id, authorization=authorization, db=db)
+
+    # Normalize data
+    scores = report.scores if isinstance(report.scores, dict) else {}
+    metrics = report.metrics if isinstance(report.metrics, dict) else {}
+    recommendations = report.recommendations if isinstance(report.recommendations, list) else []
+    transcript = report.transcript if isinstance(report.transcript, list) else []
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Title"], fontSize=20, alignment=TA_LEFT, spaceAfter=12)
+    h_style = ParagraphStyle("Heading", parent=styles["Heading2"], fontSize=14, spaceAfter=8)
+    body_style = styles["BodyText"]
+
+    content = []
+    content.append(Paragraph(report.title or "Interview Report", title_style))
+    content.append(Paragraph(f"<b>Date:</b> {report.date}", body_style))
+    content.append(Paragraph(f"<b>Type:</b> {report.type}", body_style))
+    content.append(Paragraph(f"<b>Mode:</b> {report.mode}", body_style))
+    content.append(Paragraph(f"<b>Duration:</b> {report.duration}", body_style))
+    content.append(Spacer(1, 12))
+
+    content.append(Paragraph("Summary Scores", h_style))
+    overall = report.overall_score if report.overall_score is not None else 0
+    content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
+    if scores:
+        for k, v in scores.items():
+            content.append(Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", body_style))
+    content.append(Spacer(1, 12))
+
+    content.append(Paragraph("Metrics", h_style))
+    for k, v in metrics.items():
+        content.append(Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", body_style))
+    content.append(Spacer(1, 12))
+
+    if recommendations:
+        content.append(Paragraph("Recommendations", h_style))
+        for rec in recommendations:
+            content.append(Paragraph(f"• {rec}", body_style))
+        content.append(Spacer(1, 12))
+
+    # Transcript appendix (optional, short)
+    if transcript:
+        content.append(PageBreak())
+        content.append(Paragraph("Transcript (Excerpt)", h_style))
+        for entry in transcript[:40]:
+            speaker = entry.get("speaker", "Speaker")
+            text = entry.get("text", "")
+            content.append(Paragraph(f"<b>{speaker}:</b> {text}", body_style))
+
+    doc.build(content)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="interview-report-{report_id}.pdf"'}
+    )
 
 # @app.post("/api/interview/reports")
 # async def create_interview_report(request: CreateInterviewReportRequest, authorization: Optional[str] = Header(None)):
