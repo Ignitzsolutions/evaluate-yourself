@@ -380,13 +380,12 @@ export default function InterviewSessionRoom() {
               addTranscript('ai', finalText);
             }
             // Count question if we haven't seen response.completed for this response_id
-            const responseId = msg.response_id;
-            const finalText = msg.text || msg.transcript;
-            if (finalText && finalText.trim().length > 10 && responseId && !countedResponseIdsRef.current.has(responseId)) {
-              countedResponseIdsRef.current.add(responseId);
+            const countId = msg.response_id;
+            if (finalText && finalText.trim().length > 10 && countId && !countedResponseIdsRef.current.has(countId)) {
+              countedResponseIdsRef.current.add(countId);
               setQuestionCount(prev => {
                 const newCount = prev + 1;
-                console.log(`📊 Question count incremented to ${newCount} (from response.output_audio_transcript.done, response_id: ${responseId})`);
+                console.log(`📊 Question count incremented to ${newCount} (from response.output_audio_transcript.done, response_id: ${countId})`);
                 return newCount;
               });
             }
