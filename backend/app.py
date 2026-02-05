@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -63,6 +64,7 @@ from fastapi import Depends
 # from sqlalchemy.orm import Session
 from db.database import get_db
 from db.users import get_or_create_user
+from services.session.session_store import SessionStore
 
 # Clerk token verification imports
 from jose import jwt as jose_jwt
@@ -572,7 +574,52 @@ def read_root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    """Comprehensive health check for Azure deployment.
+    
+    Checks:
+    - Database connectivity (PostgreSQL/SQLite)
+    - Redis connectivity
+    - Overall service health
+    
+    Returns:
+        JSON with service status, component health, and latencies
+    """
+    from db.database import test_db_connection
+    from db.redis_client import test_redis_connection
+    
+    # Test database
+    db_ok, db_msg, db_latency = test_db_connection()
+    
+    # Test Redis
+    redis_ok, redis_msg, redis_latency = test_redis_connection()
+    
+    # Overall status
+    overall_ok = db_ok and redis_ok
+    status_code = 200 if overall_ok else 503
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if overall_ok else "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "services": {
+                "database": {
+                    "status": "up" if db_ok else "down",
+                    "message": db_msg,
+                    "latency_ms": round(db_latency, 2)
+                },
+                "redis": {
+                    "status": "up" if redis_ok else "down",
+                    "message": redis_msg,
+                    "latency_ms": round(redis_latency, 2)
+                }
+            },
+            "environment": {
+                "database_type": "postgresql" if os.getenv("DATABASE_URL", "").startswith("postgresql") else "sqlite",
+                "redis_mode": "azure" if os.getenv("REDIS_URL", "").startswith("rediss://") else "local"
+            }
+        }
+    )
 
 @app.get("/api/key")
 def get_api_key():
@@ -1274,6 +1321,9 @@ Provide only one response per user turn. Never produce multiple responses.
                         "modalities": ["audio"],  # ONLY audio - prevents text+audio duplicate streams
                         "input_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz input
                         "output_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz output - CRITICAL for correct playback speed
+                        "input_audio_transcription": {  # ✅ Enable Realtime ASR for reliable user transcripts
+                            "model": "whisper-1"
+                        },
                         "voice": "alloy",
                         "audio": {
                             "voice": "alloy",
@@ -1438,6 +1488,13 @@ Provide only one response per user turn. Never produce multiple responses.
                                         full_text = "".join(current_ai_text)
                                         if full_text:
                                             session_state.add_question(full_text)
+                                            # Also store in transcript with source marker
+                                            session_state.transcript.append({
+                                                "speaker": "ai",
+                                                "text": full_text,
+                                                "timestamp": datetime.now().isoformat(),
+                                                "source": "assistant_text"  # Marks as AI-generated
+                                            })
                                             current_ai_text = []
                                             waiting_for_response = True
 
@@ -1446,12 +1503,27 @@ Provide only one response per user turn. Never produce multiple responses.
                                         transcript = event.get("transcript", "")
                                         if transcript and waiting_for_response:
                                             current_user_text.append(transcript)
+                                            # Store in session with source indicator (fallback method)
+                                            session_state.transcript.append({
+                                                "speaker": "user",
+                                                "text": transcript,
+                                                "timestamp": datetime.now().isoformat(),
+                                                "source": "input_buffer_fallback"
+                                            })
 
                                     elif event_type == "conversation.item.input_audio_transcription.completed":
-                                        # User transcript is complete - accumulate
+                                        # ✅ PRIMARY METHOD: Realtime ASR transcript (most reliable)
                                         transcript = event.get("transcript", "")
                                         if transcript and waiting_for_response:
                                             current_user_text.append(transcript)
+                                            # Store with authoritative source marker
+                                            session_state.transcript.append({
+                                                "speaker": "user",
+                                                "text": transcript,
+                                                "timestamp": datetime.now().isoformat(),
+                                                "source": "realtime_asr"  # Marks this as server-authoritative
+                                            })
+                                            print(f"✅ [Realtime ASR] User transcript: {transcript[:100]}...")
 
                                     elif event_type == "conversation.item.completed":
                                         # User finished speaking - evaluate the complete answer
@@ -3009,6 +3081,15 @@ async def save_interview_transcript(
                     duration_minutes = 1
 
                 report_data = generate_interview_report(session_state, interview_type, duration_minutes)
+                
+                # Store transcript in canonical format for better analysis
+                canonical_transcript = {
+                    "mode": transcript_input.get("mode", "legacy") if isinstance(transcript_input, dict) else "legacy",
+                    "qa_pairs": qa_pairs if qa_pairs else [],
+                    "unpaired": unpaired if unpaired else [],
+                    "raw_messages": raw_messages if raw_messages else []
+                }
+                
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
@@ -3020,11 +3101,7 @@ async def save_interview_transcript(
                     duration=report_data.duration,
                     overall_score=report_data.overall_score,
                     scores=json.dumps(report_data.scores.dict() if hasattr(report_data.scores, 'dict') else report_data.scores),
-                    transcript=json.dumps([{
-                        "speaker": t.speaker if hasattr(t, 'speaker') else t.get("speaker", "unknown"),
-                        "text": t.text if hasattr(t, 'text') else t.get("text", ""),
-                        "timestamp": (t.timestamp.isoformat() if isinstance(t.timestamp, datetime) else t.timestamp) if hasattr(t, 'timestamp') else t.get("timestamp", "")
-                    } for t in report_data.transcript]),
+                    transcript=json.dumps(canonical_transcript),  # Store canonical format
                     recommendations=json.dumps(report_data.recommendations),
                     questions=report_data.questions,
                     is_sample=False,
@@ -3048,6 +3125,13 @@ async def save_interview_transcript(
             "message": "Transcript saved successfully",
             "session_id": session_id,
             "report_id": report_id,
+            "transcript": {
+                "mode": transcript_input.get("mode", "legacy") if isinstance(transcript_input, dict) else "legacy",
+                "qa_pairs": qa_pairs if qa_pairs else [],
+                "questions_answered": len(qa_pairs) if qa_pairs else 0,
+                "has_unpaired": len(unpaired) > 0 if unpaired else False,
+                "has_raw_messages": len(raw_messages) > 0 if raw_messages else False
+            },
             "files": {
                 "json": json_filename,
                 "text": text_filename
@@ -3059,6 +3143,242 @@ async def save_interview_transcript(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save transcript: {str(e)}")
+
+
+@app.post("/api/interview/{session_id}/generate-feedback")
+async def generate_interview_feedback(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate AI feedback for a completed interview.
+    
+    This endpoint is idempotent - calling it multiple times with the same session_id
+    will return the same feedback without re-generating (24h cache).
+    
+    Flow:
+    1. Load report from database
+    2. Validate report has transcript
+    3. Check idempotency lock (24h TTL)
+    4. Build transcript text from canonical qa_pairs
+    5. Call LangChain candidate_feedback chain
+    6. Save feedback to report.ai_feedback
+    7. Emit FEEDBACK_GENERATED event
+    8. Return feedback in report format
+    """
+    try:
+        # Authentication
+        user_id = None
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            try:
+                from db.users import get_current_user_from_token
+                user_id = get_current_user_from_token(token, db)
+            except Exception:
+                pass
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # Get report from database
+        report = db.query(models.InterviewReport).filter(
+            models.InterviewReport.session_id == session_id,
+            models.InterviewReport.user_id == user_id
+        ).first()
+        
+        if not report:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No report found for session {session_id}"
+            )
+        
+        # Check if feedback already exists
+        if report.ai_feedback:
+            try:
+                existing_feedback = json.loads(report.ai_feedback)
+                if existing_feedback:
+                    print(f"ℹ️ Feedback already exists for session {session_id}, returning cached version")
+                    
+                    # Return in report format if available
+                    if "_report_format" in existing_feedback:
+                        return {
+                            "status": "success",
+                            "cached": True,
+                            "feedback": existing_feedback["_report_format"]
+                        }
+                    return {
+                        "status": "success",
+                        "cached": True,
+                        "feedback": existing_feedback
+                    }
+            except json.JSONDecodeError:
+                print(f"⚠️ Existing feedback JSON invalid, will regenerate")
+        
+        # Check idempotency lock (prevent concurrent generation)
+        lock_key = f"feedback_lock:{session_id}"
+        session_store = SessionStore(redis_client) if redis_client else None
+        
+        if session_store:
+            # Use SessionStore atomic lock acquisition
+            lock_acquired = session_store.acquire_lock(lock_key, ttl_seconds=300)
+            if not lock_acquired:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Feedback generation already in progress for this session"
+                )
+        elif redis_client:
+            # Fallback for direct Redis client (shouldn't happen)
+            lock_exists = redis_client.get(lock_key)
+            if lock_exists:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Feedback generation already in progress for this session"
+                )
+            redis_client.setex(lock_key, 300, "1")
+        
+        try:
+            # Parse transcript
+            transcript_data = json.loads(report.transcript) if isinstance(report.transcript, str) else report.transcript
+            
+            # Check if canonical format
+            if isinstance(transcript_data, dict):
+                qa_pairs = transcript_data.get("qa_pairs", [])
+                raw_messages = transcript_data.get("raw_messages", [])
+                
+                if not qa_pairs and not raw_messages:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No transcript content available for feedback generation"
+                    )
+                
+                # Build transcript text from QA pairs
+                if qa_pairs:
+                    transcript_lines = []
+                    for i, qa in enumerate(qa_pairs, 1):
+                        q = qa.get("question", "").strip()
+                        a = qa.get("answer", "").strip()
+                        if q:
+                            transcript_lines.append(f"Q{i}: {q}")
+                        if a:
+                            transcript_lines.append(f"A{i}: {a}")
+                    transcript_text = "\n\n".join(transcript_lines)
+                else:
+                    # Fallback to raw messages
+                    transcript_lines = []
+                    for msg in raw_messages:
+                        speaker = msg.get("speaker", "unknown").upper()
+                        text = msg.get("text", "").strip()
+                        if text:
+                            transcript_lines.append(f"{speaker}: {text}")
+                    transcript_text = "\n\n".join(transcript_lines)
+            
+            elif isinstance(transcript_data, list):
+                # Legacy format: [{speaker, text, timestamp}]
+                transcript_lines = []
+                for msg in transcript_data:
+                    speaker = msg.get("speaker", "unknown").upper()
+                    text = msg.get("text", "").strip()
+                    if text:
+                        transcript_lines.append(f"{speaker}: {text}")
+                transcript_text = "\n\n".join(transcript_lines)
+            
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid transcript format"
+                )
+            
+            if not transcript_text or len(transcript_text) < 50:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transcript too short for meaningful feedback"
+                )
+            
+            # Extract interview metadata
+            interview_type = report.type or "mixed"
+            duration_minutes = report.duration or "0 minutes"
+            # Parse duration string (e.g., "5 minutes" -> 5)
+            try:
+                duration_int = int(duration_minutes.split()[0])
+            except (ValueError, IndexError):
+                duration_int = 0
+            
+            # Generate feedback using LangChain chain
+            from services.llm.chains.candidate_feedback import generate_candidate_feedback
+            
+            print(f"🤖 Generating AI feedback for session {session_id}...")
+            print(f"   Interview type: {interview_type}, Duration: {duration_int} min, Transcript length: {len(transcript_text)} chars")
+            
+            feedback = generate_candidate_feedback(
+                transcript_text=transcript_text,
+                interview_type=interview_type,
+                duration_minutes=duration_int,
+                use_structured_output=True  # Use LangChain structured output
+            )
+            
+            if not feedback:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate feedback - LLM returned empty response"
+                )
+            
+            # Save feedback to database
+            report.ai_feedback = json.dumps(feedback)
+            db.commit()
+            db.refresh(report)
+            
+            print(f"✅ AI feedback generated and saved for session {session_id}")
+            
+            # Emit FEEDBACK_GENERATED event using SessionStore Redis Streams
+            if session_store:
+                try:
+                    event_payload = {
+                        "has_structured_format": "_structured" in feedback,
+                        "categories": list(feedback.get("_structured", {}).get("categories", {}).keys()) if "_structured" in feedback else []
+                    }
+                    event_id = session_store.emit_event(session_id, "FEEDBACK_GENERATED", event_payload)
+                    if event_id:
+                        print(f"✅ Emitted FEEDBACK_GENERATED event: {event_id}")
+                except Exception as event_err:
+                    print(f"⚠️ Failed to emit FEEDBACK_GENERATED event: {event_err}")
+            
+            # Return in report format if available
+            if "_report_format" in feedback:
+                return {
+                    "status": "success",
+                    "cached": False,
+                    "feedback": feedback["_report_format"]
+                }
+            
+            return {
+                "status": "success",
+                "cached": False,
+                "feedback": feedback
+            }
+        
+        finally:
+            # Release lock using SessionStore
+            if session_store:
+                try:
+                    session_store.release_lock(lock_key)
+                except Exception:
+                    pass
+            elif redis_client:
+                try:
+                    redis_client.delete(lock_key)
+                except Exception:
+                    pass
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error generating feedback: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate feedback: {str(e)}")
+
 
 # Gaze tracking WebSocket endpoint
 class EMA:

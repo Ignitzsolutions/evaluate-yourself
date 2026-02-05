@@ -141,3 +141,176 @@ class SessionStore:
                 return None
 
         return None
+
+    # Lock management methods
+    def acquire_lock(self, lock_key: str, ttl_seconds: int = 300) -> bool:
+        """
+        Acquire a distributed lock using SET NX EX atomic operation.
+        
+        Args:
+            lock_key: Lock identifier (e.g., 'feedback_lock:session_123')
+            ttl_seconds: Lock TTL in seconds (default 5 minutes)
+        
+        Returns:
+            True if lock acquired, False if already held
+        """
+        try:
+            # SET key value NX EX seconds - atomic operation
+            result = self.redis.set(lock_key, "1", nx=True, ex=ttl_seconds)
+            return bool(result)
+        except Exception as e:
+            logger.error(f"Error acquiring lock {lock_key}: {e}")
+            return False
+
+    def release_lock(self, lock_key: str) -> bool:
+        """
+        Release a distributed lock.
+        
+        Args:
+            lock_key: Lock identifier
+        
+        Returns:
+            True if lock was released, False otherwise
+        """
+        try:
+            return bool(self.redis.delete(lock_key))
+        except Exception as e:
+            logger.error(f"Error releasing lock {lock_key}: {e}")
+            return False
+
+    def check_lock(self, lock_key: str) -> bool:
+        """
+        Check if a lock exists.
+        
+        Args:
+            lock_key: Lock identifier
+        
+        Returns:
+            True if lock exists, False otherwise
+        """
+        try:
+            return bool(self.redis.exists(lock_key))
+        except Exception as e:
+            logger.error(f"Error checking lock {lock_key}: {e}")
+            return False
+
+    # Event streaming methods using Redis Streams
+    def emit_event(self, session_id: str, event_type: str, payload: Dict[str, Any]) -> Optional[str]:
+        """
+        Emit an event to Redis Stream for a session.
+        
+        Args:
+            session_id: Session ID
+            event_type: Event type (e.g., 'FEEDBACK_GENERATED', 'INTERVIEW_ENDED')
+            payload: Event payload dictionary
+        
+        Returns:
+            Event ID from Redis Stream, or None on failure
+        """
+        try:
+            stream_key = f"events:{session_id}"
+            event_data = {
+                "type": event_type,
+                "timestamp": datetime.now().isoformat(),
+                "payload": json.dumps(payload, default=str)
+            }
+            # XADD returns the event ID (e.g., '1234567890123-0')
+            event_id = self.redis.xadd(stream_key, event_data)
+            return event_id.decode() if isinstance(event_id, bytes) else event_id
+        except Exception as e:
+            logger.error(f"Error emitting event {event_type} for session {session_id}: {e}")
+            return None
+
+    def replay_events(self, session_id: str, start_id: str = "0", count: int = 100) -> List[Dict[str, Any]]:
+        """
+        Replay events from Redis Stream for a session.
+        
+        Args:
+            session_id: Session ID
+            start_id: Starting event ID (default '0' for beginning)
+            count: Max number of events to retrieve
+        
+        Returns:
+            List of events with id, type, timestamp, and payload
+        """
+        try:
+            stream_key = f"events:{session_id}"
+            # XRANGE returns [(event_id, {field: value})]
+            events = self.redis.xrange(stream_key, min=start_id, max="+", count=count)
+            
+            result = []
+            for event_id, event_data in events:
+                event_id_str = event_id.decode() if isinstance(event_id, bytes) else event_id
+                event_type = event_data.get(b"type", b"").decode() if isinstance(event_data.get(b"type"), bytes) else event_data.get("type", "")
+                timestamp = event_data.get(b"timestamp", b"").decode() if isinstance(event_data.get(b"timestamp"), bytes) else event_data.get("timestamp", "")
+                payload_str = event_data.get(b"payload", b"{}").decode() if isinstance(event_data.get(b"payload"), bytes) else event_data.get("payload", "{}")
+                
+                try:
+                    payload = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    payload = {}
+                
+                result.append({
+                    "id": event_id_str,
+                    "type": event_type,
+                    "timestamp": timestamp,
+                    "payload": payload
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error replaying events for session {session_id}: {e}")
+            return []
+
+    def get_latest_events(self, session_id: str, after_id: Optional[str] = None, block_ms: int = 0) -> List[Dict[str, Any]]:
+        """
+        Get latest events from Redis Stream, optionally blocking for new events.
+        
+        Args:
+            session_id: Session ID
+            after_id: Only return events after this ID (default None for all new)
+            block_ms: Block for this many milliseconds waiting for new events (0 = no block)
+        
+        Returns:
+            List of events with id, type, timestamp, and payload
+        """
+        try:
+            stream_key = f"events:{session_id}"
+            start_id = after_id if after_id else "$"  # '$' means only new events
+            
+            if block_ms > 0:
+                # XREAD BLOCK for live streaming
+                streams = {stream_key: start_id}
+                results = self.redis.xread(streams, count=10, block=block_ms)
+                if not results:
+                    return []
+                
+                # results = [(stream_key, [(event_id, event_data)])]
+                events = results[0][1] if results else []
+            else:
+                # Non-blocking read
+                events = self.redis.xrange(stream_key, min=start_id, max="+", count=10)
+            
+            result = []
+            for event_id, event_data in events:
+                event_id_str = event_id.decode() if isinstance(event_id, bytes) else event_id
+                event_type = event_data.get(b"type", b"").decode() if isinstance(event_data.get(b"type"), bytes) else event_data.get("type", "")
+                timestamp = event_data.get(b"timestamp", b"").decode() if isinstance(event_data.get(b"timestamp"), bytes) else event_data.get("timestamp", "")
+                payload_str = event_data.get(b"payload", b"{}").decode() if isinstance(event_data.get(b"payload"), bytes) else event_data.get("payload", "{}")
+                
+                try:
+                    payload = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    payload = {}
+                
+                result.append({
+                    "id": event_id_str,
+                    "type": event_type,
+                    "timestamp": timestamp,
+                    "payload": payload
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error getting latest events for session {session_id}: {e}")
+            return []
