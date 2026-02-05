@@ -339,44 +339,6 @@ export default function Dashboard() {
 
 
       </div>
-      <Box
-        component="div"
-        sx={{
-          width: "100%",
-          bgcolor: "primary.main", // EXACT MUI button color
-          m: 0,                    // no margin
-          py: 3,
-          textAlign: "center"
-        }}
-      >
-        <Typography
-          sx={{
-            fontSize: 164,
-            fontWeight: 800,
-            letterSpacing: 1.2,
-            opacity: 0.95,
-            color: "white"
-          }}
-        >
-          EvaluateYourself
-        </Typography>
-        {/* Break line below main text */}
-        <div style={{ width: "100%", marginTop: 12, marginBottom: 12 }}>
-          <Divider sx={{ bgcolor: "white", opacity: 0.3, height: 2, width: "100%" }} />
-        </div>
-
-        {/* Copyright text */}
-        <Typography
-          sx={{
-            fontSize: 14,
-            fontWeight: 500,
-            color: "white",
-            opacity: 0.7
-          }}
-        >
-          © {new Date().getFullYear()} Evaluate Yourself. All rights reserved.
-        </Typography>
-      </Box>
     </>
   );
 }
