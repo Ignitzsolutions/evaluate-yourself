@@ -43,13 +43,14 @@ const Logo = ({ onClick }) => {
         display: 'flex',
         alignItems: 'center',
         cursor: onClick ? 'pointer' : 'default',
+        gap: 1.2,
       }}
       onClick={onClick}
     >
       <img 
         src="/assets/logo.png" 
         alt="Evaluate Yourself Logo" 
-        style={{ height: '100px', width: 'auto' }}
+        style={{ height: '60px', width: 'auto' }}
       />
     </Box>
   );
@@ -171,44 +172,43 @@ export default function Navbar() {
         position="sticky"
         elevation={0}
         sx={{
-          backgroundColor: theme.palette.background.paper,
-          borderBottom: `1px solid ${theme.palette.divider}`,
+          backgroundColor: 'rgba(255,255,255,0.75)',
+          backdropFilter: 'blur(12px) saturate(140%)',
+          borderBottom: '1px solid rgba(148,163,184,0.25)',
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between' }}>
+        <Toolbar sx={{ justifyContent: 'space-between', minHeight: { xs: 70, md: 78 }, px: { xs: 2, md: 3 } }}>
           {/* Logo */}
           <Logo onClick={() => navigate('/')} />
 
           {/* Desktop Navigation */}
           {!isMobile && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {navItems.map((item) => (
                 <Button
                   key={item.path}
                   onClick={() => handleNavigation(item.path)}
                   startIcon={item.icon}
                   sx={{
-                    color: isActivePath(item.path)
-                      ? theme.palette.primary.main
-                      : theme.palette.text.secondary,
-                    fontWeight: isActivePath(item.path) ? 600 : 500,
-                    position: 'relative',
-                    '&::after': isActivePath(item.path)
-                      ? {
-                          content: '""',
-                          position: 'absolute',
-                          bottom: 0,
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          width: '60%',
-                          height: 3,
-                          borderRadius: '3px 3px 0 0',
-                          backgroundColor: theme.palette.primary.main,
-                        }
-                      : {},
+                    color: '#0f172a',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    borderRadius: 999,
+                    px: { xs: 1.6, md: 2.2 },
+                    py: { xs: 0.7, md: 0.9 },
+                    fontSize: { xs: 13, md: 14 },
+                    border: isActivePath(item.path)
+                      ? '1px solid rgba(59,130,246,0.35)'
+                      : '1px solid transparent',
+                    background: isActivePath(item.path)
+                      ? 'rgba(59,130,246,0.12)'
+                      : 'transparent',
                     '&:hover': {
-                      backgroundColor: theme.palette.primary.main + '10',
-                      color: theme.palette.primary.main,
+                      backgroundColor: 'rgba(15,23,42,0.06)',
+                    },
+                    '&:focus-visible': {
+                      outline: '2px solid rgba(59,130,246,0.5)',
+                      outlineOffset: 2,
                     },
                   }}
                 >
@@ -235,9 +235,13 @@ export default function Navbar() {
                   startIcon={<PlayArrow />}
                   onClick={handleNewInterview}
                   sx={{
-                    background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
+                    background: 'linear-gradient(135deg, #0f172a, #1f2937)',
+                    borderRadius: 999,
+                    textTransform: 'none',
+                    px: { xs: 2, md: 2.5 },
+                    fontSize: { xs: 13, md: 14 },
                     '&:hover': {
-                      background: `linear-gradient(135deg, ${theme.palette.primary.dark}, ${theme.palette.primary.main})`,
+                      background: 'linear-gradient(135deg, #111827, #0f172a)',
                     },
                   }}
                 >
@@ -249,6 +253,13 @@ export default function Navbar() {
                   startIcon={<Logout />}
                   onClick={handleLogout}
                   size="small"
+                  sx={{
+                    borderRadius: 999,
+                    textTransform: 'none',
+                    px: { xs: 1.6, md: 2 },
+                    fontSize: { xs: 12, md: 13 },
+                    borderColor: 'rgba(239,68,68,0.5)',
+                  }}
                 >
                   Logout
                 </Button>

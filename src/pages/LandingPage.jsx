@@ -35,14 +35,14 @@ export default function LandingPage() {
                 src="/assets/logo.png"
                 alt="Evaluate Yourself Logo"
                 style={{
-                  width: isScrolled ? 28 : 36,
-                  height: isScrolled ? 28 : 36,
+                  width: isScrolled ? 40 : 56,
+                  height: isScrolled ? 40 : 56,
                   borderRadius: "12px",
                   transition: "all 0.3s ease-in-out"
                 }}
               />
               <strong style={{
-                fontSize: isScrolled ? "14px" : "16px",
+                fontSize: isScrolled ? "15px" : "18px",
                 transition: "all 0.3s ease-in-out"
               }}>Evaluate Yourself</strong>
             </Link>
