@@ -58,6 +58,7 @@ export default function ReportPage() {
   const [report, setReport] = useState(null);
   const [feedbackPollCount, setFeedbackPollCount] = useState(0);
   const [isFeedbackGenerating, setIsFeedbackGenerating] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
   
   const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || '';
   
@@ -187,6 +188,31 @@ export default function ReportPage() {
     navigate("/dashboard");
   };
 
+  const handleDownload = async () => {
+    if (!sessionId) return;
+    setDownloadLoading(true);
+    try {
+      const token = await getToken();
+      const resp = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}/download?format=pdf`, token);
+      if (!resp.ok) {
+        throw new Error(`Download failed: ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `interview-report-${sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Download failed:', e);
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
   const getScoreColor = (score) => {
     if (score >= 80) return "#4CAF50"; // Green
     if (score >= 60) return "#FF9800"; // Orange
@@ -252,6 +278,21 @@ export default function ReportPage() {
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={handleDownload}
+            disabled={downloadLoading}
+            sx={{
+              borderRadius: "8px",
+              textTransform: "none",
+              fontWeight: 600,
+              fontFamily: "'Inter', sans-serif",
+              px: 3,
+              py: 1.5
+            }}
+          >
+            {downloadLoading ? "Preparing..." : "Download PDF"}
+          </Button>
           <Button
             variant="contained"
             onClick={() => navigate("/")}

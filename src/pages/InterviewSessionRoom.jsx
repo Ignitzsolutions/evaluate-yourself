@@ -90,6 +90,8 @@ export default function InterviewSessionRoom() {
   const [questionCount, setQuestionCount] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const capturedAiRef = useRef(new Set());
+  const capturedUserRef = useRef(new Set());
 
   // Collect all AI and user messages for saving
   const aiMessagesRef = useRef([]);
@@ -344,40 +346,16 @@ export default function InterviewSessionRoom() {
           } else if (msg.type === 'response.output_text.delta') {
             if (msg.delta) {
               setAiSpeaking(true);
-              setTranscript(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.speaker === 'ai' && !last.final) {
-                  const combined = last.text + msg.delta;
-                  // update aiMessagesRef last entry if exists
-                  if (aiMessagesRef.current.length > 0) {
-                    aiMessagesRef.current[aiMessagesRef.current.length - 1].text = combined;
-                    aiMessagesRef.current[aiMessagesRef.current.length - 1].timestamp = new Date().toISOString();
-                  } else {
-                    aiMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
-                  }
-                  return [...prev.slice(0, -1), { ...last, text: combined }];
-                }
-                const entry = { speaker: 'ai', text: msg.delta, final: false, timestamp: new Date().toISOString() };
-                aiMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
-                return [...prev, entry];
-              });
             }
           } else if (msg.type === 'response.output_text.done') {
             setAiSpeaking(false);
-            setTranscript(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.speaker === 'ai') {
-                const finalText = msg.text || last.text;
-                // update aiMessagesRef last entry to final
-                if (aiMessagesRef.current.length > 0) {
-                  aiMessagesRef.current[aiMessagesRef.current.length - 1].text = finalText;
-                } else {
-                  aiMessagesRef.current.push({ text: finalText, timestamp: new Date().toISOString() });
-                }
-                return [...prev.slice(0, -1), { ...last, text: finalText, final: true }];
-              }
-              return prev;
-            });
+            const finalText = msg.text || msg.transcript;
+            const responseId = msg.response_id || msg.response?.id || 'text';
+            const key = `${responseId}:${finalText}`;
+            if (finalText && finalText.trim().length > 0 && !capturedAiRef.current.has(key)) {
+              capturedAiRef.current.add(key);
+              addTranscript('ai', finalText);
+            }
           } else if (msg.type === 'response.output_item.added') {
             // Remember the last AI output item id so we can detect the user reply that follows
             try {
@@ -388,43 +366,19 @@ export default function InterviewSessionRoom() {
               console.warn('Failed to capture output item id:', e);
             }
           } else if (msg.type === 'response.output_audio_transcript.delta') {
-            // Many SDKs send audio-based transcript events with the partial transcript text
             const text = msg.delta || msg.transcript || msg.text || msg.transcript_delta || null;
             if (text) {
               setAiSpeaking(true);
-              setTranscript(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.speaker === 'ai' && !last.final) {
-                  const combined = last.text + text;
-                  // update aiMessagesRef last entry if exists
-                  if (aiMessagesRef.current.length > 0) {
-                    aiMessagesRef.current[aiMessagesRef.current.length - 1].text = combined;
-                    aiMessagesRef.current[aiMessagesRef.current.length - 1].timestamp = new Date().toISOString();
-                  } else {
-                    aiMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
-                  }
-                  return [...prev.slice(0, -1), { ...last, text: combined }];
-                }
-                const entry = { speaker: 'ai', text: text, final: false, timestamp: new Date().toISOString() };
-                aiMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
-                return [...prev, entry];
-              });
             }
           } else if (msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.output_audio_transcript.completed') {
             setAiSpeaking(false);
-            setTranscript(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.speaker === 'ai') {
-                const finalText = msg.text || msg.transcript || last.text;
-                if (aiMessagesRef.current.length > 0) {
-                  aiMessagesRef.current[aiMessagesRef.current.length - 1].text = finalText;
-                } else {
-                  aiMessagesRef.current.push({ text: finalText, timestamp: new Date().toISOString() });
-                }
-                return [...prev.slice(0, -1), { ...last, text: finalText, final: true }];
-              }
-              return prev;
-            });
+            const finalText = msg.text || msg.transcript;
+            const responseId = msg.response_id || msg.response?.id || 'audio';
+            const key = `${responseId}:${finalText}`;
+            if (finalText && finalText.trim().length > 0 && !capturedAiRef.current.has(key)) {
+              capturedAiRef.current.add(key);
+              addTranscript('ai', finalText);
+            }
             // Count question if we haven't seen response.completed for this response_id
             const responseId = msg.response_id;
             const finalText = msg.text || msg.transcript;
@@ -453,40 +407,19 @@ export default function InterviewSessionRoom() {
           // Handle user transcription events (fallbacks + conversation items)
           else if (msg.type === 'input_audio_transcription.completed' || msg.type === 'input_audio_transcription.done') {
             const text = msg.text || msg.transcript;
+            const itemId = msg.item_id || msg.conversation_item_id || 'user';
+            const key = `${itemId}:${text}`;
             console.log('[input_audio_transcription.completed] text:', text);
-            if (text && text.trim().length > 0) {
+            if (text && text.trim().length > 0 && !capturedUserRef.current.has(key)) {
+              capturedUserRef.current.add(key);
               addTranscript('user', text);
               setMicActive(false);
-            } else {
+            } else if (!text) {
               console.warn('[input_audio_transcription.completed] No user text found in message:', msg);
             }
-          } else if (msg.type && msg.type.startsWith('input_audio_transcription') && msg.delta) {
-            // partial transcription while user is speaking
-            const partial = msg.delta || msg.text || msg.transcript;
-            if (partial) {
-              // show partial as 'system' typing indicator or temporary user line
-              setTranscript(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.speaker === 'user' && !last.final) {
-                  // append
-                  const combined = last.text + partial;
-                  // update userMessagesRef
-                  if (userMessagesRef.current.length > 0) {
-                    userMessagesRef.current[userMessagesRef.current.length - 1].text = combined;
-                    userMessagesRef.current[userMessagesRef.current.length - 1].timestamp = new Date().toISOString();
-                  } else {
-                    userMessagesRef.current.push({ text: combined, timestamp: new Date().toISOString() });
-                  }
-                  return [...prev.slice(0, -1), { ...last, text: combined }];
-                }
-                const entry = { speaker: 'user', text: partial, final: false, timestamp: new Date().toISOString() };
-                userMessagesRef.current.push({ text: entry.text, timestamp: entry.timestamp });
-                return [...prev, entry];
-              });
-            }
           } else if (msg.type === 'conversation.item.added' || msg.type === 'conversation.item.done') {
-                        // Debug: log the full message object for diagnosis
-                        console.log('[DEBUG][conversation.item.*] FULL MSG:', JSON.stringify(msg, null, 2));
+            // Debug: log the full message object for diagnosis
+            console.log('[DEBUG][conversation.item.*] FULL MSG:', JSON.stringify(msg, null, 2));
             // Some events include user contributions as conversation items
             const item = msg.item || msg;
             try {
@@ -522,9 +455,9 @@ export default function InterviewSessionRoom() {
               console.log('[conversation.item.*] text:', text, '| isUserReply:', isUserReply, '| role:', role, '| prevId:', prevId, '| lastAIItemRef:', lastAIItemRef.current);
 
               if (isUserReply && text && text.trim().length > 0) {
-                // avoid duplicates
-                const last = transcript[transcript.length - 1];
-                if (!last || last.speaker !== 'user' || last.text !== text) {
+                const key = `${itemId || prevId || 'item'}:${text}`;
+                if (!capturedUserRef.current.has(key)) {
+                  capturedUserRef.current.add(key);
                   addTranscript('user', text);
                 }
               } else if (text && text.trim().length > 0) {
