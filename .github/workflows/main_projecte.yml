@@ -16,6 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install frontend dependencies and build
+        run: |
+          npm ci
+          CI=false npm run build
+
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
@@ -74,6 +85,8 @@ jobs:
           path: |
             .
             !antenv/
+            !node_modules/
+            !backend/venv/
 
   deploy:
     runs-on: ubuntu-22.04
@@ -102,7 +115,8 @@ jobs:
         with:
           app-name: 'projecte'
           slot-name: 'Production'
-          startup-command: 'cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000} --timeout 600'
+          package: .
+          startup-command: 'cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${WEBSITES_PORT:-8000} --timeout 600'
           # Note: If remote build fails, disable SCM_DO_BUILD_DURING_DEPLOYMENT in Azure Portal
           # Configuration → Application settings → Set SCM_DO_BUILD_DURING_DEPLOYMENT to false
           # Also set WEBSITES_PORT=8000 in Application settings for proper port routing

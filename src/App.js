@@ -48,6 +48,7 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/test-realtime" element={<RealtimeTestPage />} />
+          <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
 
           {/* Auth-protected routes with navbar */}
           <Route

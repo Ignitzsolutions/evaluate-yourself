@@ -107,8 +107,9 @@ async def websocket_interview_endpoint(
     connection_id = str(uuid.uuid4())
     logger.info(f"[{connection_id}] WebSocket connection attempt for session {session_id}")
     
-    # Dependencies (in production, inject via dependency injection)
-    redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    # Dependencies (use centralized Redis client)
+    from db.redis_client import get_redis_client
+    redis_client = get_redis_client()
     token_service = TokenService()
     from services.session.session_store import SessionStore
     session_store = SessionStore(redis_client)

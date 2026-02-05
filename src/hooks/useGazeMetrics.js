@@ -5,8 +5,8 @@ const getEnv = (k) =>
   process.env[k];
 
 export default function useGazeMetrics() {
-  const url =
-    getEnv("VITE_GAZE_WS_URL") || getEnv("REACT_APP_GAZE_WS_URL") || null;
+  // Disabled by default - only connects if GAZE_WS_URL is explicitly set
+  const url = null; // getEnv("VITE_GAZE_WS_URL") || getEnv("REACT_APP_GAZE_WS_URL") || null;
   const wsRef = useRef(null);
   const [connected, setConnected] = useState(false);
   const [metrics, setMetrics] = useState({
