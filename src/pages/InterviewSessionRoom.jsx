@@ -7,6 +7,11 @@ import {
   ExitToApp,
   Dashboard as DashboardIcon,
   Assessment,
+  Mic,
+  MicOff,
+  Videocam,
+  VideocamOff,
+  CallEnd,
 } from '@mui/icons-material';
 import {
   Dialog,
@@ -83,6 +88,8 @@ export default function InterviewSessionRoom() {
   const [permissionError, setPermissionError] = useState(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [questionCount, setQuestionCount] = useState(0);
+  const [micMuted, setMicMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
 
   // Collect all AI and user messages for saving
   const aiMessagesRef = useRef([]);
@@ -965,178 +972,96 @@ export default function InterviewSessionRoom() {
   }
 
   return (
-    <div className="session-shell">
+    <div className="session-shell meet-shell">
       {/* Top Bar */}
-      <div className="session-topbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <Typography style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+      <div className="session-topbar meet-topbar">
+        <div className="meet-topbar-left">
+          <Typography style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
             Interview Session
           </Typography>
-          <span style={{ fontSize: '14px', color: '#64748b', textTransform: 'capitalize' }}>
-            {interviewType}
-          </span>
+          <span className="meet-subtle">{interviewType}</span>
         </div>
+        <div className="meet-topbar-right" aria-hidden="true" />
+      </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ fontSize: '14px', color: '#334155' }}>
-            {formatTime(timeElapsed)}
-          </span>
-          <span style={{ fontSize: '14px', color: '#64748b' }}>
-            Q{questionCount} / {maxQuestions}
-          </span>
-          <span
-            style={{
-              fontSize: '12px',
-              color: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af'
-              }}
-            />
-            {status}
-          </span>
+      {(status === 'error' || status === 'disconnected' || status === 'failed') && (
+        <div className="meet-conn-banner">
+          Connection issue detected. Please check your network.
         </div>
+      )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {reportAvailable && reportId && (
-            <button
-              onClick={() => navigate(`/report/${reportId}`)}
-              className="session-action-btn"
-            >
-              <Assessment style={{ fontSize: '16px' }} />
-              {reportLoading ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <span>Generating...</span>
-                  <CircularProgress size={16} />
-                </span>
-              ) : (
-                'Report'
-              )}
-            </button>
+      {/* Main Stage */}
+      <div className="meet-stage-wrap">
+        <div className="meet-stage">
+          <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
+            <div className="meet-memoji" aria-hidden="true" />
+            <Avatar className="meet-avatar">S</Avatar>
+          </div>
+          <div className="meet-nameplate">Sonia</div>
+          {(status === 'connecting' || status === 'idle') && (
+            <div className="meet-stage-status">Connecting…</div>
           )}
-
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="session-action-btn"
-          >
-            <DashboardIcon style={{ fontSize: '16px' }} />
-            Dashboard
-          </button>
-          <button
-            onClick={() => navigate('/')}
-            className="session-action-btn"
-          >
-            <ExitToApp style={{ fontSize: '16px' }} />
-            Exit
-          </button>
         </div>
       </div>
 
-      {/* Main Content - Single Panel Layout */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', padding: '24px', gap: '24px', minHeight: 0, justifyContent: 'center' }}>
-        {/* Video Tiles Panel */}
-        <div style={{ flex: '0 0 80%', maxWidth: '1000px', display: 'flex', flexDirection: 'column', gap: '24px', minHeight: 0 }}>
-          {/* Video Tiles Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
-            {/* User Tile */}
-            <div className="session-tile">
-              <div className="session-tile-header">
-                <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>You</Typography>
-                <span className={`session-chip ${micActive ? 'on' : 'off'}`}>{micActive ? 'Mic On' : 'Mic Off'}</span>
-              </div>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  <Avatar className="session-avatar" style={{ width: '80px', height: '80px' }}>U</Avatar>
-                  <Typography style={{ fontSize: '14px', color: '#64748b' }}>Camera off</Typography>
-                </div>
-              </div>
-            </div>
-
-            {/* Sonia Tile */}
-            <div className="session-tile">
-              <div className="session-tile-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>Sonia</Typography>
-                  <span className="session-chip live">Live</span>
-                </div>
-                {aiSpeaking && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80', animation: 'pulse 2s infinite' }} />}
-              </div>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', padding: '40px 20px' }}>
-                <div className="session-ai-avatar">S</div>
-                <Typography style={{ fontSize: '13px', color: '#64748b', textAlign: 'center' }}>
-                  {aiSpeaking ? 'Sonia is speaking...' : 'Ready to interview'}
-                </Typography>
-              </div>
-            </div>
+      {/* Bottom Controls */}
+      <div className="meet-controls">
+        {!hasJoined ? (
+          <div className="meet-controls-row">
+            <Button
+              variant="contained"
+              onClick={() => {
+                setHasJoined(true);
+                setReportAvailable(false);
+                handleConnect();
+              }}
+              disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
+              sx={{ minWidth: '200px', borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: '15px', fontWeight: 600, padding: '10px 30px', textTransform: 'none' }}
+            >
+              Join Interview
+            </Button>
           </div>
-
-          {/* Controls */}
-          {!hasJoined ? (
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center', paddingTop: '16px' }}>
-              <Button
-                variant="contained"
-                onClick={() => {
-                  setHasJoined(true);
-                  // hide previous report until this interview ends
-                  setReportAvailable(false);
-                  handleConnect();
-                }}
-                disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
-                sx={{ minWidth: '180px', borderRadius: '999px', backgroundColor: '#0f172a', '&:hover': { backgroundColor: '#111827' }, fontSize: '15px', fontWeight: 600, padding: '10px 28px', textTransform: 'none' }}
+        ) : (
+          <div className="meet-controls-row">
+            <div className="meet-controls-cluster" role="group" aria-label="Call controls">
+              <button
+                type="button"
+                className={`meet-control-btn ${micMuted ? 'off' : 'on'}`}
+                onClick={() => setMicMuted(prev => !prev)}
+                aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                aria-pressed={micMuted}
+                title={micMuted ? 'Unmute' : 'Mute'}
               >
-                Join Interview
-              </Button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', paddingTop: '16px' }}>
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleDisconnect}
-                disabled={status !== 'connected' || endInProgressRef.current}
-                sx={{ minWidth: '150px', borderRadius: '999px', color: '#ffffff', backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' }, textTransform: 'none' }}
+                {micMuted ? <MicOff /> : <Mic />}
+              </button>
+              <button
+                type="button"
+                className={`meet-control-btn ${cameraOff ? 'off' : 'on'}`}
+                onClick={() => setCameraOff(prev => !prev)}
+                aria-label={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                aria-pressed={cameraOff}
+                title={cameraOff ? 'Camera on' : 'Camera off'}
               >
-                {status === 'ending' ? 'Ending...' : 'End Call'}
-              </Button>
-              
-              {micActive && (
-                <Typography style={{ fontSize: '13px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  Listening
-                </Typography>
-              )}
-              
-              {aiSpeaking && (
-                <Typography style={{ fontSize: '13px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  Speaking
-                </Typography>
-              )}
-              
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px', color: '#6b7280' }}>Status:</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', color: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af' }} />
-                  {status}
-                </span>
-              </span>
+                {cameraOff ? <VideocamOff /> : <Videocam />}
+              </button>
             </div>
-          )}
-        </div>
-
-        {/* Right Panel: Transcript - Hidden for cleaner UI */}
-        {/* Transcript data is still collected in the background for report generation */}
+            <button
+              type="button"
+              className="meet-control-btn end"
+              onClick={handleDisconnect}
+              disabled={endInProgressRef.current}
+              aria-label="End call"
+              title="End call"
+            >
+              <CallEnd />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Error Banner */}
       {error && (
-        <div className="session-error">
+        <div className="meet-error">
           {error}
         </div>
       )}
