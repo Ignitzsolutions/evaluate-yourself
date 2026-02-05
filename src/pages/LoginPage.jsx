@@ -99,7 +99,69 @@
 //   );
 // }
 import { SignIn } from "@clerk/clerk-react";
+import "../ui.css";
 
 export default function LoginPage() {
-  return <SignIn />;
+  return (
+    <div className="clerk-shell">
+      <div className="clerk-bg-orb orb-a" />
+      <div className="clerk-bg-orb orb-b" />
+      <div className="clerk-bg-orb orb-c" />
+
+      <section className="clerk-panel">
+        <div className="clerk-hero">
+          <div className="clerk-brand-row">
+            <div className="clerk-brand-mark" />
+            <div>
+              <div className="clerk-brand-name">Evaluate Yourself</div>
+              <div className="clerk-brand-sub">AI Interview Studio</div>
+            </div>
+          </div>
+
+          <h1>Build interview confidence with realtime coaching.</h1>
+          <p>
+            Practice live sessions, get instant feedback, and walk into interviews with a clear plan
+            to improve.
+          </p>
+
+          <div className="clerk-info-grid">
+            <div className="clerk-info-card">
+              <div className="clerk-info-title">Live Signals</div>
+              <div className="clerk-info-body">Eye-contact, tone clarity, and filler tracking.</div>
+            </div>
+            <div className="clerk-info-card">
+              <div className="clerk-info-title">Scorecards</div>
+              <div className="clerk-info-body">Structured rubric across behavioral + role skills.</div>
+            </div>
+            <div className="clerk-info-card">
+              <div className="clerk-info-title">Coach Notes</div>
+              <div className="clerk-info-body">Next-steps and practice drills personalized to you.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="clerk-form-wrap">
+          <SignIn
+            appearance={{
+              variables: {
+                colorPrimary: "#2563eb",
+                colorBackground: "#ffffff",
+                colorText: "#0f172a",
+                fontFamily: "Manrope, system-ui, sans-serif",
+                borderRadius: "14px",
+              },
+              elements: {
+                card: "clerk-card",
+                headerTitle: "clerk-header-title",
+                headerSubtitle: "clerk-header-subtitle",
+                socialButtonsBlockButton: "clerk-social-button",
+                formButtonPrimary: "clerk-primary-button",
+                footerActionLink: "clerk-footer-link",
+              },
+            }}
+          />
+        </div>
+      </section>
+    </div>
+  );
 }
