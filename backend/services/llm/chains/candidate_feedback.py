@@ -1,12 +1,27 @@
 """
 CandidateFeedbackChain: Generate AI-powered candidate feedback from interview transcript.
-Uses OpenAI/Azure OpenAI for analysis.
+Uses OpenAI/Azure OpenAI for analysis with LangChain structured output support.
 """
 
 import os
 import json
 import re
 from typing import Dict, Any, List, Optional
+
+try:
+    from langchain_openai import ChatOpenAI, AzureChatOpenAI
+    from langchain_core.messages import HumanMessage
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    print("⚠️ LangChain not available - falling back to direct OpenAI API calls")
+
+try:
+    from ..schemas.feedback_output import CandidateFeedback, CategoryScore
+    SCHEMAS_AVAILABLE = True
+except ImportError:
+    SCHEMAS_AVAILABLE = False
+    print("⚠️ Feedback schemas not available - using unstructured output")
 
 CANDIDATE_FEEDBACK_PROMPT = """You are an expert interview coach and HR professional. Analyze the following interview transcript and provide detailed, constructive feedback for the candidate.
 
@@ -35,6 +50,34 @@ Based on this interview, provide feedback in the following JSON format:
 
 Be specific, constructive, and encouraging. Reference actual examples from the transcript when possible.
 Output ONLY the JSON object, no additional text."""
+
+
+STRUCTURED_FEEDBACK_PROMPT = """You are an expert interview coach and HR professional. Analyze the following interview transcript and provide detailed, constructive feedback for the candidate.
+
+Interview Type: {interview_type}
+Duration: {duration} minutes
+
+TRANSCRIPT:
+{transcript}
+
+Provide comprehensive feedback evaluating the candidate across these categories:
+- communication: Speaking clarity, tone, pace, articulation
+- technical_knowledge: Domain expertise, accuracy, depth of knowledge
+- problem_solving: Analytical thinking, creativity, systematic approach
+- cultural_fit: Teamwork, adaptability, alignment with company values
+
+For each category, provide:
+1. A score from 0-10
+2. Specific evidence from the interview
+3. Detailed constructive feedback (50-800 characters)
+
+Also provide:
+- An overall_summary (2-3 sentences, 100-600 characters)
+- 3-6 specific strengths demonstrated
+- 3-6 areas for improvement
+- A hiring recommendation: "strong_hire", "hire", "maybe", or "no_hire"
+
+Be specific, constructive, and encouraging. Reference actual examples from the transcript."""
 
 
 def _build_transcript_string(transcript: List[Dict[str, Any]]) -> str:
@@ -73,6 +116,45 @@ def _get_openai_client():
     return None, None
 
 
+def _get_langchain_client():
+    """Return LangChain ChatOpenAI or AzureChatOpenAI client from env."""
+    if not LANGCHAIN_AVAILABLE:
+        return None
+    
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
+    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    
+    if azure_key and azure_endpoint and (azure_key != "your-azure-openai-api-key-here"):
+        deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+        try:
+            return AzureChatOpenAI(
+                api_key=azure_key,
+                azure_endpoint=azure_endpoint.rstrip("/"),
+                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+                deployment_name=deployment,
+                temperature=0.4,
+                max_tokens=2000,
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to initialize AzureChatOpenAI: {e}")
+            return None
+    
+    if api_key and api_key != "your-openai-api-key-here":
+        try:
+            return ChatOpenAI(
+                api_key=api_key,
+                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+                temperature=0.4,
+                max_tokens=2000,
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to initialize ChatOpenAI: {e}")
+            return None
+    
+    return None
+
+
 def generate_candidate_feedback(
     transcript: Optional[List[Dict[str, Any]]] = None,
     scores: Optional[Dict[str, int]] = None,
@@ -81,7 +163,9 @@ def generate_candidate_feedback(
     # New parameters (PHASE 2)
     transcript_text: Optional[str] = None,
     llm_context: Optional[Any] = None,  # LLMContext
-    score_summary: Optional[Dict[str, int]] = None
+    score_summary: Optional[Dict[str, int]] = None,
+    # New parameter for structured output
+    use_structured_output: bool = True
 ) -> Optional[Dict[str, Any]]:
     """
     Generate AI-powered feedback for the interview candidate.
@@ -94,6 +178,7 @@ def generate_candidate_feedback(
         transcript_text: (New) Direct transcript text string
         llm_context: (New) LLMContext object (session_id, role, locale)
         score_summary: (New) Score summary dict
+        use_structured_output: If True, use LangChain with_structured_output (requires LangChain + schemas)
     
     Returns:
         Dict with overall_summary, strengths, areas_for_improvement, 
@@ -111,17 +196,76 @@ def generate_candidate_feedback(
     # Use new score_summary if provided, else fall back to legacy scores
     active_scores = score_summary if score_summary else (scores if scores else {})
     
-    # Backward compatibility: handle both old and new parameter styles
-    if transcript_text:
-        transcript_str = transcript_text
-    elif transcript:
-        transcript_str = _build_transcript_string(transcript)
-    else:
-        transcript_str = "No transcript available"
+    # Try structured output first if enabled and available
+    if use_structured_output and LANGCHAIN_AVAILABLE and SCHEMAS_AVAILABLE:
+        result = _generate_structured_feedback(
+            transcript_str=transcript_str,
+            interview_type=interview_type,
+            duration_minutes=duration_minutes
+        )
+        if result:
+            return result
+        # Fall through to legacy on failure
+        print("⚠️ Structured output failed, falling back to legacy method")
     
-    # Use new score_summary if provided, else fall back to legacy scores
-    active_scores = score_summary if score_summary else (scores if scores else {})
+    # Legacy method (direct OpenAI API calls)
+    return _generate_legacy_feedback(
+        transcript_str=transcript_str,
+        interview_type=interview_type,
+        duration_minutes=duration_minutes,
+        active_scores=active_scores
+    )
+
+
+def _generate_structured_feedback(
+    transcript_str: str,
+    interview_type: str,
+    duration_minutes: int
+) -> Optional[Dict[str, Any]]:
+    """Generate feedback using LangChain with structured output."""
+    llm = _get_langchain_client()
+    if not llm:
+        return None
     
+    try:
+        # Create structured output chain
+        print("🤖 Generating AI candidate feedback using LangChain structured output...")
+        structured_llm = llm.with_structured_output(CandidateFeedback)
+        
+        # Build prompt
+        prompt_text = STRUCTURED_FEEDBACK_PROMPT.format(
+            interview_type=interview_type.capitalize(),
+            duration=duration_minutes,
+            transcript=transcript_str
+        )
+        
+        # Invoke chain
+        result: CandidateFeedback = structured_llm.invoke([HumanMessage(content=prompt_text)])
+        
+        # Convert to legacy format for backward compatibility
+        feedback = result.to_legacy_format()
+        
+        # Also attach the full structured format for new consumers
+        feedback["_structured"] = result.model_dump()
+        feedback["_report_format"] = result.to_report_format()
+        
+        print("✅ AI candidate feedback generated successfully (structured)")
+        return feedback
+        
+    except Exception as e:
+        print(f"❌ Structured feedback generation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _generate_legacy_feedback(
+    transcript_str: str,
+    interview_type: str,
+    duration_minutes: int,
+    active_scores: Dict[str, int]
+) -> Optional[Dict[str, Any]]:
+    """Generate feedback using legacy direct OpenAI API calls."""
     # Build the prompt
     prompt = CANDIDATE_FEEDBACK_PROMPT.format(
         interview_type=interview_type.capitalize(),
@@ -140,7 +284,7 @@ def generate_candidate_feedback(
         return _generate_fallback_feedback(active_scores)
 
     try:
-        print(f"🤖 Generating AI candidate feedback using {model_or_deploy}...")
+        print(f"🤖 Generating AI candidate feedback using {model_or_deploy} (legacy)...")
         resp = client.chat.completions.create(
             model=model_or_deploy or "gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
@@ -171,7 +315,7 @@ def generate_candidate_feedback(
     
     try:
         feedback = json.loads(raw)
-        print("✅ AI candidate feedback generated successfully")
+        print("✅ AI candidate feedback generated successfully (legacy)")
         return feedback
     except json.JSONDecodeError as e:
         print(f"⚠️ Failed to parse AI feedback JSON: {e}")

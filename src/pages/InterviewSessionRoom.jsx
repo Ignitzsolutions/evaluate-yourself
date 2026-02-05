@@ -94,17 +94,59 @@ export default function InterviewSessionRoom() {
   // Track counted response IDs to avoid double-counting questions
   const countedResponseIdsRef = useRef(new Set());
 
+  // --- End / transcript reliability guards ---
+  const endInProgressRef = useRef(false);
+  const isEndingRef = useRef(false);
+  const lastMessageAtRef = useRef(Date.now());
+
+  // Error recovery state
+  const [endError, setEndError] = useState(null);
+  const [showEndErrorDialog, setShowEndErrorDialog] = useState(false);
+  const pendingTranscriptPayloadRef = useRef(null);
+
+  // Utility
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * Drain heuristic: wait until no new messages have arrived for `quietMs`,
+   * or until `timeoutMs` is reached.
+   */
+  const waitForMessageQuiescence = async ({ quietMs = 200, timeoutMs = 800 } = {}) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const quietFor = Date.now() - lastMessageAtRef.current;
+      if (quietFor >= quietMs) {
+        console.log(`[Drain] Quiescence reached after ${Date.now() - start}ms`);
+        return true;
+      }
+      await sleep(50);
+    }
+    console.log(`[Drain] Timeout reached after ${timeoutMs}ms`);
+    return false;
+  };
+
   // Add transcript entry
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- callback uses refs only; adding state deps would re-register listeners
   const addTranscript = useCallback((speaker, text) => {
+    // Stop accepting new transcript writes when ending interview
+    if (isEndingRef.current) {
+      console.log('[addTranscript] BLOCKED - interview is ending');
+      return;
+    }
+    
     const ts = new Date().toISOString();
     console.log(`[addTranscript] speaker: ${speaker}, text:`, text);
+    
+    // Update drain tracking
+    lastMessageAtRef.current = Date.now();
+    
     setTranscript(prev => [...prev, {
       speaker,
       text,
       timestamp: ts
     }]);
 
-    // Also collect for saving
+    // Also collect for saving (refs are source of truth)
     if (speaker === 'ai') {
       aiMessagesRef.current.push({ text, timestamp: ts });
     } else if (speaker === 'user') {
@@ -584,61 +626,85 @@ export default function InterviewSessionRoom() {
     }
   }, [status, addTranscript, getToken, user, sessionId, interviewType]);
 
-  // Save transcript and generate report
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const saveAndGenerateReport = useCallback(async () => {
-    try {
-      // Debug: Log message refs before building Q/A pairs
-      console.log('🟦 aiMessagesRef:', JSON.stringify(aiMessagesRef.current, null, 2));
-      console.log('🟩 userMessagesRef:', JSON.stringify(userMessagesRef.current, null, 2));
+  // Build canonical transcript payload (structured/hybrid/raw)
+  const buildCanonicalTranscriptPayload = useCallback(() => {
+    const ai = aiMessagesRef.current.map(m => ({ ...m, speaker: 'ai' }));
+    const user = userMessagesRef.current.map(m => ({ ...m, speaker: 'user' }));
 
-      // Build ordered message stream
-      const ordered = [
-        ...aiMessagesRef.current.map(t => ({
-          speaker: 'ai',
-          text: t.text,
-          timestamp: t.timestamp
-        })),
-        ...userMessagesRef.current.map(t => ({
-          speaker: 'user',
-          text: t.text,
-          timestamp: t.timestamp
-        }))
-      ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    // Merge into a single ordered list
+    const raw_messages = [...ai, ...user]
+      .filter(m => m.text && String(m.text).trim().length > 0)
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-      // Debug: Log ordered array
-      console.log('🟨 ordered:', JSON.stringify(ordered, null, 2));
+    console.log(`[buildPayload] Total messages: ${raw_messages.length}`);
 
-      // Build Q/A pairs
-      const qaTranscript = [];
-      let pendingQuestion = null;
+    // Attempt Q/A pairing
+    const qa_pairs = [];
+    const unpaired = [];
+    let pendingQuestion = null;
 
-      for (const m of ordered) {
-        if (!m.text) continue;
-
-        if (m.speaker === 'ai') {
-          pendingQuestion = m.text;
+    for (const m of raw_messages) {
+      if (m.speaker === 'ai') {
+        if (pendingQuestion) {
+          // Previous question had no answer
+          unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
+          console.warn('[transcript] ⚠️ AI question without answer:', pendingQuestion.text);
         }
-
-        if (m.speaker === 'user' && pendingQuestion) {
-          qaTranscript.push({
-            question: pendingQuestion,
+        pendingQuestion = { text: m.text, timestamp: m.timestamp };
+      } else {
+        // user message
+        if (pendingQuestion) {
+          qa_pairs.push({
+            question: pendingQuestion.text,
             answer: m.text,
             timestamp: m.timestamp
           });
           pendingQuestion = null;
+        } else {
+          unpaired.push({ type: 'answer_without_question', text: m.text, timestamp: m.timestamp, speaker: 'user' });
+          console.warn('[transcript] ⚠️ User answer without AI question:', m.text);
         }
       }
+    }
 
-      console.log("📤 QA pairs built:", qaTranscript.length);
+    if (pendingQuestion) {
+      unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
+      console.warn('[transcript] ⚠️ Trailing AI question:', pendingQuestion.text);
+    }
 
-      if (qaTranscript.length === 0) {
-        alert("❌ You must answer at least one question to generate a report. Please complete part of the interview before ending the call.");
-        return { ok: false };
+    // Determine mode
+    let mode = 'structured';
+    if (qa_pairs.length === 0 && raw_messages.length > 0) {
+      mode = 'raw';
+    } else if (unpaired.length > 0) {
+      mode = 'hybrid';
+    }
+
+    console.log(`[buildPayload] Mode: ${mode}, QA pairs: ${qa_pairs.length}, Unpaired: ${unpaired.length}`);
+
+    return {
+      mode,
+      qa_pairs,
+      unpaired,
+      raw_messages,
+    };
+  }, []);
+
+  // Save transcript and generate report with canonical payload
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- uses refs which don't need deps
+  const saveAndGenerateReport = useCallback(async (options = {}) => {
+    try {
+      const transcriptPayload = options.transcript || buildCanonicalTranscriptPayload();
+      
+      console.log('📦 Transcript payload:', JSON.stringify(transcriptPayload, null, 2));
+
+      // If absolutely no messages, cannot save
+      if (transcriptPayload.raw_messages.length === 0) {
+        throw new Error('No messages captured - cannot generate report');
       }
 
-      // Calculate metrics from ordered stream
-      const totalWords = ordered.reduce((sum, entry) => {
+      // Calculate metrics
+      const totalWords = transcriptPayload.raw_messages.reduce((sum, entry) => {
         return sum + (entry.text ? entry.text.split(/\s+/).length : 0);
       }, 0);
 
@@ -653,35 +719,39 @@ export default function InterviewSessionRoom() {
         console.warn('Could not get auth token:', authErr);
       }
 
-      // Send transcript in QA format
+      // Send canonical transcript payload
       const token = await getToken();
 
       const saveResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, token, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-          transcript: qaTranscript,
+          session_id: sessionId,
+          transcript: transcriptPayload,
           interview_type: interviewType || 'mixed',
           duration_minutes: durationMinutes,
-          questions_answered: qaTranscript.length,
+          questions_answered: transcriptPayload.qa_pairs.length,
           metrics: {
-            questions_answered: qaTranscript.length,
+            questions_answered: transcriptPayload.qa_pairs.length,
             total_words: totalWords,
             total_duration: durationMinutes,
             speaking_time: durationMinutes * 60,
             silence_time: 0,
             eye_contact_pct: null
+          },
+          meta: {
+            ended_at: new Date().toISOString(),
+            client_version: '2.0.0-production-grade'
           }
         })
       });
 
       if (!saveResp.ok) {
-        const errText = await saveResp.text().catch(() => null);
+        const errText = await saveResp.text().catch(() => 'Unknown error');
         console.error('❌ Transcript save failed:', errText);
-        return { ok: false };
+        throw new Error(`Save failed: ${errText}`);
       }
 
-      // 🔍 DEBUG: read raw backend response first
       const raw = await saveResp.text();
       console.log("📦 RAW transcript response:", raw);
 
@@ -690,71 +760,196 @@ export default function InterviewSessionRoom() {
         data = JSON.parse(raw);
       } catch (e) {
         console.error("❌ Failed to parse JSON from backend");
+        throw new Error('Invalid response from backend');
       }
 
       console.log('✅ Parsed transcript response:', data);
 
-      if (data.report_id) {
-        setReportId(data.report_id);
-        console.log("📄 Report ID:", data.report_id);
+      if (!data.report_id) {
+        throw new Error('Backend did not return report_id');
       }
 
-      return data;
+      setReportId(data.report_id);
+      console.log("📄 Report ID:", data.report_id);
+
+      // Trigger feedback generation (non-blocking, fire-and-forget)
+      try {
+        const token = await getToken({ template: 'default' });
+        console.log('🤖 Triggering feedback generation...');
+        fetch(`${API_BASE_URL}/api/interview/${sessionId}/generate-feedback`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        }).then(resp => {
+          if (resp.ok) {
+            console.log('✅ Feedback generation started');
+          } else {
+            console.warn('⚠️ Feedback generation request failed, will be available later');
+          }
+        }).catch(err => {
+          console.warn('[Feedback] Generation deferred:', err);
+        });
+      } catch (feedbackErr) {
+        console.warn('⚠️ Could not trigger feedback generation:', feedbackErr);
+        // Don't block navigation if feedback trigger fails
+      }
+
+      return data.report_id;
 
     } catch (err) {
       console.error('❌ Error saving report:', err);
+      throw err;
     }
-  }, [sessionId, getToken, interviewType, timeElapsed]);
+  }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload]);
 
-  // Disconnect
+  // Production-grade disconnect flow with single-flight guard and drain
+  const runSaveFlow = useCallback(async () => {
+    // Drain in-flight messages before building transcript payload
+    isEndingRef.current = true;
+    console.log('[runSaveFlow] Starting drain...');
+    await waitForMessageQuiescence({ quietMs: 200, timeoutMs: 800 });
+
+    const transcriptPayload = buildCanonicalTranscriptPayload();
+    pendingTranscriptPayloadRef.current = transcriptPayload;
+
+    console.log('[runSaveFlow] Calling saveAndGenerateReport...');
+    const reportId = await saveAndGenerateReport({ transcript: transcriptPayload });
+
+    return reportId;
+  }, [buildCanonicalTranscriptPayload, saveAndGenerateReport]);
+
   const handleDisconnect = useCallback(async () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
+    // Single-flight guard
+    if (endInProgressRef.current) {
+      console.log('[handleDisconnect] Already in progress, ignoring');
+      return;
     }
-    if (dcRef.current) {
-      dcRef.current.close();
-      dcRef.current = null;
-    }
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-    if (audioElementRef.current) {
-      audioElementRef.current.pause();
-      audioElementRef.current.srcObject = null;
-      audioElementRef.current = null;
-    }
-  
-    setStatus('idle');
-    setMicActive(false);
-    setAiSpeaking(false);
-    setError(null);
-  
-    setReportAvailable(true);
+
+    endInProgressRef.current = true;
+    setStatus('ending');
+    setEndError(null);
+    setReportAvailable(false);
     setReportLoading(true);
-  
+
     try {
-      const resp = await saveAndGenerateReport();
-  
-      console.log("📦 Backend response:", resp);
-  
-      if (resp && resp.report_id) {
-        navigate(`/report/${resp.report_id}`);
-      } else {
-        alert("❌ Backend did not return report_id — check backend logs");
-        console.error("Missing report_id:", resp);
+      const reportId = await runSaveFlow();
+
+      // Close connections only AFTER successful save
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
       }
-  
-    } catch (e) {
-      console.error('Report generation error:', e);
-      alert("❌ Report generation failed — see console");
+      if (dcRef.current) {
+        dcRef.current.close();
+        dcRef.current = null;
+      }
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.srcObject = null;
+        audioElementRef.current = null;
+      }
+
+      setStatus('idle');
+      setMicActive(false);
+      setAiSpeaking(false);
+      endInProgressRef.current = false;
+
+      navigate(`/report/${reportId}`);
+
+    } catch (err) {
+      console.error('[handleDisconnect] Save failed:', err);
+      setEndError(err);
+      setShowEndErrorDialog(true);
+      setStatus('connected'); // Revert to allow retry
+      // DO NOT close connections - keep them alive for retry
+      // DO NOT reset endInProgressRef - modal controls that
     } finally {
       setReportLoading(false);
     }
-  }, [saveAndGenerateReport, navigate]);
-  
-  
+  }, [runSaveFlow, navigate]);
+
+  // Retry handler
+  const handleRetryEnd = useCallback(async () => {
+    setEndError(null);
+    setShowEndErrorDialog(false);
+    setReportLoading(true);
+
+    try {
+      const reportId = await runSaveFlow();
+
+      // Close connections after successful retry
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (dcRef.current) {
+        dcRef.current.close();
+        dcRef.current = null;
+      }
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.srcObject = null;
+        audioElementRef.current = null;
+      }
+
+      setStatus('idle');
+      endInProgressRef.current = false;
+
+      navigate(`/report/${reportId}`);
+
+    } catch (err) {
+      console.error('[handleRetryEnd] Retry failed:', err);
+      setEndError(err);
+      setShowEndErrorDialog(true);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [runSaveFlow, navigate]);
+
+  // End without saving handler
+  const handleEndWithoutSaving = useCallback(async () => {
+    setShowEndErrorDialog(false);
+
+    try {
+      // Close all connections
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (dcRef.current) {
+        dcRef.current.close();
+        dcRef.current = null;
+      }
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.srcObject = null;
+        audioElementRef.current = null;
+      }
+    } finally {
+      setStatus('idle');
+      setMicActive(false);
+      setAiSpeaking(false);
+      endInProgressRef.current = false;
+      isEndingRef.current = false;
+      pendingTranscriptPayloadRef.current = null;
+      navigate('/dashboard');
+    }
+  }, [navigate]);
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -961,10 +1156,10 @@ export default function InterviewSessionRoom() {
                 variant="contained"
                 color="error"
                 onClick={handleDisconnect}
-                disabled={status === 'idle' || status === 'disconnected'}
+                disabled={status !== 'connected' || endInProgressRef.current}
                 sx={{ minWidth: '140px', borderRadius: '6px', color: '#ffffff', backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' } }}
               >
-                End Call
+                {status === 'ending' ? 'Ending...' : 'End Call'}
               </Button>
               
               {micActive && (
@@ -1032,6 +1227,29 @@ export default function InterviewSessionRoom() {
           <Button onClick={() => setShowPermissionModal(false)}>Close</Button>
           <Button onClick={() => setShowPermissionModal(false)} variant="contained">
             Try Again
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Retry Error Dialog */}
+      <Dialog open={showEndErrorDialog} onClose={() => {}} disableEscapeKeyDown>
+        <DialogTitle>Couldn't Generate Report</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            The interview is still connected. You can retry generating the report, or end without saving.
+          </Typography>
+          {endError && (
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, marginTop: 12, color: '#ef4444' }}>
+              {String(endError?.message || endError)}
+            </pre>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleEndWithoutSaving} color="error">
+            End Without Saving
+          </Button>
+          <Button onClick={handleRetryEnd} variant="contained" autoFocus>
+            Retry
           </Button>
         </DialogActions>
       </Dialog>

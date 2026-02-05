@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, Dict, List
@@ -18,6 +18,7 @@ import traceback
 import numpy as np
 import re
 import sys
+from pathlib import Path
 try:
     import cv2
     CV2_AVAILABLE = True
@@ -210,10 +211,19 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
-try:
-    app.mount("/static", StaticFiles(directory="backend/static"), name="static")
-except Exception:
-    pass
+# Static asset setup
+BACKEND_STATIC_DIR = Path(__file__).resolve().parent / "static"
+if BACKEND_STATIC_DIR.exists():
+    app.mount("/backend-static", StaticFiles(directory=str(BACKEND_STATIC_DIR)), name="backend-static")
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "build"
+FRONTEND_INDEX = FRONTEND_DIR / "index.html"
+FRONTEND_AVAILABLE = FRONTEND_INDEX.exists()
+
+if FRONTEND_AVAILABLE:
+    frontend_static_dir = FRONTEND_DIR / "static"
+    if frontend_static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(frontend_static_dir)), name="static")
 
 # Load environment variables
 AZURE_REALTIME_SCOPE = os.getenv(
@@ -405,9 +415,11 @@ except Exception as e:
 
 #D
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", include_in_schema=False)
 def read_root():
-    return """
+    if FRONTEND_AVAILABLE:
+        return FileResponse(FRONTEND_INDEX)
+    return HTMLResponse("""
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -526,7 +538,7 @@ def read_root():
     </head>
     <body>
         <div class="container">
-            <img src="/static/logo.png" alt="Evaluate Yourself" class="logo" onerror="this.style.display='none'">
+            <img src="/backend-static/logo.png" alt="Evaluate Yourself" class="logo" onerror="this.style.display='none'">
             <h1>Evaluate Yourself</h1>
             <p class="subtitle">AI-Powered Interview Practice Platform</p>
             <div class="status">✓ API Running</div>
@@ -568,7 +580,7 @@ def read_root():
         </div>
     </body>
     </html>
-    """
+    """)
 
 @app.get("/health")
 def health_check():
@@ -3227,6 +3239,21 @@ async def gaze_websocket(websocket: WebSocket):
         pass
     except Exception as e:
         print(f"Gaze WebSocket error: {e}")
+
+# Serve React SPA routes (must be registered after API routes)
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str):
+    if not FRONTEND_AVAILABLE:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    # Avoid hijacking API paths if an endpoint is missing
+    if full_path.startswith("api/") or full_path in {"api", "docs", "redoc", "openapi.json"}:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    file_path = FRONTEND_DIR / full_path
+    if file_path.exists() and file_path.is_file():
+        return FileResponse(file_path)
+    return FileResponse(FRONTEND_INDEX)
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
 import { 
@@ -13,7 +13,11 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  Chip,
+  CircularProgress,
+  Alert,
+  CardContent
 } from "@mui/material";
 import { 
   Schedule,
@@ -22,7 +26,11 @@ import {
   Visibility,
   TrendingUp,
   Assessment,
-  PlayArrow
+  PlayArrow,
+  Timer,
+  QuestionAnswer,
+  RecordVoiceOver,
+  Speed
 } from "@mui/icons-material";
 import { useNavigate, useParams } from "react-router-dom";
 // import { useAuth } from "../context/AuthContext";
@@ -35,8 +43,6 @@ import {
   Tooltip, 
   Legend, 
   ResponsiveContainer,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell
@@ -50,52 +56,101 @@ export default function ReportPage() {
   const { sessionId } = useParams();
   const { user } = useAuth();
   const [report, setReport] = useState(null);
+  const [feedbackPollCount, setFeedbackPollCount] = useState(0);
+  const [isFeedbackGenerating, setIsFeedbackGenerating] = useState(false);
+  
+  const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || '';
   
   // Fetch report from backend
+  const fetchReport = useCallback(async () => {
+    if (!sessionId) return null;
+    
+    try {
+      // Build headers with auth if available
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Try to get auth token from localStorage (if using Clerk or similar)
+      const authToken = localStorage.getItem('clerk_session') || localStorage.getItem('authToken');
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      
+      const token = await getToken();
+      const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {
+        headers: headers
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data;
+      } else if (response.status === 401) {
+        // Auth failed but backend should still return report if it exists
+        console.warn('Authentication failed, but report may still be accessible');
+        // Try again without auth token
+        const retryResponse = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`);
+        if (retryResponse.ok) {
+          const data = await retryResponse.json();
+          return data;
+        }
+      } else {
+        console.error("Error fetching report:", response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error("Error fetching report:", error);
+    }
+    return null;
+  }, [sessionId, user, getToken, API_BASE_URL]);
+  
+  // Initial report fetch
   useEffect(() => {
     if (sessionId) {
-      const fetchReport = async () => {
-        try {
-          const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || '';
+      fetchReport().then(data => {
+        if (data) {
+          setReport(data);
           
-          // Build headers with auth if available
-          const headers = {
-            'Content-Type': 'application/json',
-          };
-          
-          // Try to get auth token from localStorage (if using Clerk or similar)
-          const authToken = localStorage.getItem('clerk_session') || localStorage.getItem('authToken');
-          if (authToken) {
-            headers['Authorization'] = `Bearer ${authToken}`;
+          // Check if feedback exists
+          if (!data.feedback && !data.ai_feedback) {
+            setIsFeedbackGenerating(true);
           }
-          
-          const token = await getToken();
-          const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {
-            headers: headers
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            setReport(data);
-          } else if (response.status === 401) {
-            // Auth failed but backend should still return report if it exists
-            console.warn('Authentication failed, but report may still be accessible');
-            // Try again without auth token
-            const retryResponse = await fetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`);
-            if (retryResponse.ok) {
-              const data = await retryResponse.json();
-              setReport(data);
-            }
-          } else {
-            console.error("Error fetching report:", response.status, response.statusText);
-          }
-        } catch (error) {
-          console.error("Error fetching report:", error);
         }
-      };
-      fetchReport();
+      });
     }
-  }, [sessionId, user, getToken]);
+  }, [sessionId, fetchReport]);
+  
+  // Poll for feedback if it doesn't exist yet
+  useEffect(() => {
+    if (!report || report.feedback || report.ai_feedback || !isFeedbackGenerating) {
+      return;
+    }
+    
+    if (feedbackPollCount >= 20) {
+      // Stop polling after 20 attempts (1 minute)
+      console.warn('Feedback polling timeout - stopped after 20 attempts');
+      setIsFeedbackGenerating(false);
+      return;
+    }
+    
+    const pollInterval = setInterval(async () => {
+      console.log(`[Feedback Poll ${feedbackPollCount + 1}/20] Checking for feedback...`);
+      const updated = await fetchReport();
+      
+      if (updated) {
+        setReport(updated);
+        
+        if (updated.feedback || updated.ai_feedback) {
+          console.log('✅ Feedback received!');
+          setIsFeedbackGenerating(false);
+          clearInterval(pollInterval);
+        } else {
+          setFeedbackPollCount(prev => prev + 1);
+        }
+      }
+    }, 3000); // Poll every 3 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [report, feedbackPollCount, isFeedbackGenerating, fetchReport]);
   
   // Rating and feedback state
   const [experienceRating, setExperienceRating] = useState(0);
@@ -220,6 +275,98 @@ export default function ReportPage() {
           </Button>
         </Box>
       </Box>
+
+      {/* Interview Statistics (Immediate Data) */}
+      <Card sx={{ p: 3, mb: 3, bgcolor: "white", border: "1px solid #e0e0e0", borderRadius: "12px" }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, fontFamily: "'Inter', sans-serif" }}>
+            Interview Statistics
+          </Typography>
+          {report?.transcript && (
+            <Chip 
+              label={`Transcript: ${report.transcript.mode || 'legacy'}`}
+              size="small"
+              color={
+                report.transcript.mode === 'structured' ? 'success' :
+                report.transcript.mode === 'hybrid' ? 'warning' : 'default'
+              }
+            />
+          )}
+        </Box>
+        
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card variant="outlined" sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}>
+              <Timer sx={{ fontSize: 32, color: "#1976d2", mb: 1 }} />
+              <Typography variant="h5" sx={{ fontWeight: 700, color: "#1a1a1a", mb: 0.5 }}>
+                {report?.duration_minutes || 0} min
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Duration
+              </Typography>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card variant="outlined" sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}>
+              <QuestionAnswer sx={{ fontSize: 32, color: "#d32f2f", mb: 1 }} />
+              <Typography variant="h5" sx={{ fontWeight: 700, color: "#1a1a1a", mb: 0.5 }}>
+                {report?.questions_answered || 0}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Questions
+              </Typography>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card variant="outlined" sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}>
+              <RecordVoiceOver sx={{ fontSize: 32, color: "#388e3c", mb: 1 }} />
+              <Typography variant="h5" sx={{ fontWeight: 700, color: "#1a1a1a", mb: 0.5 }}>
+                {report?.metrics?.total_words || 0}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Total Words
+              </Typography>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <Card variant="outlined" sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}>
+              <Speed sx={{ fontSize: 32, color: "#ff9800", mb: 1 }} />
+              <Typography variant="h5" sx={{ fontWeight: 700, color: "#1a1a1a", mb: 0.5 }}>
+                {report?.duration_minutes && report?.metrics?.total_words 
+                  ? Math.round(report.metrics.total_words / report.duration_minutes)
+                  : 0}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#666" }}>
+                Words/Min
+              </Typography>
+            </Card>
+          </Grid>
+        </Grid>
+        
+        {/* Feedback Generation Status */}
+        {isFeedbackGenerating && (
+          <Alert 
+            severity="info" 
+            sx={{ mt: 3 }}
+            icon={<CircularProgress size={20} />}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2">
+                Generating AI feedback analysis... ({feedbackPollCount}/20)
+              </Typography>
+            </Box>
+          </Alert>
+        )}
+        
+        {!isFeedbackGenerating && !report?.feedback && !report?.ai_feedback && feedbackPollCount >= 20 && (
+          <Alert severity="warning" sx={{ mt: 3 }}>
+            AI feedback generation is taking longer than expected. Please refresh the page in a few moments.
+          </Alert>
+        )}
+      </Card>
 
       {/* Clean Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 5 }}>
