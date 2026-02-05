@@ -965,43 +965,23 @@ export default function InterviewSessionRoom() {
   }
 
   return (
-    <div
-      style={{
-        height: '100vh',
-        width: '100vw',
-        background: '#ffffff',
-        display: 'flex',
-        flexDirection: 'column',
-        fontFamily: 'Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="session-shell">
       {/* Top Bar */}
-      <div
-        style={{
-          height: '60px',
-          borderBottom: '1px solid #e0e0e0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 24px',
-          background: '#fafafa',
-        }}
-      >
+      <div className="session-topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <Typography style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>
+          <Typography style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
             Interview Session
           </Typography>
-          <span style={{ fontSize: '14px', color: '#6b7280', textTransform: 'capitalize' }}>
+          <span style={{ fontSize: '14px', color: '#64748b', textTransform: 'capitalize' }}>
             {interviewType}
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ fontSize: '14px', color: '#374151' }}>
+          <span style={{ fontSize: '14px', color: '#334155' }}>
             {formatTime(timeElapsed)}
           </span>
-          <span style={{ fontSize: '14px', color: '#6b7280' }}>
+          <span style={{ fontSize: '14px', color: '#64748b' }}>
             Q{questionCount} / {maxQuestions}
           </span>
           <span
@@ -1010,7 +990,7 @@ export default function InterviewSessionRoom() {
               color: status === 'connected' || status === 'ready' ? '#4ade80' : '#9ca3af',
               display: 'flex',
               alignItems: 'center',
-              gap: '4px'
+              gap: '6px'
             }}
           >
             <span
@@ -1029,18 +1009,7 @@ export default function InterviewSessionRoom() {
           {reportAvailable && reportId && (
             <button
               onClick={() => navigate(`/report/${reportId}`)}
-              style={{
-                background: 'transparent',
-                border: '1px solid #e0e0e0',
-                borderRadius: '6px',
-                padding: '6px 12px',
-                fontSize: '14px',
-                color: '#374151',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
+              className="session-action-btn"
             >
               <Assessment style={{ fontSize: '16px' }} />
               {reportLoading ? (
@@ -1056,36 +1025,14 @@ export default function InterviewSessionRoom() {
 
           <button
             onClick={() => navigate('/dashboard')}
-            style={{
-              background: 'transparent',
-              border: '1px solid #e0e0e0',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              fontSize: '14px',
-              color: '#374151',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className="session-action-btn"
           >
             <DashboardIcon style={{ fontSize: '16px' }} />
             Dashboard
           </button>
           <button
             onClick={() => navigate('/')}
-            style={{
-              background: 'transparent',
-              border: '1px solid #e0e0e0',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              fontSize: '14px',
-              color: '#374151',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className="session-action-btn"
           >
             <ExitToApp style={{ fontSize: '16px' }} />
             Exit
@@ -1100,33 +1047,31 @@ export default function InterviewSessionRoom() {
           {/* Video Tiles Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
             {/* User Tile */}
-            <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', background: '#fafafa', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>You</Typography>
-                <span style={{ fontSize: '12px', color: micActive ? '#4ade80' : '#9ca3af' }}>{micActive ? '🎤 Mic On' : '🔇 Mic Off'}</span>
+            <div className="session-tile">
+              <div className="session-tile-header">
+                <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>You</Typography>
+                <span className={`session-chip ${micActive ? 'on' : 'off'}`}>{micActive ? 'Mic On' : 'Mic Off'}</span>
               </div>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  <Avatar style={{ width: '80px', height: '80px', background: '#e0e0e0', color: '#6b7280', fontSize: '32px', fontWeight: 600 }}>U</Avatar>
-                  <Typography style={{ fontSize: '14px', color: '#6b7280' }}>Camera off</Typography>
+                  <Avatar className="session-avatar" style={{ width: '80px', height: '80px' }}>U</Avatar>
+                  <Typography style={{ fontSize: '14px', color: '#64748b' }}>Camera off</Typography>
                 </div>
               </div>
             </div>
 
             {/* Sonia Tile */}
-            <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', background: '#fafafa', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="session-tile">
+              <div className="session-tile-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>Sonia</Typography>
-                  <span style={{ fontSize: '11px', background: '#4ade80', color: '#ffffff', padding: '2px 8px', borderRadius: '12px' }}>Live</span>
+                  <Typography style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>Sonia</Typography>
+                  <span className="session-chip live">Live</span>
                 </div>
                 {aiSpeaking && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80', animation: 'pulse 2s infinite' }} />}
               </div>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', padding: '40px 20px' }}>
-                <div style={{ width: '120px', height: '120px', borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '48px' }}>
-                  👤
-                </div>
-                <Typography style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center' }}>
+                <div className="session-ai-avatar">S</div>
+                <Typography style={{ fontSize: '13px', color: '#64748b', textAlign: 'center' }}>
                   {aiSpeaking ? 'Sonia is speaking...' : 'Ready to interview'}
                 </Typography>
               </div>
@@ -1145,7 +1090,7 @@ export default function InterviewSessionRoom() {
                   handleConnect();
                 }}
                 disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
-                sx={{ minWidth: '160px', borderRadius: '6px', backgroundColor: '#ff6b35', '&:hover': { backgroundColor: '#ff5722' }, fontSize: '16px', fontWeight: 600, padding: '10px 24px' }}
+                sx={{ minWidth: '180px', borderRadius: '999px', backgroundColor: '#0f172a', '&:hover': { backgroundColor: '#111827' }, fontSize: '15px', fontWeight: 600, padding: '10px 28px', textTransform: 'none' }}
               >
                 Join Interview
               </Button>
@@ -1157,20 +1102,20 @@ export default function InterviewSessionRoom() {
                 color="error"
                 onClick={handleDisconnect}
                 disabled={status !== 'connected' || endInProgressRef.current}
-                sx={{ minWidth: '140px', borderRadius: '6px', color: '#ffffff', backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' } }}
+                sx={{ minWidth: '150px', borderRadius: '999px', color: '#ffffff', backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' }, textTransform: 'none' }}
               >
                 {status === 'ending' ? 'Ending...' : 'End Call'}
               </Button>
               
               {micActive && (
-                <Typography style={{ fontSize: '13px', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  🎤 Listening
+                <Typography style={{ fontSize: '13px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  Listening
                 </Typography>
               )}
               
               {aiSpeaking && (
-                <Typography style={{ fontSize: '13px', color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  🔊 Speaking
+                <Typography style={{ fontSize: '13px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  Speaking
                 </Typography>
               )}
               
@@ -1191,8 +1136,8 @@ export default function InterviewSessionRoom() {
 
       {/* Error Banner */}
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px 24px', fontSize: '14px', color: '#991b1b', borderBottom: '1px solid #e0e0e0' }}>
-          ⚠️ {error}
+        <div className="session-error">
+          {error}
         </div>
       )}
 
