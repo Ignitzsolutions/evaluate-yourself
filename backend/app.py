@@ -52,8 +52,10 @@ from services.report_generator import generate_report as generate_interview_repo
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing, Rect, String
 
 #database imports
 from db.database import engine
@@ -2914,6 +2916,7 @@ async def download_interview_report(
 
     content = []
     content.append(Paragraph(report.title or "Interview Report", title_style))
+    content.append(Paragraph("Evaluate Yourself", ParagraphStyle("Brand", parent=styles["Heading1"], fontSize=16, textColor=colors.HexColor("#1d4ed8"))))
     content.append(Paragraph(f"<b>Date:</b> {report.date}", body_style))
     content.append(Paragraph(f"<b>Type:</b> {report.type}", body_style))
     content.append(Paragraph(f"<b>Mode:</b> {report.mode}", body_style))
@@ -2924,13 +2927,35 @@ async def download_interview_report(
     overall = report.overall_score if report.overall_score is not None else 0
     content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
     if scores:
+        # Simple horizontal bar chart for top skills
+        drawing = Drawing(480, 140)
+        y = 110
         for k, v in scores.items():
-            content.append(Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", body_style))
+            label = k.replace("_", " ").title()
+            value = max(0, min(100, int(v))) if v is not None else 0
+            drawing.add(String(0, y, label, fontSize=9, fillColor=colors.HexColor("#0f172a")))
+            drawing.add(Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
+            drawing.add(Rect(140, y - 4, 3 * value, 8, fillColor=colors.HexColor("#2563eb"), strokeColor=None))
+            drawing.add(String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a")))
+            y -= 18
+        content.append(drawing)
     content.append(Spacer(1, 12))
 
     content.append(Paragraph("Metrics", h_style))
-    for k, v in metrics.items():
-        content.append(Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", body_style))
+    if metrics:
+        rows = [["Metric", "Value"]]
+        for k, v in metrics.items():
+            rows.append([k.replace("_", " ").title(), str(v)])
+        table = Table(rows, colWidths=[200, 260])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ]))
+        content.append(table)
     content.append(Spacer(1, 12))
 
     if recommendations:
