@@ -296,6 +296,10 @@ export default function InterviewSessionRoom() {
                       silence_duration_ms: 600,
                       create_response: true,
                       interrupt_response: false
+                    },
+                    transcription: {
+                      model: 'gpt-4o-mini-transcribe',
+                      language: 'en'
                     }
                   },
                   output: {
