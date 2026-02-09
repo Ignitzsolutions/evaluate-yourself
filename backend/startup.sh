@@ -1,12 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
+# Ensure Oryx-built virtualenv is active when using a custom startup command.
+# App Service typically builds a venv at /home/site/wwwroot/antenv.
+if [ -n "${ORYX_VIRTUAL_ENV:-}" ] && [ -d "${ORYX_VIRTUAL_ENV:-}" ]; then
+  source "${ORYX_VIRTUAL_ENV}/bin/activate"
+elif [ -d "/home/site/wwwroot/antenv" ]; then
+  source "/home/site/wwwroot/antenv/bin/activate"
+fi
+
 cd /home/site/wwwroot/backend
 
 # Run DB migrations on startup
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "Running Alembic migrations..."
-  alembic -c alembic.ini upgrade head
+  python -m alembic -c alembic.ini upgrade head
 else
   echo "DATABASE_URL not set; skipping migrations"
 fi
