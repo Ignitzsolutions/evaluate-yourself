@@ -146,10 +146,19 @@ export default function RealtimeTestPage() {
             dc.send(JSON.stringify({
               type: 'session.update',
               session: {
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.7,
-                  silence_duration_ms: 600
+                type: 'realtime',
+                audio: {
+                  input: {
+                    turn_detection: {
+                      type: 'server_vad',
+                      threshold: 0.7,
+                      silence_duration_ms: 600
+                    },
+                    transcription: {
+                      model: 'gpt-4o-mini-transcribe',
+                      language: 'en'
+                    }
+                  }
                 }
               }
             }));

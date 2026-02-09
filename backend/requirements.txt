@@ -39,6 +39,8 @@ reportlab==4.0.9
 
 # Database (Auth & user persistence)
 sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.18
+alembic>=1.13.1
 
 # Redis (Session & event storage)
 redis>=5.0.0

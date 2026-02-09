@@ -15,6 +15,7 @@ import websockets
 import asyncio
 import base64
 import traceback
+import time
 import numpy as np
 import re
 import sys
@@ -47,6 +48,8 @@ from models.personality import CreateAssessmentRequest, UpdateReflectionsRequest
 from models.interview import InterviewReport, InterviewReportSummary, CreateInterviewReportRequest, TranscriptMessage, ScoreBreakdown
 from services.personality_scoring import generate_report
 from services.interview_state import InterviewState, NextAction
+from services.interview_state_store import InterviewStateStore
+from db.redis_client import get_redis_client
 from services.interview_evaluator import evaluate_response
 from services.report_generator import generate_report as generate_interview_report
 from reportlab.lib.pagesizes import letter
@@ -603,8 +606,45 @@ def get_azure_credential() -> DefaultAzureCredential:
         azure_credential = DefaultAzureCredential()
     return azure_credential
 
-# Interview session storage (in-memory, could be moved to Redis in production)
-interview_sessions: Dict[str, InterviewState] = {}
+# Interview session storage (Redis-backed, with in-memory fallback)
+_interview_state_cache: Dict[str, InterviewState] = {}
+_interview_state_store: Optional[InterviewStateStore] = None
+
+
+def _get_interview_state_store() -> Optional[InterviewStateStore]:
+    global _interview_state_store
+    if _interview_state_store is None:
+        try:
+            _interview_state_store = InterviewStateStore(get_redis_client())
+        except Exception as e:
+            print(f"⚠️ Redis unavailable for interview state: {e}")
+            _interview_state_store = None
+    return _interview_state_store
+
+
+def load_interview_state(session_id: str) -> Optional[InterviewState]:
+    store = _get_interview_state_store()
+    if store:
+        state = store.get(session_id)
+        if state:
+            return state
+    return _interview_state_cache.get(session_id)
+
+
+def save_interview_state(state: InterviewState) -> None:
+    store = _get_interview_state_store()
+    saved = False
+    if store:
+        saved = store.set(state)
+    if not saved:
+        _interview_state_cache[state.session_id] = state
+
+
+def delete_interview_state(session_id: str) -> None:
+    store = _get_interview_state_store()
+    if store:
+        store.delete(session_id)
+    _interview_state_cache.pop(session_id, None)
 
 # Pydantic models for WebRTC endpoint
 class WebRTCRequest(BaseModel):
@@ -716,8 +756,9 @@ async def webrtc_proxy(request: WebRTCRequest):
             }
         }
         
-        # Add instructions if provided
-        if system_prompt:
+        # Add instructions if provided (can be disabled to reduce token creation latency)
+        include_inline_instructions = os.getenv("REALTIME_INLINE_INSTRUCTIONS", "1").strip() != "0"
+        if system_prompt and include_inline_instructions:
             client_secrets_request["session"]["instructions"] = system_prompt
         
         # #region agent log
@@ -766,15 +807,23 @@ async def webrtc_proxy(request: WebRTCRequest):
         # #endregion
         
         try:
-            token_resp = requests.post(
-                token_url,
-                headers={
-                    "api-key": AZURE_OPENAI_API_KEY,
-                    "content-type": "application/json"
-                },
-                json=client_secrets_request,
-                timeout=10.0
-            )
+            token_resp = None
+            for attempt in range(3):
+                try:
+                    token_resp = requests.post(
+                        token_url,
+                        headers={
+                            "api-key": AZURE_OPENAI_API_KEY,
+                            "content-type": "application/json"
+                        },
+                        json=client_secrets_request,
+                        timeout=20.0
+                    )
+                    break
+                except requests.Timeout:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.5 * (attempt + 1))
             response_body = token_resp.text[:500] if token_resp.text else ""
             print(f"   Status: {token_resp.status_code} Body: {response_body[:200]}")
             
@@ -825,7 +874,7 @@ async def webrtc_proxy(request: WebRTCRequest):
             # #region agent log
             try:
                 with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:541","message":"Request timeout","data":{"token_url":token_url,"timeout":10.0},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
+                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:541","message":"Request timeout","data":{"token_url":token_url,"timeout":20.0},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
             except: pass
             # #endregion
             raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
@@ -880,15 +929,23 @@ async def webrtc_proxy(request: WebRTCRequest):
         print(f"📤 SDP offer preview: {request.sdpOffer[:200]}...")
         
         try:
-            sdp_resp = requests.post(
-                calls_url,
-                headers={
-                    "Authorization": f"Bearer {ephemeral_token}",
-                    "Content-Type": "application/sdp"
-                },
-                data=request.sdpOffer,
-                timeout=15.0
-            )
+            sdp_resp = None
+            for attempt in range(3):
+                try:
+                    sdp_resp = requests.post(
+                        calls_url,
+                        headers={
+                            "Authorization": f"Bearer {ephemeral_token}",
+                            "Content-Type": "application/sdp"
+                        },
+                        data=request.sdpOffer,
+                        timeout=20.0
+                    )
+                    break
+                except requests.Timeout:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.5 * (attempt + 1))
             print(f"📥 SDP response status: {sdp_resp.status_code}")  # Debug log
             sdp_resp.raise_for_status()
         except requests.Timeout:
@@ -1070,7 +1127,8 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
             pass
     
     # Get or create interview session state
-    if session_id not in interview_sessions:
+    session_state = load_interview_state(session_id)
+    if not session_state:
         # Initialize from query params or defaults
         interview_type = "mixed"
         difficulty = "mid"
@@ -1082,14 +1140,13 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         difficulty = query_params.get("difficulty", difficulty)
         max_questions = int(query_params.get("max_questions", max_questions))
         
-        interview_sessions[session_id] = InterviewState(
+        session_state = InterviewState(
             session_id=session_id,
             interview_type=interview_type,
             difficulty=difficulty,
             max_questions=max_questions
         )
-    
-    session_state = interview_sessions[session_id]
+        save_interview_state(session_state)
     
     # Build Azure OpenAI Realtime WebSocket URL
     if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and AZURE_OPENAI_API_KEY != "your-azure-openai-api-key-here":
@@ -1375,6 +1432,7 @@ Provide only one response per user turn. Never produce multiple responses.
                                             session_state.question_index,
                                             msg.get("metrics", {})
                                         )
+                                        save_interview_state(session_state)
                                 else:
                                     # Forward other messages
                                     await azure_ws.send(data)
@@ -1452,6 +1510,7 @@ Provide only one response per user turn. Never produce multiple responses.
                                         full_text = "".join(current_ai_text)
                                         if full_text:
                                             session_state.add_question(full_text)
+                                            save_interview_state(session_state)
                                             current_ai_text = []
                                             waiting_for_response = True
 
@@ -1481,6 +1540,7 @@ Provide only one response per user turn. Never produce multiple responses.
                                                     {"question": session_state.current_question}
                                                 )
                                                 session_state.add_evaluation(evaluation)
+                                                save_interview_state(session_state)
 
                                                 # Determine next action
                                                 next_action = session_state.get_next_action(evaluation)
@@ -1552,8 +1612,9 @@ Provide only one response per user turn. Never produce multiple responses.
             await websocket.close(code=1011, reason=f"Connection failed: {str(e)}")
     finally:
         # Clean up session if interview ended
-        if session_id in interview_sessions and not interview_sessions[session_id].is_active:
-            del interview_sessions[session_id]
+        state = load_interview_state(session_id)
+        if state and not state.is_active:
+            delete_interview_state(session_id)
 
 
 def _build_interviewer_system_prompt(
@@ -1755,6 +1816,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
     """Handle the next action based on evaluation."""
     if action == NextAction.MOVE_ON:
         session_state.move_to_next_question()
+        save_interview_state(session_state)
         # Generate next question
         question = _generate_next_question(session_state)
         await azure_ws.send(json.dumps({
@@ -1793,6 +1855,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
         }))
     elif action == NextAction.RAISE_BAR:
         session_state.move_to_next_question()
+        save_interview_state(session_state)
         question = _generate_next_question(session_state, harder=True)
         await azure_ws.send(json.dumps({
             "type": "response.create",
@@ -1837,6 +1900,7 @@ def _generate_next_question(session_state: InterviewState, harder: bool = False)
 async def _end_interview(azure_ws, session_state: InterviewState, client_ws: WebSocket, user_id: str):
     """End the interview and generate report."""
     session_state.end_interview()
+    save_interview_state(session_state)
     
     # Send closing message
     await azure_ws.send(json.dumps({
@@ -3134,7 +3198,7 @@ async def save_interview_transcript(
 
         # Update or reconstruct the in-memory session state
         from services.interview_state import InterviewState
-        session_state = interview_sessions.get(session_id)
+        session_state = load_interview_state(session_id)
         if not session_state:
             # Reconstruct minimal session state if missing
             session_state = InterviewState(
@@ -3143,7 +3207,7 @@ async def save_interview_transcript(
                 difficulty="mid",
                 max_questions=len(questions) if questions else 6
             )
-            interview_sessions[session_id] = session_state
+            save_interview_state(session_state)
 
        # ✅ Update session state with posted Q/A transcript (correct format)
         session_state.transcript_history = []
@@ -3185,6 +3249,8 @@ async def save_interview_transcript(
         if metrics:
             for k, v in metrics.items():
                 setattr(session_state, k, v)
+
+        save_interview_state(session_state)
 
         # Save transcript as before (unchanged)
         transcripts_dir = os.path.join(os.path.dirname(__file__), "transcripts")

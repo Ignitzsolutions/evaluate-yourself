@@ -48,6 +48,57 @@ class InterviewState:
         self.current_question = None
         self.current_answer = None
         self.is_active = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize state for storage."""
+        return {
+            "session_id": self.session_id,
+            "interview_type": self.interview_type,
+            "difficulty": self.difficulty,
+            "max_questions": self.max_questions,
+            "question_index": self.question_index,
+            "transcript_history": self.transcript_history,
+            "evaluation_results": self.evaluation_results,
+            "gaze_metrics": self.gaze_metrics,
+            "performance_signals": self.performance_signals,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "current_question": self.current_question,
+            "current_answer": self.current_answer,
+            "is_active": self.is_active,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "InterviewState":
+        """Deserialize state from storage."""
+        state = cls(
+            session_id=data.get("session_id"),
+            interview_type=data.get("interview_type", "mixed"),
+            difficulty=data.get("difficulty", "mid"),
+            max_questions=data.get("max_questions", 6),
+        )
+        state.question_index = data.get("question_index", 0)
+        state.transcript_history = data.get("transcript_history", [])
+        state.evaluation_results = data.get("evaluation_results", [])
+        state.gaze_metrics = data.get("gaze_metrics", [])
+        state.performance_signals = data.get("performance_signals", {
+            "pace": [],
+            "clarity_scores": [],
+            "depth_scores": [],
+            "relevance_scores": [],
+            "confidence_signals": [],
+            "pause_count": 0,
+            "total_words": 0,
+        })
+        start_time = data.get("start_time")
+        if start_time:
+            try:
+                state.start_time = datetime.fromisoformat(start_time)
+            except Exception:
+                state.start_time = datetime.now()
+        state.current_question = data.get("current_question")
+        state.current_answer = data.get("current_answer")
+        state.is_active = data.get("is_active", True)
+        return state
         
     def add_question(self, question_text: str):
         """Record a new question being asked."""

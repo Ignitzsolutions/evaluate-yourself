@@ -475,10 +475,18 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
             type: 'session.update',
             session: {
               type: 'realtime',
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.7,
-                silence_duration_ms: 600
+              audio: {
+                input: {
+                  turn_detection: {
+                    type: 'server_vad',
+                    threshold: 0.7,
+                    silence_duration_ms: 600
+                  },
+                  transcription: {
+                    model: 'gpt-4o-mini-transcribe',
+                    language: 'en'
+                  }
+                }
               }
             }
           });
