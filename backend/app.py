@@ -16,7 +16,12 @@ import asyncio
 import base64
 import traceback
 import time
-import numpy as np
+try:
+    import numpy as np
+    NP_AVAILABLE = True
+except ImportError:
+    np = None
+    NP_AVAILABLE = False
 import re
 import sys
 from pathlib import Path
@@ -24,6 +29,7 @@ try:
     import cv2
     CV2_AVAILABLE = True
 except ImportError:
+    cv2 = None
     CV2_AVAILABLE = False
 from azure.identity import (
     CredentialUnavailableError,
@@ -3383,8 +3389,8 @@ class EMA:
 
 def simple_eye_contact_detection(frame):
     """Simplified eye contact detection using OpenCV face detection"""
-    if not CV2_AVAILABLE:
-        # Return mock data if OpenCV not available
+    if not CV2_AVAILABLE or not NP_AVAILABLE:
+        # Return mock data if OpenCV/Numpy not available
         return {
             "eyeContact": True,
             "blink": False,
@@ -3477,6 +3483,19 @@ async def gaze_websocket(websocket: WebSocket):
                 continue
             
             try:
+                if not NP_AVAILABLE:
+                    await websocket.send_text(json.dumps({
+                        "t": int(datetime.now().timestamp() * 1000),
+                        "earLeft": 0.25,
+                        "earRight": 0.25,
+                        "blink": False,
+                        "eyeContact": True,
+                        "eyeContactPct": 0.8,
+                        "gazeVector": [0.0, 0.0],
+                        "conf": 0.7
+                    }))
+                    continue
+
                 # Decode dataURL
                 data_url = data.get("data", "")
                 if "," not in data_url:
