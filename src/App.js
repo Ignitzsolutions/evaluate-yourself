@@ -5,6 +5,7 @@ import { ThemeProvider, CssBaseline, Box } from "@mui/material";
 import PrivateRoute from "./components/PrivateRoute";
 import ErrorBoundaryWrapper from "./components/ErrorBoundary";
 import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 import theme from "./theme/theme";
 
 import LandingPage from "./pages/LandingPage.jsx";
@@ -23,9 +24,37 @@ import RealtimeTestPage from "./pages/RealtimeTestPage";
 // Layout wrapper for authenticated pages with navbar
 function MainLayout() {
   return (
-    <Box sx={{ minHeight: "100vh", backgroundColor: "background.default" }}>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundColor: "background.default",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <Navbar />
-      <Outlet />
+      <Box component="main" sx={{ flex: 1 }}>
+        <Outlet />
+      </Box>
+      <Footer />
+    </Box>
+  );
+}
+
+function PublicLayout() {
+  return (
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundColor: "background.default",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box component="main" sx={{ flex: 1 }}>
+        <Outlet />
+      </Box>
+      <Footer />
     </Box>
   );
 }
@@ -43,12 +72,14 @@ export default function App() {
       >
         <Routes>
           {/* Public routes without navbar */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/test-realtime" element={<RealtimeTestPage />} />
-          <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/test-realtime" element={<RealtimeTestPage />} />
+            <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
+          </Route>
 
           {/* Auth-protected routes with navbar */}
           <Route
