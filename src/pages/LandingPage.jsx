@@ -363,42 +363,6 @@ export default function LandingPage() {
         Evaluate Yourself helps candidates practice real interviews, understand how they perform under pressure, and improve before the real interview.
       </Box>
 
-      <Box
-        component="div"
-        sx={{
-          width: "100%",
-          bgcolor: "primary.main",
-          m: 0,
-          py: 3,
-          textAlign: "center"
-        }}
-      >
-        <Typography
-          sx={{
-            fontSize: 164,
-            fontWeight: 800,
-            letterSpacing: 1.2,
-            opacity: 0.95,
-            color: "white"
-          }}
-        >
-          EvaluateYourself
-        </Typography>
-        <div style={{ width: "100%", marginTop: 12, marginBottom: 12 }}>
-          <Divider sx={{ bgcolor: "white", opacity: 0.3, height: 2, width: "100%" }} />
-        </div>
-        <Typography
-          sx={{
-            fontSize: 14,
-            fontWeight: 500,
-            color: "white",
-            opacity: 0.7
-          }}
-        >
-          © {new Date().getFullYear()} Evaluate Yourself. All rights reserved.
-        </Typography>
-      </Box>
-
     </div>
   );
 }
