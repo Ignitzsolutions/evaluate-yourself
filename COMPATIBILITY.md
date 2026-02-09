@@ -280,11 +280,12 @@ If you see "Your web app is running and waiting for your content":
 
 ### Import Errors
 
-If you see import errors for cv2, numpy, or scipy:
+If you see import errors for optional computer-vision packages (cv2, numpy, scipy):
 
-1. Verify Python version: `python --version` (should be 3.10)
-2. Check system packages are installed (libgl1, libglib2.0-0)
-3. Reinstall dependencies: `pip install -r backend/requirements.txt`
+1. Verify Python version: `python --version` (Azure uses 3.11)
+2. If you need gaze tracking, install optional CV deps:
+   `pip install -r requirements-base.txt`
+3. Otherwise, you can ignore cv2/numpy/scipy import errors in production.
 
 ### dlib Build Failures
 
@@ -298,7 +299,7 @@ If dlib fails to install:
 
 If deployment fails:
 
-1. Check Python runtime version in Azure Portal (should be 3.10)
+1. Check Python runtime version in Azure Portal (should be 3.11)
 2. Verify startup command is correct (should use gunicorn)
 3. Check application logs in Azure Portal → Log stream
 4. Ensure environment variables are set correctly
@@ -311,7 +312,7 @@ If deployment fails:
 
 ```bash
 # Create virtual environment
-python3.10 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 # or: .venv\Scripts\activate  # Windows
 
@@ -326,8 +327,11 @@ pip install -r requirements-face.txt
 ### Testing
 
 ```bash
-# Test core imports
-python -c "import fastapi, uvicorn, cv2, numpy, scipy; print('✓ Core imports OK')"
+# Test core imports (no OpenCV required)
+python -c "import fastapi, uvicorn; print('✓ Core imports OK')"
+
+# Optional: test OpenCV stack if you enabled gaze tracking
+python -c "import cv2, numpy, scipy; print('✓ OpenCV imports OK')"
 
 # Test backend app
 cd backend
@@ -339,10 +343,10 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## Summary
 
-- **Python**: 3.10 (required)
+- **Python**: 3.11 (required for Azure)
 - **OS**: Ubuntu 22.04 (CI/CD), Linux (Azure App Service)
 - **Core Dependencies**: `backend/requirements.txt` (no dlib)
 - **Optional**: `requirements-face.txt` (dlib for server.py only)
-- **Azure**: Uses `backend/app.py` with OpenCV (no dlib needed)
+- **Azure**: Uses `backend/app.py` with OpenCV optional (no dlib needed)
 
 For questions or issues, check the GitHub Actions logs or Azure App Service logs for detailed error messages.
