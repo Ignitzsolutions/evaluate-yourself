@@ -88,16 +88,16 @@ def generate_report(
 
     # Generate AI candidate feedback
     ai_feedback = None
+    scores_for_ai = {
+        "communication": scores.communication,
+        "clarity": scores.clarity,
+        "structure": scores.structure,
+        "relevance": scores.relevance,
+        "overall_score": overall_score
+    }
     try:
         from services.llm.chains.candidate_feedback import generate_candidate_feedback
         transcript_for_ai = [{"speaker": msg.speaker, "text": msg.text} for msg in transcript]
-        scores_for_ai = {
-            "communication": scores.communication,
-            "clarity": scores.clarity,
-            "structure": scores.structure,
-            "relevance": scores.relevance,
-            "overall_score": overall_score
-        }
         ai_feedback = generate_candidate_feedback(
             transcript=transcript_for_ai,
             scores=scores_for_ai,
@@ -106,6 +106,8 @@ def generate_report(
         )
     except Exception as e:
         print(f"⚠️ Failed to generate AI feedback: {e}")
+    if not isinstance(ai_feedback, dict) or not ai_feedback:
+        ai_feedback = _build_deterministic_feedback(scores_for_ai)
 
     # Create report
     report = InterviewReport(
@@ -160,8 +162,51 @@ def _generate_minimal_report(interview_type: str, duration_minutes: int) -> Inte
         questions=0,
         is_sample=False,
         metrics=metrics,
-        ai_feedback=None
+        ai_feedback=_build_deterministic_feedback({"overall_score": 50})
     )
+
+
+def _build_deterministic_feedback(scores: Dict[str, int]) -> Dict[str, Any]:
+    """Deterministic fallback so report generation never returns empty feedback."""
+    overall = int(scores.get("overall_score", 50) or 50)
+    if overall >= 80:
+        summary = "Strong performance with clear communication and relevant examples."
+        strengths = [
+            "Clear communication under interview pressure",
+            "Good structure in responses",
+            "Relevant examples matched to questions",
+        ]
+    elif overall >= 60:
+        summary = "Solid interview with good fundamentals and clear room to improve depth."
+        strengths = [
+            "Consistent participation and engagement",
+            "Basic structure in most responses",
+            "Reasonable alignment with interview prompts",
+        ]
+    else:
+        summary = "Interview fundamentals are present, but response clarity and depth need improvement."
+        strengths = [
+            "Willingness to answer and engage",
+            "Baseline understanding of interview flow",
+        ]
+
+    return {
+        "overall_summary": summary,
+        "strengths": strengths,
+        "areas_for_improvement": [
+            "Use STAR format for behavioral answers",
+            "Add concrete examples with measurable outcomes",
+            "State assumptions and tradeoffs more explicitly",
+        ],
+        "communication_feedback": "Keep answers concise, structured, and specific. Avoid filler and aim for clear start-middle-end delivery.",
+        "content_feedback": "Increase depth with concrete project details, constraints, decisions, and impact metrics.",
+        "tips_for_next_interview": [
+            "Prepare 4-5 STAR stories across leadership, conflict, failure, and delivery",
+            "Practice technical explanations with architecture tradeoffs",
+            "Use a brief structure before each answer: context, action, outcome",
+            "Close answers with what you learned and how you improved",
+        ],
+    }
 
 
 def _calculate_structure_score(evaluations: List[Dict[str, Any]]) -> int:

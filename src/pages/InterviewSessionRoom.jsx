@@ -4,9 +4,6 @@ import { useUser } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
 import { authFetch } from '../utils/apiClient';
 import {
-  ExitToApp,
-  Dashboard as DashboardIcon,
-  Assessment,
   Mic,
   MicOff,
   Videocam,
@@ -22,7 +19,8 @@ import {
   Typography,
   Avatar,
   Box,
-  CircularProgress,
+  Rating,
+  TextField,
 } from '@mui/material';
 import '../ui.css';
 
@@ -51,7 +49,12 @@ export default function InterviewSessionRoom() {
 
   // Get interview type from sessionStorage, URL params, or defaults
   const [interviewType, setInterviewType] = useState(typeFromUrl || 'behavioral');
-  const [maxQuestions, setMaxQuestions] = useState(6);
+  const [durationMinutes, setDurationMinutes] = useState(15);
+  const [difficulty, setDifficulty] = useState('medium');
+  const [targetRole, setTargetRole] = useState('');
+  const [targetCompany, setTargetCompany] = useState('');
+  const [questionMix, setQuestionMix] = useState('balanced');
+  const [interviewStyle, setInterviewStyle] = useState('neutral');
 
   useEffect(() => {
     const config = sessionStorage.getItem('interviewConfig');
@@ -59,7 +62,12 @@ export default function InterviewSessionRoom() {
       try {
         const parsed = JSON.parse(config);
         setInterviewType(parsed.type || typeFromUrl || 'behavioral');
-        setMaxQuestions(parsed.duration ? parseInt(parsed.duration) : 6);
+        setDurationMinutes(parsed.duration ? parseInt(parsed.duration, 10) : 15);
+        setDifficulty(parsed.difficulty || 'medium');
+        setTargetRole(parsed.role || '');
+        setTargetCompany(parsed.company || '');
+        setQuestionMix(parsed.questionMix || 'balanced');
+        setInterviewStyle(parsed.interviewStyle || 'neutral');
       } catch (e) {
         console.error('Error parsing config:', e);
       }
@@ -76,18 +84,15 @@ export default function InterviewSessionRoom() {
 
   // State
   const [status, setStatus] = useState('idle');
-  const [micActive, setMicActive] = useState(false);
+  const [, setMicActive] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
-  const [transcript, setTranscript] = useState([]);
+  const [, setTranscript] = useState([]);
   const [error, setError] = useState(null);
   const [hasJoined, setHasJoined] = useState(false);
-  const [reportAvailable, setReportAvailable] = useState(false);
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportId, setReportId] = useState(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionError, setPermissionError] = useState(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
-  const [questionCount, setQuestionCount] = useState(0);
+  const [, setQuestionCount] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const capturedAiRef = useRef(new Set());
@@ -112,27 +117,13 @@ export default function InterviewSessionRoom() {
   const [endError, setEndError] = useState(null);
   const [showEndErrorDialog, setShowEndErrorDialog] = useState(false);
   const pendingTranscriptPayloadRef = useRef(null);
+  const [showEndFeedbackDialog, setShowEndFeedbackDialog] = useState(false);
+  const [endExperienceRating, setEndExperienceRating] = useState(0);
+  const [endFeedbackComment, setEndFeedbackComment] = useState('');
+  const [endFeedbackError, setEndFeedbackError] = useState('');
 
   // Utility
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  /**
-   * Drain heuristic: wait until no new messages have arrived for `quietMs`,
-   * or until `timeoutMs` is reached.
-   */
-  const waitForMessageQuiescence = async ({ quietMs = 200, timeoutMs = 800 } = {}) => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const quietFor = Date.now() - lastMessageAtRef.current;
-      if (quietFor >= quietMs) {
-        console.log(`[Drain] Quiescence reached after ${Date.now() - start}ms`);
-        return true;
-      }
-      await sleep(50);
-    }
-    console.log(`[Drain] Timeout reached after ${timeoutMs}ms`);
-    return false;
-  };
 
   // Add transcript entry
   // eslint-disable-next-line react-hooks/exhaustive-deps -- callback uses refs only; adding state deps would re-register listeners
@@ -508,7 +499,12 @@ export default function InterviewSessionRoom() {
           sdpOffer: offer.sdp,
           sessionId: sessionId,
           interviewType: interviewType || 'mixed',
-          difficulty: 'mid'
+          difficulty: difficulty || 'medium',
+          role: targetRole || undefined,
+          company: targetCompany || undefined,
+          questionMix: questionMix || 'balanced',
+          interviewStyle: interviewStyle || 'neutral',
+          durationMinutes: durationMinutes || 15
         })
       });
 
@@ -567,7 +563,20 @@ export default function InterviewSessionRoom() {
         pcRef.current = null;
       }
     }
-  }, [status, addTranscript, getToken, user, sessionId, interviewType]);
+  }, [
+    status,
+    addTranscript,
+    getToken,
+    user,
+    sessionId,
+    interviewType,
+    difficulty,
+    targetRole,
+    targetCompany,
+    questionMix,
+    interviewStyle,
+    durationMinutes,
+  ]);
 
   // Build canonical transcript payload (structured/hybrid/raw)
   const buildCanonicalTranscriptPayload = useCallback(() => {
@@ -638,6 +647,7 @@ export default function InterviewSessionRoom() {
   const saveAndGenerateReport = useCallback(async (options = {}) => {
     try {
       const transcriptPayload = options.transcript || buildCanonicalTranscriptPayload();
+      const sessionFeedback = options.sessionFeedback || null;
       
       console.log('📦 Transcript payload:', JSON.stringify(transcriptPayload, null, 2));
 
@@ -680,8 +690,10 @@ export default function InterviewSessionRoom() {
             total_duration: durationMinutes,
             speaking_time: durationMinutes * 60,
             silence_time: 0,
-            eye_contact_pct: null
+            eye_contact_pct: null,
+            session_feedback: sessionFeedback,
           },
+          session_feedback: sessionFeedback,
           meta: {
             ended_at: new Date().toISOString(),
             client_version: '2.0.0-production-grade'
@@ -712,32 +724,7 @@ export default function InterviewSessionRoom() {
         throw new Error('Backend did not return report_id');
       }
 
-      setReportId(data.report_id);
       console.log("📄 Report ID:", data.report_id);
-
-      // Trigger feedback generation (non-blocking, fire-and-forget)
-      try {
-        const token = await getToken({ template: 'default' });
-        console.log('🤖 Triggering feedback generation...');
-        fetch(`${API_BASE_URL}/api/interview/${sessionId}/generate-feedback`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          }
-        }).then(resp => {
-          if (resp.ok) {
-            console.log('✅ Feedback generation started');
-          } else {
-            console.warn('⚠️ Feedback generation request failed, will be available later');
-          }
-        }).catch(err => {
-          console.warn('[Feedback] Generation deferred:', err);
-        });
-      } catch (feedbackErr) {
-        console.warn('⚠️ Could not trigger feedback generation:', feedbackErr);
-        // Don't block navigation if feedback trigger fails
-      }
 
       return data.report_id;
 
@@ -748,22 +735,32 @@ export default function InterviewSessionRoom() {
   }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload]);
 
   // Production-grade disconnect flow with single-flight guard and drain
-  const runSaveFlow = useCallback(async () => {
+  const runSaveFlow = useCallback(async (sessionFeedback = null) => {
     // Drain in-flight messages before building transcript payload
     isEndingRef.current = true;
     console.log('[runSaveFlow] Starting drain...');
-    await waitForMessageQuiescence({ quietMs: 200, timeoutMs: 800 });
+    const drainStart = Date.now();
+    const quietMs = 200;
+    const timeoutMs = 800;
+    while (Date.now() - drainStart < timeoutMs) {
+      const quietFor = Date.now() - lastMessageAtRef.current;
+      if (quietFor >= quietMs) {
+        console.log(`[Drain] Quiescence reached after ${Date.now() - drainStart}ms`);
+        break;
+      }
+      await sleep(50);
+    }
 
     const transcriptPayload = buildCanonicalTranscriptPayload();
     pendingTranscriptPayloadRef.current = transcriptPayload;
 
     console.log('[runSaveFlow] Calling saveAndGenerateReport...');
-    const reportId = await saveAndGenerateReport({ transcript: transcriptPayload });
+    const reportId = await saveAndGenerateReport({ transcript: transcriptPayload, sessionFeedback });
 
     return reportId;
   }, [buildCanonicalTranscriptPayload, saveAndGenerateReport]);
 
-  const handleDisconnect = useCallback(async () => {
+  const handleDisconnect = useCallback(async (sessionFeedback = null) => {
     // Single-flight guard
     if (endInProgressRef.current) {
       console.log('[handleDisconnect] Already in progress, ignoring');
@@ -773,11 +770,9 @@ export default function InterviewSessionRoom() {
     endInProgressRef.current = true;
     setStatus('ending');
     setEndError(null);
-    setReportAvailable(false);
-    setReportLoading(true);
 
     try {
-      const reportId = await runSaveFlow();
+      const reportId = await runSaveFlow(sessionFeedback);
 
       // Close connections only AFTER successful save
       if (localStreamRef.current) {
@@ -813,7 +808,6 @@ export default function InterviewSessionRoom() {
       // DO NOT close connections - keep them alive for retry
       // DO NOT reset endInProgressRef - modal controls that
     } finally {
-      setReportLoading(false);
     }
   }, [runSaveFlow, navigate]);
 
@@ -821,10 +815,13 @@ export default function InterviewSessionRoom() {
   const handleRetryEnd = useCallback(async () => {
     setEndError(null);
     setShowEndErrorDialog(false);
-    setReportLoading(true);
 
     try {
-      const reportId = await runSaveFlow();
+      const reportId = await runSaveFlow({
+        rating: endExperienceRating,
+        comment: endFeedbackComment.trim() || null,
+        submitted_at: new Date().toISOString(),
+      });
 
       // Close connections after successful retry
       if (localStreamRef.current) {
@@ -855,9 +852,29 @@ export default function InterviewSessionRoom() {
       setEndError(err);
       setShowEndErrorDialog(true);
     } finally {
-      setReportLoading(false);
     }
-  }, [runSaveFlow, navigate]);
+  }, [runSaveFlow, navigate, endExperienceRating, endFeedbackComment]);
+
+  const handleOpenEndFeedback = useCallback(() => {
+    if (endInProgressRef.current || status === 'ending') {
+      return;
+    }
+    setEndFeedbackError('');
+    setShowEndFeedbackDialog(true);
+  }, [status]);
+
+  const handleConfirmEndFeedback = useCallback(async () => {
+    if (!endExperienceRating || endExperienceRating < 1) {
+      setEndFeedbackError('Please provide a rating before ending the interview.');
+      return;
+    }
+    setShowEndFeedbackDialog(false);
+    await handleDisconnect({
+      rating: endExperienceRating,
+      comment: endFeedbackComment.trim() || null,
+      submitted_at: new Date().toISOString(),
+    });
+  }, [endExperienceRating, endFeedbackComment, handleDisconnect]);
 
   // End without saving handler
   const handleEndWithoutSaving = useCallback(async () => {
@@ -892,12 +909,6 @@ export default function InterviewSessionRoom() {
       navigate('/dashboard');
     }
   }, [navigate]);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   if (!user) {
     return (
@@ -948,7 +959,6 @@ export default function InterviewSessionRoom() {
               variant="contained"
               onClick={() => {
                 setHasJoined(true);
-                setReportAvailable(false);
                 handleConnect();
               }}
               disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
@@ -984,7 +994,7 @@ export default function InterviewSessionRoom() {
             <button
               type="button"
               className="meet-control-btn end"
-              onClick={handleDisconnect}
+              onClick={handleOpenEndFeedback}
               disabled={endInProgressRef.current}
               aria-label="End call"
               title="End call"
@@ -1033,6 +1043,54 @@ export default function InterviewSessionRoom() {
           <Button onClick={() => setShowPermissionModal(false)}>Close</Button>
           <Button onClick={() => setShowPermissionModal(false)} variant="contained">
             Try Again
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={showEndFeedbackDialog}
+        onClose={() => setShowEndFeedbackDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Before You End</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            Please share a quick rating for this interview session before generating your results.
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Session Rating (Required)
+            </Typography>
+            <Rating
+              value={endExperienceRating}
+              onChange={(_, value) => {
+                setEndExperienceRating(value || 0);
+                if (value && value > 0) {
+                  setEndFeedbackError('');
+                }
+              }}
+            />
+          </Box>
+          <TextField
+            label="Comments (Optional)"
+            multiline
+            rows={3}
+            fullWidth
+            value={endFeedbackComment}
+            onChange={(e) => setEndFeedbackComment(e.target.value)}
+            placeholder="Anything we should improve?"
+          />
+          {endFeedbackError && (
+            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+              {endFeedbackError}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowEndFeedbackDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleConfirmEndFeedback}>
+            Submit & End Interview
           </Button>
         </DialogActions>
       </Dialog>

@@ -658,6 +658,7 @@ class WebRTCRequest(BaseModel):
     sessionId: Optional[str] = None
     interviewType: Optional[str] = "mixed"
     difficulty: Optional[str] = "mid"
+    durationMinutes: Optional[int] = None
     role: Optional[str] = None
     company: Optional[str] = None
     jobLevel: Optional[str] = "mid"
@@ -723,6 +724,7 @@ async def webrtc_proxy(request: WebRTCRequest):
         system_prompt = _build_interviewer_system_prompt(
             interview_type=request.interviewType or "mixed",
             difficulty=request.difficulty or "mid",
+            duration_minutes=request.durationMinutes,
             role=request.role,
             company=request.company,
             job_level=request.jobLevel or "mid",
@@ -1626,6 +1628,7 @@ Provide only one response per user turn. Never produce multiple responses.
 def _build_interviewer_system_prompt(
     interview_type: str,
     difficulty: str,
+    duration_minutes: Optional[int] = None,
     role: Optional[str] = None,
     company: Optional[str] = None,
     job_level: Optional[str] = None,
@@ -1752,6 +1755,23 @@ Do not reset, do not switch personas.
             "custom": "Adapt your question mix based on the candidate's responses and the role requirements."
         }
         base_prompt += f"\n{mix_context.get(question_mix, '')}"
+
+    if duration_minutes:
+        if duration_minutes <= 10:
+            base_prompt += (
+                f"\nInterview duration target: {duration_minutes} minutes. Keep questions crisp, "
+                "limit deep multi-layer probing, and prioritize core signal collection quickly."
+            )
+        elif duration_minutes <= 20:
+            base_prompt += (
+                f"\nInterview duration target: {duration_minutes} minutes. Maintain a balanced pace: "
+                "one focused follow-up for strong signals, then move forward."
+            )
+        else:
+            base_prompt += (
+                f"\nInterview duration target: {duration_minutes} minutes. You have room for deeper "
+                "probing per topic while still covering technical and behavioral dimensions."
+            )
     
     base_prompt += "\n"
     
@@ -3141,8 +3161,11 @@ async def save_interview_transcript(
         questions = request.get("questions", [])  # Can be list or integer
         questions_answered = request.get("questions_answered")  # Explicit count
         metrics = request.get("metrics", {})
+        session_feedback = request.get("session_feedback")
         interview_type = request.get("interview_type", "mixed")
         duration_minutes = request.get("duration_minutes", 0)
+        if not session_feedback and isinstance(metrics, dict):
+            session_feedback = metrics.get("session_feedback")
 
         # Parse canonical transcript format (mode, qa_pairs, unpaired, raw_messages)
         # or legacy format (list of {question, answer})
@@ -3187,6 +3210,88 @@ async def save_interview_transcript(
 
         if not transcript and not raw_messages:
             return {"message": "No transcript data provided", "session_id": session_id}
+
+        # Build timeline-friendly ordered messages from canonical raw stream when available.
+        ordered_messages = []
+        if raw_messages:
+            for msg in raw_messages:
+                text = (msg.get("text") or "").strip()
+                if not text:
+                    continue
+                ordered_messages.append({
+                    "speaker": (msg.get("speaker") or "unknown").lower(),
+                    "text": text,
+                    "timestamp": msg.get("timestamp") or datetime.now().isoformat()
+                })
+            ordered_messages.sort(key=lambda m: m.get("timestamp") or "")
+        else:
+            for entry in transcript:
+                ts = entry.get("timestamp") or datetime.now().isoformat()
+                question = (entry.get("question") or "").strip()
+                answer = (entry.get("answer") or "").strip()
+                if question:
+                    ordered_messages.append({"speaker": "ai", "text": question, "timestamp": ts})
+                if answer:
+                    ordered_messages.append({"speaker": "user", "text": answer, "timestamp": ts})
+
+        effective_questions_answered = 0
+        if questions_answered is not None:
+            try:
+                effective_questions_answered = max(0, int(questions_answered))
+            except Exception:
+                effective_questions_answered = len(transcript)
+        else:
+            effective_questions_answered = len(transcript)
+
+        total_words_derived = sum(len((m.get("text") or "").split()) for m in ordered_messages)
+        total_duration_derived = 0
+        try:
+            total_duration_derived = int(duration_minutes) if duration_minutes else 0
+        except Exception:
+            total_duration_derived = 0
+        if total_duration_derived <= 0 and isinstance(metrics, dict):
+            try:
+                total_duration_derived = int(metrics.get("total_duration", 0))
+            except Exception:
+                total_duration_derived = 0
+        if total_duration_derived <= 0:
+            total_duration_derived = 1
+
+        # Approximate response latency from ordered timeline.
+        response_times = []
+        last_ai_ts = None
+        for msg in ordered_messages:
+            speaker = (msg.get("speaker") or "").lower()
+            ts_raw = msg.get("timestamp")
+            try:
+                ts_val = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            except Exception:
+                ts_val = None
+            if not ts_val:
+                continue
+            if speaker in ["ai", "interviewer", "sonia"]:
+                last_ai_ts = ts_val
+            elif speaker in ["user", "candidate"] and last_ai_ts:
+                delta = (ts_val - last_ai_ts).total_seconds()
+                if delta >= 0:
+                    response_times.append(delta)
+                last_ai_ts = None
+
+        avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else None
+        words_per_minute_derived = round(total_words_derived / max(total_duration_derived, 1))
+        eye_contact_pct_derived = None
+        if isinstance(metrics, dict):
+            eye_contact_pct_derived = metrics.get("eye_contact_pct")
+
+        derived_metrics = {
+            "questions_answered": effective_questions_answered,
+            "total_words": total_words_derived,
+            "total_duration": total_duration_derived,
+            "avg_response_time_seconds": avg_response_time_derived,
+            "words_per_minute": words_per_minute_derived,
+            "eye_contact_pct": eye_contact_pct_derived,
+            "session_feedback": session_feedback,
+        }
 
         # Get user info from auth (optional - can work without auth for testing)
         user_id = None
@@ -3322,6 +3427,8 @@ async def save_interview_transcript(
                     duration_minutes = 1
 
                 report_data = generate_interview_report(session_state, interview_type, duration_minutes)
+                merged_metrics = report_data.metrics if isinstance(report_data.metrics, dict) else {}
+                merged_metrics.update({k: v for k, v in derived_metrics.items() if v is not None})
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
@@ -3333,15 +3440,11 @@ async def save_interview_transcript(
                     duration=report_data.duration,
                     overall_score=report_data.overall_score,
                     scores=json.dumps(report_data.scores.dict() if hasattr(report_data.scores, 'dict') else report_data.scores),
-                    transcript=json.dumps([{
-                        "speaker": t.speaker if hasattr(t, 'speaker') else t.get("speaker", "unknown"),
-                        "text": t.text if hasattr(t, 'text') else t.get("text", ""),
-                        "timestamp": (t.timestamp.isoformat() if isinstance(t.timestamp, datetime) else t.timestamp) if hasattr(t, 'timestamp') else t.get("timestamp", "")
-                    } for t in report_data.transcript]),
+                    transcript=json.dumps(ordered_messages),
                     recommendations=json.dumps(report_data.recommendations),
                     questions=report_data.questions,
                     is_sample=False,
-                    metrics=json.dumps(report_data.metrics) if hasattr(report_data, 'metrics') and report_data.metrics is not None else None,
+                    metrics=json.dumps(merged_metrics) if merged_metrics else None,
                     ai_feedback=json.dumps(report_data.ai_feedback) if hasattr(report_data, 'ai_feedback') and report_data.ai_feedback is not None else None
                 )
                 db.add(db_report)
