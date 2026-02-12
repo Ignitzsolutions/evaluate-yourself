@@ -2,11 +2,11 @@ from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional, Dict, List
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, Dict, List, Any, Literal
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 import jwt
 import json
@@ -67,7 +67,7 @@ from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Rect, String
 
 #database imports
-from db.database import engine
+from db.database import engine, DATABASE_URL
 from db import models
 from sqlalchemy.orm import Session
 from db.models import User
@@ -247,6 +247,8 @@ AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+TRIAL_MODE_ENABLED = os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+FREE_TRIAL_MINUTES = max(1, int(os.getenv("FREE_TRIAL_MINUTES", "5")))
 
 # OpenAI Realtime API variables (optional - for direct OpenAI API, not Azure)
 OPENAI_REALTIME_API_KEY = os.getenv("OPENAI_REALTIME_API_KEY")
@@ -358,6 +360,19 @@ def validate_environment():
         print("3. Restart the server")
         print("="*60 + "\n")
 
+
+def validate_production_requirements() -> None:
+    """Fail fast in production if critical persistence config is missing."""
+    if not is_production:
+        return
+
+    if not os.getenv("DATABASE_URL"):
+        raise RuntimeError("DATABASE_URL must be set in production.")
+    if not DATABASE_URL.startswith("postgresql"):
+        raise RuntimeError("Production requires PostgreSQL DATABASE_URL.")
+    if not os.getenv("REDIS_URL"):
+        raise RuntimeError("REDIS_URL must be set in production.")
+
 # Validate on import (will run when module loads)
 validate_environment()
 
@@ -365,6 +380,7 @@ validate_environment()
 @app.on_event("startup")
 async def startup_event():
     validate_environment()
+    validate_production_requirements()
     # Log Clerk JWKS URL so /api/me auth issues are debuggable
     try:
         jwks_url = _clerk_jwks_url()
@@ -378,6 +394,7 @@ async def startup_event():
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
 _env_value = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))).strip().lower()
 is_production = _env_value == "production"
+validate_production_requirements()
 
 if allowed_origins_env:
     if allowed_origins_env == "*":
@@ -612,7 +629,7 @@ def get_azure_credential() -> DefaultAzureCredential:
         azure_credential = DefaultAzureCredential()
     return azure_credential
 
-# Interview session storage (Redis-backed, with in-memory fallback)
+# Interview session storage (Redis-backed, with in-memory fallback for local only)
 _interview_state_cache: Dict[str, InterviewState] = {}
 _interview_state_store: Optional[InterviewStateStore] = None
 
@@ -623,7 +640,9 @@ def _get_interview_state_store() -> Optional[InterviewStateStore]:
         try:
             _interview_state_store = InterviewStateStore(get_redis_client())
         except Exception as e:
-            print(f"⚠️ Redis unavailable for interview state: {e}")
+            if is_production:
+                raise RuntimeError(f"Redis unavailable for interview state in production: {e}") from e
+            print(f"⚠️ Redis unavailable for interview state (dev fallback to memory): {e}")
             _interview_state_store = None
     return _interview_state_store
 
@@ -634,6 +653,8 @@ def load_interview_state(session_id: str) -> Optional[InterviewState]:
         state = store.get(session_id)
         if state:
             return state
+    if is_production:
+        return None
     return _interview_state_cache.get(session_id)
 
 
@@ -642,7 +663,7 @@ def save_interview_state(state: InterviewState) -> None:
     saved = False
     if store:
         saved = store.set(state)
-    if not saved:
+    if not saved and not is_production:
         _interview_state_cache[state.session_id] = state
 
 
@@ -650,7 +671,186 @@ def delete_interview_state(session_id: str) -> None:
     store = _get_interview_state_store()
     if store:
         store.delete(session_id)
-    _interview_state_cache.pop(session_id, None)
+    if not is_production:
+        _interview_state_cache.pop(session_id, None)
+
+
+class UserProfileUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    userCategory: Literal["student", "professional"]
+    primaryGoal: str
+    targetRoles: List[str]
+    industries: List[str]
+    interviewTimeline: str
+    prepIntensity: str
+    learningStyle: str
+    consentDataUse: bool
+
+    # Student fields
+    educationLevel: Optional[str] = None
+    graduationTimeline: Optional[str] = None
+    majorDomain: Optional[str] = None
+    placementReadiness: Optional[str] = None
+
+    # Professional fields
+    currentRole: Optional[str] = None
+    experienceBand: Optional[str] = None
+    managementScope: Optional[str] = None
+    domainExpertise: Optional[List[str]] = None
+    targetCompanyType: Optional[str] = None
+    careerTransitionIntent: Optional[str] = None
+    noticePeriodBand: Optional[str] = None
+    careerCompBand: Optional[Literal["Foundation", "Growth", "Advanced", "Leadership"]] = None
+    interviewUrgency: Optional[str] = None
+
+
+def _json_dumps_safe(value: Any) -> str:
+    return json.dumps(value if value is not None else [])
+
+
+def _json_loads_safe_list(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+    except Exception:
+        pass
+    return []
+
+
+def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
+    if not payload.consentDataUse:
+        raise HTTPException(status_code=400, detail="Explicit consent is required to continue.")
+
+    if not payload.targetRoles:
+        raise HTTPException(status_code=400, detail="At least one target role is required.")
+    if not payload.industries:
+        raise HTTPException(status_code=400, detail="At least one industry selection is required.")
+
+    if payload.userCategory == "student":
+        required_student = [
+            ("educationLevel", payload.educationLevel),
+            ("graduationTimeline", payload.graduationTimeline),
+            ("majorDomain", payload.majorDomain),
+            ("placementReadiness", payload.placementReadiness),
+        ]
+        missing = [name for name, value in required_student if not value]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing required student fields: {', '.join(missing)}")
+    elif payload.userCategory == "professional":
+        required_prof = [
+            ("currentRole", payload.currentRole),
+            ("experienceBand", payload.experienceBand),
+            ("managementScope", payload.managementScope),
+            ("targetCompanyType", payload.targetCompanyType),
+            ("careerTransitionIntent", payload.careerTransitionIntent),
+            ("noticePeriodBand", payload.noticePeriodBand),
+            ("careerCompBand", payload.careerCompBand),
+            ("interviewUrgency", payload.interviewUrgency),
+        ]
+        missing = [name for name, value in required_prof if not value]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing required professional fields: {', '.join(missing)}")
+        if not payload.domainExpertise:
+            raise HTTPException(status_code=400, detail="domainExpertise is required for professional profile.")
+
+
+def _resolve_plan_tier_for_user(_clerk_user_id: str) -> str:
+    # Current launch default: signed-in users start as trial unless billing integration says otherwise.
+    return "trial" if TRIAL_MODE_ENABLED else "basic"
+
+
+def _effective_duration_minutes(requested: Optional[int], plan_tier: str) -> int:
+    requested_value = requested if requested and requested > 0 else FREE_TRIAL_MINUTES
+    if plan_tier == "trial":
+        return min(requested_value, FREE_TRIAL_MINUTES)
+    return requested_value
+
+
+def _runtime_session_key(session_id: str) -> str:
+    return f"runtime_session:{session_id}"
+
+
+def _save_runtime_session(
+    session_id: str,
+    clerk_user_id: str,
+    requested_minutes: int,
+    effective_minutes: int,
+    interview_type: str,
+    difficulty: str,
+    plan_tier: str,
+) -> Dict[str, Any]:
+    runtime_payload = {
+        "session_id": session_id,
+        "clerk_user_id": clerk_user_id,
+        "status": "ACTIVE",
+        "started_at": datetime.utcnow().isoformat(),
+        "duration_minutes_requested": requested_minutes,
+        "duration_minutes_effective": effective_minutes,
+        "interview_type": interview_type,
+        "difficulty": difficulty,
+        "plan_tier": plan_tier,
+        "trial_mode": plan_tier == "trial",
+    }
+    ttl_seconds = max(300, effective_minutes * 60 + 600)
+    try:
+        redis_client = get_redis_client()
+        redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_payload))
+    except Exception as redis_err:
+        if is_production:
+            raise HTTPException(status_code=500, detail=f"Failed to persist runtime session: {redis_err}")
+        print(f"⚠️ Runtime session not saved in Redis (dev): {redis_err}")
+    return runtime_payload
+
+
+def _load_runtime_session(session_id: str) -> Dict[str, Any]:
+    try:
+        redis_client = get_redis_client()
+        raw = redis_client.get(_runtime_session_key(session_id))
+        if not raw:
+            return {}
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def _upsert_interview_session_row(
+    db: Session,
+    session_id: str,
+    clerk_user_id: str,
+    interview_type: str,
+    difficulty: str,
+    requested_minutes: int,
+    effective_minutes: int,
+    runtime_payload: Dict[str, Any],
+) -> models.InterviewSession:
+    row = db.query(models.InterviewSession).filter(models.InterviewSession.session_id == session_id).first()
+    if not row:
+        row = models.InterviewSession(
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            status="ACTIVE",
+            interview_type=interview_type,
+            difficulty=difficulty,
+            duration_minutes_requested=requested_minutes,
+            duration_minutes_effective=effective_minutes,
+            started_at=datetime.utcnow(),
+            session_meta_json=json.dumps(runtime_payload),
+        )
+        db.add(row)
+    else:
+        row.clerk_user_id = clerk_user_id
+        row.status = "ACTIVE"
+        row.interview_type = interview_type
+        row.difficulty = difficulty
+        row.duration_minutes_requested = requested_minutes
+        row.duration_minutes_effective = effective_minutes
+        row.session_meta_json = json.dumps(runtime_payload)
+    db.commit()
+    db.refresh(row)
+    return row
 
 # Pydantic models for WebRTC endpoint
 class WebRTCRequest(BaseModel):
@@ -675,7 +875,11 @@ def build_azure_realtime_url(resource_name: str, domain: str, path: str, region:
     return f"{base_url}{path}?api-version={AZURE_OPENAI_API_VERSION}"
 
 @app.post("/api/realtime/webrtc")
-async def webrtc_proxy(request: WebRTCRequest):
+async def webrtc_proxy(
+    request: WebRTCRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
     """WebRTC proxy endpoint for ephemeral token creation and SDP negotiation."""
     # #region agent log
     try:
@@ -688,6 +892,13 @@ async def webrtc_proxy(request: WebRTCRequest):
         print(f"DEBUG LOG ERROR: {log_err}")
     # #endregion
     try:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization is required.")
+        current_user = get_current_user(authorization=authorization, db=db)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Invalid user session.")
+        clerk_user_id = current_user.clerk_user_id
+
         # Validate Azure configuration
         if not AZURE_OPENAI_API_KEY or AZURE_OPENAI_API_KEY == "your-azure-openai-api-key-here":
             raise HTTPException(
@@ -720,11 +931,36 @@ async def webrtc_proxy(request: WebRTCRequest):
             # #endregion
             raise HTTPException(status_code=500, detail=str(e))
         
+        plan_tier = _resolve_plan_tier_for_user(clerk_user_id)
+        requested_minutes = request.durationMinutes if request.durationMinutes and request.durationMinutes > 0 else FREE_TRIAL_MINUTES
+        effective_minutes = _effective_duration_minutes(requested_minutes, plan_tier)
+        session_id = request.sessionId or f"session_{uuid.uuid4().hex[:16]}"
+
+        runtime_payload = _save_runtime_session(
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            requested_minutes=requested_minutes,
+            effective_minutes=effective_minutes,
+            interview_type=request.interviewType or "mixed",
+            difficulty=request.difficulty or "mid",
+            plan_tier=plan_tier,
+        )
+        _upsert_interview_session_row(
+            db=db,
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            interview_type=request.interviewType or "mixed",
+            difficulty=request.difficulty or "mid",
+            requested_minutes=requested_minutes,
+            effective_minutes=effective_minutes,
+            runtime_payload=runtime_payload,
+        )
+
         # Build system prompt with new form fields
         system_prompt = _build_interviewer_system_prompt(
             interview_type=request.interviewType or "mixed",
             difficulty=request.difficulty or "mid",
-            duration_minutes=request.durationMinutes,
+            duration_minutes=effective_minutes,
             role=request.role,
             company=request.company,
             job_level=request.jobLevel or "mid",
@@ -737,7 +973,7 @@ async def webrtc_proxy(request: WebRTCRequest):
         client_secrets_request = {
             "expires_after": {
                 "anchor": "created_at",
-                "seconds": 3600  # 1 hour
+                "seconds": max(300, effective_minutes * 60 + 180)
             },
             "session": {
                 "type": "realtime",
@@ -971,7 +1207,13 @@ async def webrtc_proxy(request: WebRTCRequest):
         
         sdp_answer = sdp_resp.text
         
-        return {"sdpAnswer": sdp_answer}
+        return {
+            "sdpAnswer": sdp_answer,
+            "sessionId": session_id,
+            "effectiveDurationMinutes": effective_minutes,
+            "trialMode": plan_tier == "trial",
+            "planTier": plan_tier,
+        }
         
     except HTTPException as http_ex:
         # #region agent log
@@ -2421,6 +2663,129 @@ def get_me_users(current_user: User = Depends(get_current_user)):
         "full_name": current_user.full_name,
     }
 
+
+def _profile_to_api(profile: models.UserProfile) -> Dict[str, Any]:
+    return {
+        "id": profile.id,
+        "clerkUserId": profile.clerk_user_id,
+        "userCategory": profile.user_category,
+        "primaryGoal": profile.primary_goal,
+        "targetRoles": _json_loads_safe_list(profile.target_roles),
+        "industries": _json_loads_safe_list(profile.industries),
+        "interviewTimeline": profile.interview_timeline,
+        "prepIntensity": profile.prep_intensity,
+        "learningStyle": profile.learning_style,
+        "consentDataUse": bool(profile.consent_data_use),
+        "educationLevel": profile.education_level,
+        "graduationTimeline": profile.graduation_timeline,
+        "majorDomain": profile.major_domain,
+        "placementReadiness": profile.placement_readiness,
+        "currentRole": profile.current_role,
+        "experienceBand": profile.experience_band,
+        "managementScope": profile.management_scope,
+        "domainExpertise": _json_loads_safe_list(profile.domain_expertise),
+        "targetCompanyType": profile.target_company_type,
+        "careerTransitionIntent": profile.career_transition_intent,
+        "noticePeriodBand": profile.notice_period_band,
+        "careerCompBand": profile.career_comp_band,
+        "interviewUrgency": profile.interview_urgency,
+        "createdAt": profile.created_at,
+        "updatedAt": profile.updated_at,
+    }
+
+
+@app.get("/api/profile/status")
+def get_profile_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(models.UserProfile).filter(
+        models.UserProfile.clerk_user_id == current_user.clerk_user_id
+    ).first()
+    return {
+        "completed": bool(profile),
+        "user_category": profile.user_category if profile else None,
+    }
+
+
+@app.get("/api/profile/me")
+def get_profile_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(models.UserProfile).filter(
+        models.UserProfile.clerk_user_id == current_user.clerk_user_id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return _profile_to_api(profile)
+
+
+@app.put("/api/profile/me")
+def upsert_profile_me(
+    payload: UserProfileUpsertRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _validate_profile_payload(payload)
+    profile = db.query(models.UserProfile).filter(
+        models.UserProfile.clerk_user_id == current_user.clerk_user_id
+    ).first()
+
+    if not profile:
+        profile = models.UserProfile(
+            clerk_user_id=current_user.clerk_user_id,
+            user_category=payload.userCategory,
+            primary_goal=payload.primaryGoal,
+            target_roles=_json_dumps_safe(payload.targetRoles),
+            industries=_json_dumps_safe(payload.industries),
+            interview_timeline=payload.interviewTimeline,
+            prep_intensity=payload.prepIntensity,
+            learning_style=payload.learningStyle,
+            consent_data_use=payload.consentDataUse,
+            education_level=payload.educationLevel,
+            graduation_timeline=payload.graduationTimeline,
+            major_domain=payload.majorDomain,
+            placement_readiness=payload.placementReadiness,
+            current_role=payload.currentRole,
+            experience_band=payload.experienceBand,
+            management_scope=payload.managementScope,
+            domain_expertise=_json_dumps_safe(payload.domainExpertise),
+            target_company_type=payload.targetCompanyType,
+            career_transition_intent=payload.careerTransitionIntent,
+            notice_period_band=payload.noticePeriodBand,
+            career_comp_band=payload.careerCompBand,
+            interview_urgency=payload.interviewUrgency,
+        )
+        db.add(profile)
+    else:
+        profile.user_category = payload.userCategory
+        profile.primary_goal = payload.primaryGoal
+        profile.target_roles = _json_dumps_safe(payload.targetRoles)
+        profile.industries = _json_dumps_safe(payload.industries)
+        profile.interview_timeline = payload.interviewTimeline
+        profile.prep_intensity = payload.prepIntensity
+        profile.learning_style = payload.learningStyle
+        profile.consent_data_use = payload.consentDataUse
+        profile.education_level = payload.educationLevel
+        profile.graduation_timeline = payload.graduationTimeline
+        profile.major_domain = payload.majorDomain
+        profile.placement_readiness = payload.placementReadiness
+        profile.current_role = payload.currentRole
+        profile.experience_band = payload.experienceBand
+        profile.management_scope = payload.managementScope
+        profile.domain_expertise = _json_dumps_safe(payload.domainExpertise)
+        profile.target_company_type = payload.targetCompanyType
+        profile.career_transition_intent = payload.careerTransitionIntent
+        profile.notice_period_band = payload.noticePeriodBand
+        profile.career_comp_band = payload.careerCompBand
+        profile.interview_urgency = payload.interviewUrgency
+        profile.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(profile)
+    return {"ok": True, "profile": _profile_to_api(profile)}
+
 @app.post("/api/self-insight/assessments")
 async def create_assessment(request: CreateAssessmentRequest, authorization: Optional[str] = Header(None)):
     user_id = get_user_id(authorization)
@@ -3145,6 +3510,43 @@ async def create_interview_report(
         logging.exception("Failed to create interview report")
         raise HTTPException(status_code=500, detail="Failed to create report")
 
+
+@app.get("/api/interview/sessions/{session_id}")
+def get_interview_session_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = db.query(models.InterviewSession).filter(
+        models.InterviewSession.session_id == session_id
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if row.clerk_user_id != current_user.clerk_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    runtime_data = _load_runtime_session(session_id)
+    session_meta = {}
+    if row.session_meta_json:
+        try:
+            session_meta = json.loads(row.session_meta_json)
+        except Exception:
+            session_meta = {}
+
+    return {
+        "session_id": row.session_id,
+        "status": row.status,
+        "interview_type": row.interview_type,
+        "difficulty": row.difficulty,
+        "duration_minutes_requested": row.duration_minutes_requested,
+        "duration_minutes_effective": row.duration_minutes_effective,
+        "started_at": row.started_at,
+        "ended_at": row.ended_at,
+        "report_id": row.report_id,
+        "runtime": runtime_data,
+        "meta": session_meta,
+    }
+
 @app.post("/api/interview/{session_id}/transcript")
 async def save_interview_transcript(
     session_id: str, 
@@ -3301,19 +3703,26 @@ async def save_interview_transcript(
             "eye_contact_pct": eye_contact_pct_derived,
             "session_feedback": session_feedback,
         }
+        runtime_session_data = _load_runtime_session(session_id)
+        if runtime_session_data:
+            derived_metrics["runtime_session"] = runtime_session_data
 
-        # Get user info from auth (optional - can work without auth for testing)
+        # Resolve authenticated user. Production disallows guest transcript writes.
         user_id = None
-        try:
-            if authorization:
+        current_user = None
+        if authorization:
+            try:
                 current_user = get_current_user(authorization=authorization, db=db)
                 if current_user:
                     user_id = current_user.clerk_user_id
-        except Exception as auth_err:
-            print(f"⚠️ Auth optional for transcript save: {auth_err}")
-            user_id = "guest"  # Fallback to guest if no auth
+            except Exception as auth_err:
+                if is_production:
+                    raise HTTPException(status_code=401, detail=f"Unauthorized transcript save: {auth_err}")
+                print(f"⚠️ Auth optional for transcript save (dev): {auth_err}")
 
         if not user_id:
+            if is_production:
+                raise HTTPException(status_code=401, detail="Authorization is required to save transcripts.")
             user_id = "guest"
 
         # Update or reconstruct the in-memory session state
@@ -3469,6 +3878,47 @@ async def save_interview_transcript(
             print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")
             import traceback
             traceback.print_exc()
+
+        # Mark durable interview session row as completed/failed with final metadata.
+        try:
+            session_row = db.query(models.InterviewSession).filter(
+                models.InterviewSession.session_id == session_id
+            ).first()
+            final_status = "COMPLETED" if report_id else "FAILED"
+            final_meta = runtime_session_data if isinstance(runtime_session_data, dict) else {}
+            final_meta.update({
+                "ended_at": datetime.utcnow().isoformat(),
+                "questions_answered": effective_questions_answered,
+            })
+            if session_feedback is not None:
+                final_meta["session_feedback"] = session_feedback
+
+            if session_row:
+                session_row.status = final_status
+                session_row.ended_at = datetime.utcnow()
+                session_row.report_id = report_id
+                session_row.duration_minutes_effective = total_duration_derived
+                session_row.session_meta_json = json.dumps(final_meta)
+            else:
+                session_row = models.InterviewSession(
+                    session_id=session_id,
+                    clerk_user_id=user_id,
+                    status=final_status,
+                    interview_type=interview_type,
+                    difficulty=getattr(session_state, "difficulty", "mid"),
+                    duration_minutes_requested=total_duration_derived,
+                    duration_minutes_effective=total_duration_derived,
+                    started_at=session_state.start_time or datetime.utcnow(),
+                    ended_at=datetime.utcnow(),
+                    report_id=report_id,
+                    session_meta_json=json.dumps(final_meta),
+                )
+                db.add(session_row)
+            db.commit()
+        except Exception as session_update_err:
+            db.rollback()
+            print(f"⚠️ Failed to update interview session row: {session_update_err}")
+
         return {
             "message": "Transcript saved successfully",
             "session_id": session_id,

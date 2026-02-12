@@ -50,11 +50,14 @@ export default function InterviewSessionRoom() {
   // Get interview type from sessionStorage, URL params, or defaults
   const [interviewType, setInterviewType] = useState(typeFromUrl || 'behavioral');
   const [durationMinutes, setDurationMinutes] = useState(15);
+  const [effectiveDurationMinutes, setEffectiveDurationMinutes] = useState(15);
   const [difficulty, setDifficulty] = useState('medium');
   const [targetRole, setTargetRole] = useState('');
   const [targetCompany, setTargetCompany] = useState('');
   const [questionMix, setQuestionMix] = useState('balanced');
   const [interviewStyle, setInterviewStyle] = useState('neutral');
+  const [planTier, setPlanTier] = useState('trial');
+  const [trialMode, setTrialMode] = useState(true);
 
   useEffect(() => {
     const config = sessionStorage.getItem('interviewConfig');
@@ -62,12 +65,17 @@ export default function InterviewSessionRoom() {
       try {
         const parsed = JSON.parse(config);
         setInterviewType(parsed.type || typeFromUrl || 'behavioral');
-        setDurationMinutes(parsed.duration ? parseInt(parsed.duration, 10) : 15);
+        const configuredDuration = parsed.duration ? parseInt(parsed.duration, 10) : 15;
+        setDurationMinutes(configuredDuration);
+        setEffectiveDurationMinutes(configuredDuration);
         setDifficulty(parsed.difficulty || 'medium');
         setTargetRole(parsed.role || '');
         setTargetCompany(parsed.company || '');
         setQuestionMix(parsed.questionMix || 'balanced');
         setInterviewStyle(parsed.interviewStyle || 'neutral');
+        if (typeof parsed.trialMode === 'boolean') {
+          setTrialMode(parsed.trialMode);
+        }
       } catch (e) {
         console.error('Error parsing config:', e);
       }
@@ -573,8 +581,20 @@ export default function InterviewSessionRoom() {
       if (!data.sdpAnswer) {
         throw new Error('No SDP answer in response');
       }
+      if (typeof data.effectiveDurationMinutes === 'number' && data.effectiveDurationMinutes > 0) {
+        setEffectiveDurationMinutes(data.effectiveDurationMinutes);
+      }
+      if (typeof data.trialMode === 'boolean') {
+        setTrialMode(data.trialMode);
+      }
+      if (data.planTier) {
+        setPlanTier(data.planTier);
+      }
 
       addTranscript('system', 'SDP answer received from backend');
+      if (typeof data.effectiveDurationMinutes === 'number' && data.effectiveDurationMinutes > 0) {
+        addTranscript('system', `Session limit enforced: ${data.effectiveDurationMinutes} minutes (${data.planTier || 'trial'} plan).`);
+      }
 
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
       addTranscript('system', 'Remote description set, connection establishing...');
@@ -747,11 +767,19 @@ export default function InterviewSessionRoom() {
             silence_time: 0,
             eye_contact_pct: null,
             session_feedback: sessionFeedback,
+            duration_minutes_requested: durationMinutes,
+            duration_minutes_effective: effectiveDurationMinutes,
+            trial_mode: trialMode,
+            plan_tier: planTier,
           },
           session_feedback: sessionFeedback,
           meta: {
             ended_at: new Date().toISOString(),
-            client_version: '2.0.0-production-grade'
+            client_version: '2.0.0-production-grade',
+            duration_minutes_requested: durationMinutes,
+            duration_minutes_effective: effectiveDurationMinutes,
+            trial_mode: trialMode,
+            plan_tier: planTier,
           }
         })
       });
@@ -787,7 +815,7 @@ export default function InterviewSessionRoom() {
       console.error('❌ Error saving report:', err);
       throw err;
     }
-  }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload]);
+  }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload, effectiveDurationMinutes, trialMode, planTier]);
 
   // Production-grade disconnect flow with single-flight guard and drain
   const runSaveFlow = useCallback(async (sessionFeedback = null) => {
@@ -981,7 +1009,9 @@ export default function InterviewSessionRoom() {
           <Typography style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
             Interview Session
           </Typography>
-          <span className="meet-subtle">{interviewType}</span>
+          <span className="meet-subtle">
+            {interviewType} • {effectiveDurationMinutes}m limit {trialMode ? `(trial)` : `(${planTier})`}
+          </span>
         </div>
         <div className="meet-topbar-right" aria-hidden="true" />
       </div>

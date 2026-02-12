@@ -121,5 +121,11 @@
 import { SignUp } from "@clerk/clerk-react";
 
 export default function RegisterPage() {
-  return <SignUp />;
+  return (
+    <SignUp
+      fallbackRedirectUrl="/onboarding"
+      forceRedirectUrl="/onboarding"
+      signInUrl="/login"
+    />
+  );
 }

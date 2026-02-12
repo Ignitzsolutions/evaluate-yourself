@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -18,13 +19,19 @@ import {
   Typography,
 } from "@mui/material";
 
+const trialModeEnabled = !["0", "false", "no", "off"].includes(
+  String(process.env.REACT_APP_TRIAL_MODE_ENABLED || "true").toLowerCase()
+);
+const freeTrialMinutes = Math.max(1, Number(process.env.REACT_APP_FREE_TRIAL_MINUTES || 5));
+
 export default function PreInterviewForm() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const selectedType = useMemo(() => location.state?.type || "technical", [location.state?.type]);
 
-  const [duration, setDuration] = useState(15);
+  const durationOptions = trialModeEnabled ? [freeTrialMinutes] : [10, 15, 20, 30];
+  const [duration, setDuration] = useState(durationOptions[0]);
   const [difficulty, setDifficulty] = useState("medium");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
@@ -45,6 +52,7 @@ export default function PreInterviewForm() {
     const config = {
       type: selectedType,
       duration,
+      trialMode: trialModeEnabled,
       difficulty,
       role: role.trim() || undefined,
       company: company.trim() || undefined,
@@ -94,15 +102,19 @@ export default function PreInterviewForm() {
           </Stack>
 
           <Box component="form" onSubmit={handleSubmit}>
+            {trialModeEnabled && (
+              <Alert severity="info" sx={{ mb: 2.5 }}>
+                Free trial mode is active. Interview duration is capped at {freeTrialMinutes} minutes.
+              </Alert>
+            )}
             <Grid container spacing={2.5}>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
                   <InputLabel id="duration-label">Duration</InputLabel>
                   <Select labelId="duration-label" label="Duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                    <MenuItem value={10}>10 minutes</MenuItem>
-                    <MenuItem value={15}>15 minutes</MenuItem>
-                    <MenuItem value={20}>20 minutes</MenuItem>
-                    <MenuItem value={30}>30 minutes</MenuItem>
+                    {durationOptions.map((mins) => (
+                      <MenuItem key={mins} value={mins}>{mins} minutes</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>

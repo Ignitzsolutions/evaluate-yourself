@@ -10,6 +10,14 @@ logger = logging.getLogger(__name__)
 
 # Global Redis client instance
 _redis_client: Optional[redis.Redis] = None
+_env_value = os.getenv(
+    "ENV",
+    os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", "development"))),
+).strip().lower()
+
+
+def is_production_env() -> bool:
+    return _env_value == "production"
 
 
 def get_redis_client() -> redis.Redis:
@@ -26,6 +34,9 @@ def get_redis_client() -> redis.Redis:
     
     if _redis_client is None:
         redis_url = os.getenv("REDIS_URL")
+
+        if is_production_env() and not redis_url:
+            raise RuntimeError("REDIS_URL must be set in production.")
         
         if redis_url:
             # Parse Redis URL (supports redis:// and rediss:// for TLS)
