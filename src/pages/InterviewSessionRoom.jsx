@@ -323,13 +323,14 @@ export default function InterviewSessionRoom() {
         try {
           const msg = JSON.parse(e.data);
           console.log('Message received:', msg.type, msg);
+          const msgType = msg?.type || '';
 
           // Handle messages
-          if (msg.type === 'session.created') {
+          if (msgType === 'session.created') {
             addTranscript('system', 'Azure session created');
-          } else if (msg.type === 'session.updated') {
+          } else if (msgType === 'session.updated') {
             addTranscript('system', 'Session updated');
-          } else if (msg.type === 'error') {
+          } else if (msgType === 'error') {
             // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI
             const errMsg = msg.error?.message || 'Azure API error';
             if (errMsg.includes("response.modalities")) {
@@ -338,11 +339,11 @@ export default function InterviewSessionRoom() {
               setError(errMsg);
               addTranscript('system', `Error: ${errMsg}`);
             }
-          } else if (msg.type === 'response.output_text.delta') {
+          } else if (msgType === 'response.output_text.delta') {
             if (msg.delta) {
               setAiSpeaking(true);
             }
-          } else if (msg.type === 'response.output_text.done') {
+          } else if (msgType === 'response.output_text.done') {
             setAiSpeaking(false);
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'text';
@@ -351,7 +352,7 @@ export default function InterviewSessionRoom() {
               capturedAiRef.current.add(key);
               addTranscript('ai', finalText);
             }
-          } else if (msg.type === 'response.output_item.added') {
+          } else if (msgType === 'response.output_item.added') {
             // Remember the last AI output item id so we can detect the user reply that follows
             try {
               const item = msg.item || {};
@@ -360,12 +361,12 @@ export default function InterviewSessionRoom() {
             } catch (e) {
               console.warn('Failed to capture output item id:', e);
             }
-          } else if (msg.type === 'response.output_audio_transcript.delta') {
+          } else if (msgType === 'response.output_audio_transcript.delta') {
             const text = msg.delta || msg.transcript || msg.text || msg.transcript_delta || null;
             if (text) {
               setAiSpeaking(true);
             }
-          } else if (msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.output_audio_transcript.completed') {
+          } else if (msgType === 'response.output_audio_transcript.done' || msgType === 'response.output_audio_transcript.completed') {
             setAiSpeaking(false);
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'audio';
@@ -384,7 +385,7 @@ export default function InterviewSessionRoom() {
                 return newCount;
               });
             }
-          } else if (msg.type === 'response.completed') {
+          } else if (msgType === 'response.completed') {
             setAiSpeaking(false);
             // Increment question count - this is the primary event for question completion
             const responseId = msg.response_id || msg.response?.id;
@@ -399,19 +400,46 @@ export default function InterviewSessionRoom() {
           }
 
           // Handle user transcription events (fallbacks + conversation items)
-          else if (msg.type === 'input_audio_transcription.completed' || msg.type === 'input_audio_transcription.done') {
-            const text = msg.text || msg.transcript;
+          else if (
+            msgType === 'input_audio_buffer.committed' ||
+            msgType === 'input_audio_buffer.commit'
+          ) {
+            const committedItemId = msg.item_id || msg.itemId || msg.conversation_item_id || null;
+            if (committedItemId) {
+              lastCommittedInputItemRef.current = committedItemId;
+              console.log('[input_audio_buffer.committed] item id:', committedItemId);
+            }
+          } else if (
+            (msgType.includes('input_audio_transcription') || msgType.includes('input_audio_buffer.transcription')) &&
+            (msgType.endsWith('.completed') || msgType.endsWith('.done') || msgType.endsWith('completed') || msgType.endsWith('done'))
+          ) {
+            let text = msg.text || msg.transcript || msg.content || null;
+            if ((!text || !String(text).trim()) && msg.item?.input_audio_transcription) {
+              text = msg.item.input_audio_transcription.text || msg.item.input_audio_transcription.transcript || null;
+            }
+            if ((!text || !String(text).trim()) && Array.isArray(msg.item?.content)) {
+              text = msg.item.content
+                .map((c) => c?.transcript || c?.text || c?.content || null)
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+            }
             const itemId = msg.item_id || msg.conversation_item_id || 'user';
             const key = `${itemId}:${text}`;
-            console.log('[input_audio_transcription.completed] text:', text);
+            console.log('[input_audio_transcription.*] text:', text);
             if (text && text.trim().length > 0 && !capturedUserRef.current.has(key)) {
               capturedUserRef.current.add(key);
               addTranscript('user', text);
               setMicActive(false);
             } else if (!text) {
-              console.warn('[input_audio_transcription.completed] No user text found in message:', msg);
+              console.warn('[input_audio_transcription.*] No user text found in message:', msg);
             }
-          } else if (msg.type === 'conversation.item.added' || msg.type === 'conversation.item.done') {
+          } else if (
+            msgType === 'conversation.item.added' ||
+            msgType === 'conversation.item.done' ||
+            msgType === 'conversation.item.created' ||
+            msgType === 'conversation.item.completed'
+          ) {
             // Debug: log the full message object for diagnosis
             console.log('[DEBUG][conversation.item.*] FULL MSG:', JSON.stringify(msg, null, 2));
             // Some events include user contributions as conversation items
@@ -423,12 +451,17 @@ export default function InterviewSessionRoom() {
                 text = item.content.map(c => {
                   if (typeof c === 'string') return c;
                   if (c.text) return c.text;
+                  if (c.transcript) return c.transcript;
+                  if (c.input_audio_transcription) return c.input_audio_transcription.text || c.input_audio_transcription.transcript;
                   if (c.parts && Array.isArray(c.parts)) return c.parts.map(p => p.text || p).join('');
                   return null;
                 }).filter(Boolean).join(' ');
               }
               if (!text && item.text) text = item.text;
               if (!text && item.content_text) text = item.content_text;
+              if ((!text || text.trim().length === 0) && item.input_audio_transcription) {
+                text = item.input_audio_transcription.text || item.input_audio_transcription.transcript || null;
+              }
               // Fallback: check for user_transcript field added by backend patch
               if ((!text || text.trim().length === 0) && msg.user_transcript) {
                 text = msg.user_transcript;
@@ -438,8 +471,17 @@ export default function InterviewSessionRoom() {
               const role = item.role || (item.metadata && item.metadata.role) || item.author?.role || null;
               const prevId = msg.previous_item_id || item.previous_item_id || null;
               const itemId = item.id || item.item_id || item.itemId || msg.item_id || null;
+              const hasUserAudioContent = Array.isArray(item.content) && item.content.some((c) => (
+                c?.type === 'input_audio' ||
+                c?.type === 'input_text' ||
+                Boolean(c?.input_audio_transcription)
+              ));
 
-              const isUserReply = (role && (role === 'user' || role === 'candidate')) || (prevId && lastAIItemRef.current && prevId === lastAIItemRef.current) || (itemId && lastCommittedInputItemRef.current && itemId === lastCommittedInputItemRef.current);
+              const isUserReply =
+                (role && (role === 'user' || role === 'candidate')) ||
+                hasUserAudioContent ||
+                (prevId && lastAIItemRef.current && prevId === lastAIItemRef.current) ||
+                (itemId && lastCommittedInputItemRef.current && itemId === lastCommittedInputItemRef.current);
 
               // Log the full item object for user turns for debugging
               if (isUserReply) {
@@ -656,8 +698,20 @@ export default function InterviewSessionRoom() {
         throw new Error('No messages captured - cannot generate report');
       }
 
-      // Calculate metrics
-      const totalWords = transcriptPayload.raw_messages.reduce((sum, entry) => {
+      // Calculate metrics (user-centric)
+      const userMessages = transcriptPayload.raw_messages.filter((entry) => {
+        const speaker = String(entry.speaker || '').toLowerCase();
+        return speaker === 'user' || speaker === 'candidate';
+      });
+      const aiMessages = transcriptPayload.raw_messages.filter((entry) => {
+        const speaker = String(entry.speaker || '').toLowerCase();
+        return speaker === 'ai' || speaker === 'interviewer' || speaker === 'sonia';
+      });
+
+      const userWordCount = userMessages.reduce((sum, entry) => {
+        return sum + (entry.text ? entry.text.split(/\s+/).length : 0);
+      }, 0);
+      const aiWordCount = aiMessages.reduce((sum, entry) => {
         return sum + (entry.text ? entry.text.split(/\s+/).length : 0);
       }, 0);
 
@@ -686,7 +740,8 @@ export default function InterviewSessionRoom() {
           questions_answered: transcriptPayload.qa_pairs.length,
           metrics: {
             questions_answered: transcriptPayload.qa_pairs.length,
-            total_words: totalWords,
+            total_words: userWordCount,
+            ai_total_words: aiWordCount,
             total_duration: durationMinutes,
             speaking_time: durationMinutes * 60,
             silence_time: 0,
