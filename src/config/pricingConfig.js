@@ -1,0 +1,61 @@
+export const trialConfig = {
+  label: "Try Free for 5 Minutes",
+  description: "Start one realtime interview session with full AI interviewer experience.",
+};
+
+export const pricingPlans = [
+  {
+    key: "basic",
+    name: "Launchpad",
+    tierLabel: "Basic",
+    tagline: "For students and early job seekers",
+    priceLabel: "₹499",
+    priceSubLabel: "Per month",
+    bestFor: "Students & early job seekers",
+    ctaLabel: "Start Launchpad",
+    introLine: "Everything you need to start practicing consistently:",
+    features: [
+      "Core platform access",
+      "Limited AI interviews",
+      "Basic performance scores",
+      "Transcript and report export",
+      "Guided interview templates",
+    ],
+  },
+  {
+    key: "pro",
+    name: "Career Sprint",
+    tierLabel: "Pro ⭐",
+    tagline: "For serious interview preparation",
+    priceLabel: "₹1,499",
+    priceSubLabel: "Per month",
+    bestFor: "Serious interview prep",
+    ctaLabel: "Start Career Sprint",
+    introLine: "Everything in Launchpad, plus:",
+    features: [
+      "Unlimited AI interviews",
+      "Advanced performance scores",
+      "Role-specific interview tracks",
+      "Analytics over time",
+      "Stronger depth and reasoning analysis",
+    ],
+  },
+  {
+    key: "enterprise",
+    name: "Talent Grid",
+    tierLabel: "Enterprise",
+    tagline: "For institutions and hiring teams",
+    priceLabel: "₹7,999",
+    priceSubLabel: "Per month",
+    bestFor: "Institutions & teams",
+    ctaLabel: "Contact Sales",
+    introLine: "Everything in Career Sprint, plus:",
+    features: [
+      "Team and cohort analytics",
+      "Role-specific interviews at scale",
+      "Advanced trend reporting",
+      "Centralized progress management",
+      "Priority implementation support",
+    ],
+  },
+];

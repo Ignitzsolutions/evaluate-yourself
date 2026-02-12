@@ -15,6 +15,10 @@ export const footerBrand = {
 
 export const footerLinks = [
   {
+    label: "Pricing",
+    href: "/pricing",
+  },
+  {
     label: "Privacy",
     href: getEnvVar("PRIVACY_URL"),
   },

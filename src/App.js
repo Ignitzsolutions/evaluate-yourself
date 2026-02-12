@@ -4,15 +4,18 @@ import { ThemeProvider, CssBaseline, Box } from "@mui/material";
 
 import PrivateRoute from "./components/PrivateRoute";
 import ErrorBoundaryWrapper from "./components/ErrorBoundary";
+import OnboardingGuard from "./components/OnboardingGuard";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import theme from "./theme/theme";
 
 import LandingPage from "./pages/LandingPage.jsx";
+import PricingPage from "./pages/PricingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Dashboard from "./pages/Dashboard";
+import OnboardingPage from "./pages/OnboardingPage";
 import PreInterviewForm from "./pages/PreInterviewForm";
 import InterviewSessionRoom from "./pages/InterviewSessionRoom";
 import ReportPage from "./pages/ReportPage";
@@ -59,6 +62,23 @@ function PublicLayout() {
   );
 }
 
+function LandingLayout() {
+  return (
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundColor: "background.default",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box component="main" sx={{ flex: 1 }}>
+        <Outlet />
+      </Box>
+    </Box>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider theme={theme}>
@@ -71,9 +91,14 @@ export default function App() {
         }}
       >
         <Routes>
+          {/* Landing route without footer */}
+          <Route element={<LandingLayout />}>
+            <Route path="/" element={<LandingPage />} />
+          </Route>
+
           {/* Public routes without navbar */}
           <Route element={<PublicLayout />}>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -81,11 +106,24 @@ export default function App() {
             <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
           </Route>
 
-          {/* Auth-protected routes with navbar */}
+          {/* Auth-protected onboarding route (unguarded) */}
           <Route
             element={
               <PrivateRoute>
                 <MainLayout />
+              </PrivateRoute>
+            }
+          >
+            <Route path="/onboarding" element={<OnboardingPage />} />
+          </Route>
+
+          {/* Auth-protected routes with navbar + onboarding completed */}
+          <Route
+            element={
+              <PrivateRoute>
+                <OnboardingGuard>
+                  <MainLayout />
+                </OnboardingGuard>
               </PrivateRoute>
             }
           >
@@ -112,9 +150,11 @@ export default function App() {
             path="/interview/:type"
             element={
               <PrivateRoute>
-                <ErrorBoundaryWrapper>
-                  <InterviewSessionRoom />
-                </ErrorBoundaryWrapper>
+                <OnboardingGuard>
+                  <ErrorBoundaryWrapper>
+                    <InterviewSessionRoom />
+                  </ErrorBoundaryWrapper>
+                </OnboardingGuard>
               </PrivateRoute>
             }
           />
@@ -123,9 +163,11 @@ export default function App() {
             path="/interview/session/:sessionId"
             element={
               <PrivateRoute>
-                <ErrorBoundaryWrapper>
-                  <InterviewSessionRoom />
-                </ErrorBoundaryWrapper>
+                <OnboardingGuard>
+                  <ErrorBoundaryWrapper>
+                    <InterviewSessionRoom />
+                  </ErrorBoundaryWrapper>
+                </OnboardingGuard>
               </PrivateRoute>
             }
           />

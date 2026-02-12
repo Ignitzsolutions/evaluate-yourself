@@ -3,8 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 // import { useAuth } from "../context/AuthContext";
 import { useUser, useClerk } from "@clerk/clerk-react";
 import { Box, Container, Typography, Button, Card, Grid } from "@mui/material";
-import { PlayArrow, Assessment, Settings } from "@mui/icons-material";
+import { PlayArrow, Assessment, Settings, CheckRounded } from "@mui/icons-material";
 import { Divider, Stack, Paper } from "@mui/material";
+import { pricingPlans } from "../config/pricingConfig";
 import "../ui.css";
 
 export default function LandingPage() {
@@ -57,6 +58,12 @@ export default function LandingPage() {
           <div className="nav-right">
             {!isSignedIn ? (
               <>
+                <Link to="/pricing" className="btn btn-ghost" style={{
+                  textDecoration: "none",
+                  fontSize: isScrolled ? "13px" : "14px",
+                  padding: isScrolled ? "6px 12px" : "8px 14px",
+                  transition: "all 0.3s ease-in-out"
+                }}>Pricing</Link>
                 <Link to="/login" className="btn btn-primary" style={{
                   textDecoration: "none",
                   fontSize: isScrolled ? "13px" : "14px",
@@ -115,8 +122,8 @@ export default function LandingPage() {
                       <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: 4, fontSize: 16 }}>
                         Start practicing
                       </Button>
-                      <Button variant="outlined" size="large" onClick={() => nav("/sample-report")} sx={{ px: 3, fontSize: 16 }}>
-                        View sample report
+                      <Button variant="outlined" size="large" onClick={() => nav("/pricing")} sx={{ px: 3, fontSize: 16 }}>
+                        View pricing
                       </Button>
                     </>
                   ) : (
@@ -319,6 +326,81 @@ export default function LandingPage() {
             </Typography>
           </Paper>
 
+          <Stack spacing={1.5} alignItems="center" sx={{ width: "100%", mt: 3 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, opacity: 0.92 }}>
+              Pricing Plans
+            </Typography>
+            <Typography sx={{ fontSize: 16, opacity: 0.65, maxWidth: 720 }}>
+              Choose the track that matches your interview goals. Start with a free 5-minute trial.
+            </Typography>
+          </Stack>
+
+          <Grid container spacing={2.5} sx={{ width: "100%", maxWidth: 1240 }}>
+            {pricingPlans.map((plan) => (
+              <Grid item xs={12} md={4} key={plan.key}>
+                <Card
+                  sx={{
+                    p: 3.5,
+                    borderRadius: 2.5,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
+                    height: "100%",
+                    textAlign: "left",
+                  }}
+                >
+                  <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
+                    {plan.tierLabel}
+                  </Typography>
+                  <Typography sx={{ mt: 0.6, fontSize: 16, opacity: 0.74 }}>
+                    {plan.tagline}
+                  </Typography>
+
+                  <Typography sx={{ mt: 3, fontSize: 44, fontWeight: 800, lineHeight: 1 }}>
+                    {plan.priceLabel}
+                  </Typography>
+                  <Typography sx={{ mt: 0.6, fontSize: 16, opacity: 0.62 }}>
+                    {plan.priceSubLabel}
+                  </Typography>
+
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    onClick={() => nav("/pricing")}
+                    sx={{
+                      mt: 2.4,
+                      py: 1.1,
+                      borderRadius: 2,
+                      textTransform: "none",
+                      fontWeight: 700,
+                      bgcolor: "#0b0f19",
+                      "&:hover": { bgcolor: "#111827" },
+                    }}
+                  >
+                    {plan.ctaLabel}
+                  </Button>
+
+                  <Divider sx={{ my: 2.2 }} />
+
+                  <Typography sx={{ fontSize: 17, fontWeight: 700, mb: 0.8 }}>
+                    {plan.introLine}
+                  </Typography>
+
+                  <Stack spacing={1.2}>
+                    {plan.features.slice(0, 5).map((feature) => (
+                      <Stack key={feature} direction="row" spacing={1} alignItems="flex-start">
+                        <CheckRounded sx={{ fontSize: 18, mt: "3px", opacity: 0.82 }} />
+                        <Typography sx={{ fontSize: 16, opacity: 0.88 }}>
+                          {feature}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+
         </Stack>
       </Container>
 
@@ -361,6 +443,34 @@ export default function LandingPage() {
       {/* ONE-LINE YC SUMMARY */}
       <Box sx={{ textAlign: "center", py: 3, opacity: 0.5, fontSize: 14 }}>
         Evaluate Yourself helps candidates practice real interviews, understand how they perform under pressure, and improve before the real interview.
+      </Box>
+
+      <Box
+        component="div"
+        sx={{
+          width: "100%",
+          bgcolor: "primary.main",
+          m: 0,
+          mt: { xs: 4, md: 6 },
+          py: { xs: 4, md: 5 },
+          textAlign: "center"
+        }}
+      >
+        <Typography
+          sx={{
+            fontSize: { xs: 56, sm: 96, md: 164 },
+            fontWeight: 800,
+            letterSpacing: 1.2,
+            lineHeight: 0.9,
+            opacity: 0.95,
+            color: "white"
+          }}
+        >
+          EvaluateYourself
+        </Typography>
+        <div style={{ width: "100%", marginTop: 12, marginBottom: 8 }}>
+          <Divider sx={{ bgcolor: "white", opacity: 0.3, height: 2, width: "100%" }} />
+        </div>
       </Box>
 
     </div>

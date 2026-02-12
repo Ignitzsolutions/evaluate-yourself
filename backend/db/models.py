@@ -16,6 +16,65 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    clerk_user_id = Column(String, unique=True, index=True, nullable=False)
+    user_category = Column(String, nullable=False)  # student | professional
+
+    # Common fields
+    primary_goal = Column(String, nullable=False)
+    target_roles = Column(Text)  # JSON list
+    industries = Column(Text)  # JSON list
+    interview_timeline = Column(String, nullable=False)
+    prep_intensity = Column(String, nullable=False)
+    learning_style = Column(String, nullable=False)
+    consent_data_use = Column(Boolean, nullable=False, default=False)
+
+    # Student-specific fields
+    education_level = Column(String)
+    graduation_timeline = Column(String)
+    major_domain = Column(String)
+    placement_readiness = Column(String)
+
+    # Professional-specific fields
+    current_role = Column(String)
+    experience_band = Column(String)
+    management_scope = Column(String)
+    domain_expertise = Column(Text)  # JSON list
+    target_company_type = Column(String)
+    career_transition_intent = Column(String)
+    notice_period_band = Column(String)
+    career_comp_band = Column(String)  # Foundation | Growth | Advanced | Leadership
+    interview_urgency = Column(String)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class InterviewSession(Base):
+    __tablename__ = "interview_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, unique=True, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE | COMPLETED | FAILED
+
+    interview_type = Column(String)
+    difficulty = Column(String)
+    duration_minutes_requested = Column(Integer)
+    duration_minutes_effective = Column(Integer)
+
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    report_id = Column(String, index=True, nullable=True)
+    session_meta_json = Column(Text)  # JSON object
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class InterviewReport(Base):
     __tablename__ = "interview_reports"
 

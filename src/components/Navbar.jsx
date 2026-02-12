@@ -21,18 +21,20 @@ import {
   Analytics as AnalyticsIcon,
   History as HistoryIcon,
   Work as InterviewsIcon,
+  Sell as PricingIcon,
   PlayArrow,
   Logout,
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useUser, useClerk } from "@clerk/clerk-react";   // ✅ Clerk
+import { useClerk } from "@clerk/clerk-react";   // ✅ Clerk
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
   { label: 'Analytics', path: '/analytics', icon: <AnalyticsIcon /> },
   { label: 'History', path: '/history', icon: <HistoryIcon /> },
   { label: 'Interviews', path: '/interviews', icon: <InterviewsIcon /> },
+  { label: 'Pricing', path: '/pricing', icon: <PricingIcon /> },
 ];
 
 // Logo component using brand image

@@ -20,9 +20,10 @@ langchain-core>=0.1.0
 langchain-openai>=0.0.5
 
 # Data validation and serialization
-pydantic==2.5.0
+# 2.10+ avoids pydantic-core build failures on newer Python (3.13/3.14) used locally.
+pydantic>=2.10.0,<3.0.0
 python-dotenv==1.0.0
-typing-extensions==4.8.0
+typing-extensions>=4.12.0
 python-dateutil==2.8.2
 
 # Azure services

@@ -9,6 +9,14 @@ logger = logging.getLogger(__name__)
 
 _default_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_default_path}")
+ENV = os.getenv(
+    "ENV",
+    os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", "development"))),
+).strip().lower()
+
+
+def is_production_env() -> bool:
+    return ENV == "production"
 
 # Azure PostgreSQL readiness configuration
 def _get_engine_config(database_url: str) -> dict:
@@ -38,6 +46,23 @@ def _get_engine_config(database_url: str) -> dict:
             config["connect_args"] = connect_args
     
     return config
+
+
+def assert_production_database_config() -> None:
+    """Fail fast if production database settings are unsafe."""
+    if not is_production_env():
+        return
+    if not os.getenv("DATABASE_URL"):
+        raise RuntimeError("DATABASE_URL must be set in production.")
+    if not DATABASE_URL.startswith("postgresql"):
+        raise RuntimeError("Production requires PostgreSQL DATABASE_URL.")
+
+
+assert_production_database_config()
+logger.info(
+    "Database backend resolved: %s",
+    "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite",
+)
 
 engine_config = _get_engine_config(DATABASE_URL)
 engine = create_engine(DATABASE_URL, **engine_config)
