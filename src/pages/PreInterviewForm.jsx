@@ -1,307 +1,210 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Button, FormControlLabel, Checkbox, Slider } from "@mui/material";
-import "../ui.css";
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Checkbox,
+  Chip,
+  FormControl,
+  FormControlLabel,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
   const location = useLocation();
-  const incomingType = location.state?.type; // get interview type from previous page
 
-  const [selectedType] = useState(incomingType || "technical"); // initialize it, no need to change again
-  const [duration, setDuration] = useState("15");
+  const selectedType = useMemo(() => location.state?.type || "technical", [location.state?.type]);
+
+  const [duration, setDuration] = useState(15);
   const [difficulty, setDifficulty] = useState("medium");
-  
-  // New fields
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
-  const [jobLevel, setJobLevel] = useState("mid");
   const [questionMix, setQuestionMix] = useState("balanced");
-  const [questionMixRatio, setQuestionMixRatio] = useState(0.5); // For custom mix
   const [interviewStyle, setInterviewStyle] = useState("neutral");
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [transcriptConsent, setTranscriptConsent] = useState(false);
-  const [interviewMode, setInterviewMode] = useState("timeboxed");
+  const [consentError, setConsentError] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Require transcript consent
+
     if (!transcriptConsent) {
-      alert("Please consent to transcript storage to continue.");
+      setConsentError(true);
       return;
     }
-    
-    const finalType = selectedType;
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const config = {
-      type: finalType,
+      type: selectedType,
       duration,
       difficulty,
       role: role.trim() || undefined,
       company: company.trim() || undefined,
-      jobLevel,
       questionMix,
-      questionMixRatio: questionMix === "custom" ? questionMixRatio : undefined,
       interviewStyle,
-      voiceEnabled,
-      captionsEnabled,
       transcriptConsent,
-      interviewMode
     };
-    
+
     sessionStorage.setItem("interviewConfig", JSON.stringify(config));
     navigate(`/interview/session/${sessionId}`);
   };
 
   return (
-    <main className="auth-shell">
-      <section className="auth-card">
-        <div className="auth-hero">
-          <div>
-            <h1>Setup Your Interview</h1>
-            <p>Selected type: <strong style={{ color: "var(--brand)" }}>{selectedType}</strong></p>
-          </div>
-          <Button variant="contained" size="large" onClick={() => navigate("/interviews")} sx={{ px: 4, py: 1.4, fontSize: 16 }}>
-            Back to selection
-          </Button>
-        </div>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        py: { xs: 3, md: 6 },
+        px: { xs: 2, md: 4 },
+        background:
+          "radial-gradient(900px 380px at 0% 0%, rgba(0,86,179,0.10), transparent 60%), radial-gradient(700px 320px at 100% 20%, rgba(230,57,70,0.08), transparent 60%), #f8f9fa",
+      }}
+    >
+      <Card
+        sx={{
+          maxWidth: 980,
+          mx: "auto",
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+          boxShadow: "0 18px 60px rgba(0, 59, 122, 0.12)",
+        }}
+      >
+        <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} sx={{ mb: 4 }}>
+            <Box>
+              <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                Interview Configuration
+              </Typography>
+              <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                Quick setup for a focused, production-ready session.
+              </Typography>
+              <Chip label={`Type: ${selectedType}`} size="small" color="primary" sx={{ mt: 1.5 }} />
+            </Box>
+            <Button variant="outlined" onClick={() => navigate("/interviews")}>
+              Back to Selection
+            </Button>
+          </Stack>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <h2 style={{ margin: "0 0 2rem 0", fontSize: 22, fontWeight: 600 }}>Interview Configuration</h2>
+          <Box component="form" onSubmit={handleSubmit}>
+            <Grid container spacing={2.5}>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel id="duration-label">Duration</InputLabel>
+                  <Select labelId="duration-label" label="Duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                    <MenuItem value={10}>10 minutes</MenuItem>
+                    <MenuItem value={15}>15 minutes</MenuItem>
+                    <MenuItem value={20}>20 minutes</MenuItem>
+                    <MenuItem value={30}>30 minutes</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
 
-          {/* Important Settings Section */}
-          <div style={{ marginBottom: "2rem" }}>
-            <h3 style={{ fontSize: "16px", fontWeight: 600, color: "#111827", marginBottom: "1rem", paddingBottom: "0.5rem", borderBottom: "2px solid #e5e7eb" }}>
-              Essential Settings
-            </h3>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
-              {/* Duration Selection */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px" }}>
-                  Interview Duration <span style={{ color: "#dc2626" }}>*</span>
-                </label>
-                <select 
-                  className="input" 
-                  value={duration} 
-                  onChange={(e) => setDuration(e.target.value)}
-                  style={{ width: "100%" }}
-                  required
-                >
-                  <option value="10">10 minutes</option>
-                  <option value="15">15 minutes</option>
-                  <option value="20">20 minutes</option>
-                  <option value="30">30 minutes</option>
-                </select>
-              </div>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel id="difficulty-label">Difficulty</InputLabel>
+                  <Select labelId="difficulty-label" label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
+                    <MenuItem value="easy">Easy</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="hard">Hard</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
 
-              {/* Difficulty Selection */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px" }}>
-                  Difficulty Level <span style={{ color: "#dc2626" }}>*</span>
-                </label>
-                <select 
-                  className="input" 
-                  value={difficulty} 
-                  onChange={(e) => setDifficulty(e.target.value)}
-                  style={{ width: "100%" }}
-                  required
-                >
-                  <option value="easy">Easy - Entry level</option>
-                  <option value="medium">Medium - Mid level</option>
-                  <option value="hard">Hard - Senior level</option>
-                </select>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
-              {/* Job Level */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px" }}>
-                  Job Level <span style={{ color: "#dc2626" }}>*</span>
-                </label>
-                <select 
-                  className="input" 
-                  value={jobLevel} 
-                  onChange={(e) => setJobLevel(e.target.value)}
-                  style={{ width: "100%" }}
-                  required
-                >
-                  <option value="intern">Intern</option>
-                  <option value="junior">Junior</option>
-                  <option value="mid">Mid-Level</option>
-                  <option value="senior">Senior</option>
-                </select>
-              </div>
-
-              {/* Interview Style */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px" }}>
-                  Interview Style <span style={{ color: "#dc2626" }}>*</span>
-                </label>
-                <select 
-                  className="input" 
-                  value={interviewStyle} 
-                  onChange={(e) => setInterviewStyle(e.target.value)}
-                  style={{ width: "100%" }}
-                  required
-                >
-                  <option value="friendly">Friendly</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="strict">Strict</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Question Mix */}
-            <div style={{ marginBottom: "1rem" }}>
-              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px" }}>
-                Question Mix <span style={{ color: "#dc2626" }}>*</span>
-              </label>
-              <select 
-                className="input" 
-                value={questionMix} 
-                onChange={(e) => setQuestionMix(e.target.value)}
-                style={{ width: "100%" }}
-                required
-              >
-                <option value="technical">Mostly Technical</option>
-                <option value="balanced">Balanced</option>
-                <option value="behavioral">Mostly Behavioral</option>
-                <option value="custom">Custom</option>
-              </select>
-              {questionMix === "custom" && (
-                <div style={{ marginTop: "0.75rem", padding: "0.75rem", backgroundColor: "#f9fafb", borderRadius: "6px" }}>
-                  <label style={{ fontSize: "0.875rem", color: "#374151", display: "block", marginBottom: "0.5rem" }}>
-                    Technical vs Behavioral: <strong>{Math.round(questionMixRatio * 100)}% Technical</strong>
-                  </label>
-                  <Slider
-                    value={questionMixRatio}
-                    onChange={(e, newValue) => setQuestionMixRatio(newValue)}
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    sx={{ width: "100%" }}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Speech Settings */}
-          <div style={{ marginBottom: "2rem", padding: "1.25rem", backgroundColor: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}>
-            <label style={{ display: "block", marginBottom: "1rem", fontWeight: 600, fontSize: "14px" }}>
-              Speech Settings
-            </label>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={voiceEnabled}
-                    onChange={(e) => setVoiceEnabled(e.target.checked)}
-                  />
-                }
-                label={<span style={{ fontSize: "14px" }}>Enable Voice (Sonia will speak)</span>}
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={captionsEnabled}
-                    onChange={(e) => setCaptionsEnabled(e.target.checked)}
-                  />
-                }
-                label={<span style={{ fontSize: "14px" }}>Enable Live Captions</span>}
-              />
-            </div>
-          </div>
-
-          {/* Transcript Consent (Required) */}
-          <div style={{ marginBottom: "2rem", padding: "1.25rem", backgroundColor: "#fef3c7", borderRadius: "8px", border: "2px solid #fbbf24" }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={transcriptConsent}
-                  onChange={(e) => setTranscriptConsent(e.target.checked)}
-                  required
-                />
-              }
-              label={
-                <span style={{ fontWeight: 600, fontSize: "14px", color: "#92400e" }}>
-                  I consent to this session being transcribed for feedback purposes <span style={{ color: "#dc2626" }}>*</span>
-                </span>
-              }
-            />
-          </div>
-
-          {/* Optional Settings Section */}
-          <div style={{ marginBottom: "2rem", paddingTop: "1.5rem", borderTop: "2px solid #e5e7eb" }}>
-            <h3 style={{ fontSize: "14px", fontWeight: 500, color: "#6b7280", marginBottom: "1rem" }}>
-              Optional Settings
-            </h3>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
-              {/* Role (Optional) */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px", color: "#6b7280" }}>
-                  Target Role <span style={{ fontSize: "12px", color: "#9ca3af" }}>(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g., Software Engineer"
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Target Role"
+                  placeholder="e.g., Backend Engineer"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  style={{ width: "100%" }}
                 />
-              </div>
+              </Grid>
 
-              {/* Company (Optional) */}
-              <div>
-                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px", color: "#6b7280" }}>
-                  Target Company <span style={{ fontSize: "12px", color: "#9ca3af" }}>(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g., Google, Microsoft"
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Target Company"
+                  placeholder="e.g., Microsoft"
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
-                  style={{ width: "100%" }}
                 />
-              </div>
-            </div>
+              </Grid>
 
-            {/* Interview Mode */}
-            <div>
-              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: 500, fontSize: "14px", color: "#6b7280" }}>
-                Interview Mode <span style={{ fontSize: "12px", color: "#9ca3af" }}>(Optional)</span>
-              </label>
-              <select 
-                className="input" 
-                value={interviewMode} 
-                onChange={(e) => setInterviewMode(e.target.value)}
-                style={{ width: "100%" }}
-              >
-                <option value="timeboxed">Time-based (Duration)</option>
-                <option value="questionboxed">Question-based (Number of questions)</option>
-              </select>
-            </div>
-          </div>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel id="focus-label">Question Focus</InputLabel>
+                  <Select labelId="focus-label" label="Question Focus" value={questionMix} onChange={(e) => setQuestionMix(e.target.value)}>
+                    <MenuItem value="technical">Technical</MenuItem>
+                    <MenuItem value="balanced">Balanced</MenuItem>
+                    <MenuItem value="behavioral">Behavioral</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
 
-          {/* Submit */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "2rem" }}>
-            <button className="btn btn-primary btn-lg" type="submit" style={{ width: "100%" }}>
-              Start Interview →
-            </button>
-            <div className="hint" style={{ textAlign: "center", fontSize: "13px", color: "#6b7280" }}>
-              Camera & mic will be checked next.
-            </div>
-          </div>
-        </form>
-      </section>
-    </main>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel id="style-label">Interview Style</InputLabel>
+                  <Select labelId="style-label" label="Interview Style" value={interviewStyle} onChange={(e) => setInterviewStyle(e.target.value)}>
+                    <MenuItem value="friendly">Friendly</MenuItem>
+                    <MenuItem value="neutral">Neutral</MenuItem>
+                    <MenuItem value="strict">Strict</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12}>
+                <Box
+                  sx={{
+                    px: 2,
+                    py: 1.5,
+                    borderRadius: 2,
+                    border: "1px solid",
+                    borderColor: consentError ? "error.main" : "divider",
+                    bgcolor: consentError ? "rgba(211,47,47,0.04)" : "background.paper",
+                  }}
+                >
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={transcriptConsent}
+                        onChange={(e) => {
+                          setTranscriptConsent(e.target.checked);
+                          if (e.target.checked) {
+                            setConsentError(false);
+                          }
+                        }}
+                      />
+                    }
+                    label="I consent to session transcript storage for analysis and feedback."
+                  />
+                  {consentError && (
+                    <Typography variant="caption" color="error">
+                      Consent is required to start the interview.
+                    </Typography>
+                  )}
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} justifyContent="flex-end" sx={{ mt: 4 }}>
+              <Button variant="outlined" onClick={() => navigate("/interviews")}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="contained">
+                Start Interview
+              </Button>
+            </Stack>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
