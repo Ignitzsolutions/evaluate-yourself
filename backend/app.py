@@ -3243,7 +3243,16 @@ async def save_interview_transcript(
         else:
             effective_questions_answered = len(transcript)
 
-        total_words_derived = sum(len((m.get("text") or "").split()) for m in ordered_messages)
+        user_words_derived = sum(
+            len((m.get("text") or "").split())
+            for m in ordered_messages
+            if (m.get("speaker") or "").lower() in ["user", "candidate"]
+        )
+        ai_words_derived = sum(
+            len((m.get("text") or "").split())
+            for m in ordered_messages
+            if (m.get("speaker") or "").lower() in ["ai", "interviewer", "sonia"]
+        )
         total_duration_derived = 0
         try:
             total_duration_derived = int(duration_minutes) if duration_minutes else 0
@@ -3278,17 +3287,17 @@ async def save_interview_transcript(
                 last_ai_ts = None
 
         avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else None
-        words_per_minute_derived = round(total_words_derived / max(total_duration_derived, 1))
         eye_contact_pct_derived = None
         if isinstance(metrics, dict):
             eye_contact_pct_derived = metrics.get("eye_contact_pct")
 
         derived_metrics = {
             "questions_answered": effective_questions_answered,
-            "total_words": total_words_derived,
+            "total_words": user_words_derived,
+            "ai_total_words": ai_words_derived,
             "total_duration": total_duration_derived,
             "avg_response_time_seconds": avg_response_time_derived,
-            "words_per_minute": words_per_minute_derived,
+            "words_per_minute": round(user_words_derived / max(total_duration_derived, 1)),
             "eye_contact_pct": eye_contact_pct_derived,
             "session_feedback": session_feedback,
         }
