@@ -4,8 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
-const API_BASE = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "";
+const API_BASE = getApiBaseUrl();
 
 export default function Dashboard() {
   const nav = useNavigate();

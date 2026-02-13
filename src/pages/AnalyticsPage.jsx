@@ -33,6 +33,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { authFetch } from '../utils/apiClient';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import {
   LineChart,
   Line,
@@ -46,6 +47,7 @@ import {
 export default function AnalyticsPage() {
   const navigate = useNavigate();
   const { getToken } = useAuth();
+    const API_BASE_URL = getApiBaseUrl();
     const [anchorEl, setAnchorEl] = useState(null);
     const [selectedSession, setSelectedSession] = useState(null);
     const [summary, setSummary] = useState(null);
@@ -73,8 +75,6 @@ export default function AnalyticsPage() {
     const getTrendIcon = (rate) => {
       return rate > 0 ? <TrendingUp color="success" /> : <TrendingDown color="error" />;
     };
-
-    const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || '';
 
     useEffect(() => {
       let mounted = true;

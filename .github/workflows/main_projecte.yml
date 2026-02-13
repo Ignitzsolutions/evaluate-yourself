@@ -24,6 +24,7 @@ jobs:
 
       - name: Install frontend dependencies and build
         env:
+          REACT_APP_API_URL: ""
           REACT_APP_CLERK_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_CLERK_PUBLISHABLE_KEY }}
         run: |
           npm ci

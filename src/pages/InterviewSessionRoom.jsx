@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
 import { authFetch } from '../utils/apiClient';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import {
   Mic,
   MicOff,
@@ -24,11 +25,7 @@ import {
 } from '@mui/material';
 import '../ui.css';
 
-// Support both Create React App (process.env) and Vite (import.meta.env)
-const API_BASE_URL =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL) ||
-  process.env.REACT_APP_API_URL ||
-  "";
+const API_BASE_URL = getApiBaseUrl();
 
 export default function InterviewSessionRoom() {
   const params = useParams();
