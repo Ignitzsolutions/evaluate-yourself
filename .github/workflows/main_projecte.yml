@@ -122,15 +122,37 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}
 
-      - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
-        id: deploy-to-webapp
-        with:
-          app-name: 'projecte'
-          slot-name: 'Production'
-          package: .
-          startup-command: 'cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${WEBSITES_PORT:-8000} --timeout 600'
-          # Note: If remote build fails, disable SCM_DO_BUILD_DURING_DEPLOYMENT in Azure Portal
-          # Configuration → Application settings → Set SCM_DO_BUILD_DURING_DEPLOYMENT to false
-          # Also set WEBSITES_PORT=8000 in Application settings for proper port routing
+      - name: Ensure startup command
+        run: |
+          az webapp config set \
+            --resource-group projecte_group \
+            --name projecte \
+            --startup-file "cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
+
+      - name: Package deployment artifact
+        run: |
+          zip -r release.zip . -x "antenv/*" "node_modules/*" "backend/venv/*"
+
+      - name: Deploy to Azure Web App (retry)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Deployment attempt $attempt/3"
+            if az webapp deploy \
+              --resource-group projecte_group \
+              --name projecte \
+              --src-path release.zip \
+              --type zip \
+              --clean true \
+              --restart true \
+              --track-status true; then
+              echo "Deployment succeeded"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Deployment failed; retrying in 20s..."
+              sleep 20
+            fi
+          done
+          echo "Deployment failed after 3 attempts"
+          exit 1
           
