@@ -40,8 +40,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "";
+const API_BASE_URL = getApiBaseUrl();
 
 function safeTimestamp(ts) {
   if (!ts) return null;

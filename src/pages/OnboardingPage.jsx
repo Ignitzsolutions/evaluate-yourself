@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
   Alert,
   Box,
@@ -21,7 +22,7 @@ import {
   Typography,
 } from "@mui/material";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "";
+const API_BASE_URL = getApiBaseUrl();
 
 const steps = ["Profile Type", "Goals", "Background", "Consent"];
 

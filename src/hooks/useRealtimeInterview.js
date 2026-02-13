@@ -1,12 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { authFetch } from '../utils/apiClient';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
-// Support both Create React App (process.env) and Vite (import.meta.env)
-const API_BASE_URL =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL) ||
-  process.env.REACT_APP_API_URL ||
-  "";
+const API_BASE_URL = getApiBaseUrl();
 
 const DEBUG =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_REALTIME_DEBUG === 'true') ||

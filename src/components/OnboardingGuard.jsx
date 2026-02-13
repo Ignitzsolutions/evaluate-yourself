@@ -3,8 +3,9 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import { authFetch } from "../utils/apiClient";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.VITE_API_URL || "";
+const API_BASE_URL = getApiBaseUrl();
 
 export default function OnboardingGuard({ children }) {
   const location = useLocation();
