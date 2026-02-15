@@ -98,36 +98,39 @@ export default function LandingPage() {
       </header>
 
       {/* HERO SECTION */}
-      <Box className="hero" sx={{ pt: 10, pb: 10 }}>
-        <Container maxWidth="lg">
-          <Grid container spacing={6} alignItems="center">
+      <Box className="hero" sx={{ pt: { xs: 6, md: 10 }, pb: { xs: 6, md: 10 } }}>
+        <Container maxWidth="lg" sx={{ px: { xs: 2, md: 3 } }}>
+          <Grid container spacing={{ xs: 4, md: 6 }} alignItems="center">
 
             {/* LEFT CONTENT */}
             <Grid item xs={12} md={6}>
               <Stack spacing={3} textAlign="left">
-                <Typography variant="h2" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
+                <Typography
+                  variant="h2"
+                  sx={{ fontWeight: 800, lineHeight: 1.2, fontSize: { xs: "2.1rem", sm: "2.6rem", md: "3.2rem" } }}
+                >
                   Practice real interviews.<br />
                   Understand how you perform.<br />
                   Get interview-ready.
                 </Typography>
 
-                <Typography sx={{ fontSize: 18, opacity: 0.65, lineHeight: 1.6, maxWidth: 540 }}>
+                <Typography sx={{ fontSize: { xs: 15, md: 18 }, opacity: 0.65, lineHeight: 1.6, maxWidth: 540 }}>
                   Evaluate Yourself is a real-time AI interview platform that lets you experience realistic interviews,
                   observes how you communicate and reason under pressure, and shows you exactly how to improve before the real one.
                 </Typography>
 
-                <Box sx={{ display: "flex", gap: 2, pt: 1 }}>
+                <Box sx={{ display: "flex", gap: 2, pt: 1, flexWrap: "wrap" }}>
                   {!isSignedIn ? (
                     <>
-                      <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: 4, fontSize: 16 }}>
+                      <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
                         Start practicing
                       </Button>
-                      <Button variant="outlined" size="large" onClick={() => nav("/pricing")} sx={{ px: 3, fontSize: 16 }}>
+                      <Button variant="outlined" size="large" onClick={() => nav("/pricing")} sx={{ px: { xs: 2.5, md: 3 }, fontSize: { xs: 14, md: 16 } }}>
                         View pricing
                       </Button>
                     </>
                   ) : (
-                    <Button variant="contained" size="large" onClick={() => nav("/interviews")} sx={{ px: 4, fontSize: 16 }}>
+                    <Button variant="contained" size="large" onClick={() => nav("/interviews")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
                       Start practicing
                     </Button>
                   )}
@@ -155,9 +158,9 @@ export default function LandingPage() {
       <Divider sx={{ my: 2 }} />
 
       {/* SECTION 1 */}
-      <Container maxWidth="lg" sx={{ py: 6 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, px: { xs: 2, md: 3 } }}>
         <Stack spacing={6} textAlign="center">
-          <Typography variant="h3" sx={{ fontWeight: 700 }}>Practice a Real Interview</Typography>
+          <Typography variant="h3" sx={{ fontWeight: 700, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>Practice a Real Interview</Typography>
           <Grid container spacing={4}>
             {[
               { title: "Conversational flow", body: "Speak, pause, think, ask for clarification and continue naturally." },
@@ -178,9 +181,9 @@ export default function LandingPage() {
       <Divider sx={{ my: 2 }} />
 
       {/* SECTION 2 */}
-      <Container maxWidth="lg" sx={{ py: 6 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, px: { xs: 2, md: 3 } }}>
         <Stack spacing={6} textAlign="center">
-          <Typography variant="h3" sx={{ fontWeight: 700 }}>Experience How You Perform</Typography>
+          <Typography variant="h3" sx={{ fontWeight: 700, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>Experience How You Perform</Typography>
 
           <Grid container spacing={4} justifyContent="center">
 
@@ -253,10 +256,10 @@ export default function LandingPage() {
       <Divider sx={{ my: 2 }} />
 
       {/* SECTION 3 */}
-      <Container maxWidth="lg" sx={{ py: 8 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 5, md: 8 }, px: { xs: 2, md: 3 } }}>
         <Stack spacing={7} textAlign="center" alignItems="center">
 
-          <Typography variant="h3" sx={{ fontWeight: 800, opacity: 0.9 }}>
+          <Typography variant="h3" sx={{ fontWeight: 800, opacity: 0.9, fontSize: { xs: "2rem", md: "2.8rem" } }}>
             Actionable Feedback Report
           </Typography>
 
@@ -356,7 +359,7 @@ export default function LandingPage() {
                     {plan.tagline}
                   </Typography>
 
-                  <Typography sx={{ mt: 3, fontSize: 44, fontWeight: 800, lineHeight: 1 }}>
+                  <Typography sx={{ mt: 3, fontSize: { xs: 34, md: 44 }, fontWeight: 800, lineHeight: 1 }}>
                     {plan.priceLabel}
                   </Typography>
                   <Typography sx={{ mt: 0.6, fontSize: 16, opacity: 0.62 }}>
@@ -411,11 +414,11 @@ export default function LandingPage() {
       <Box sx={{ py: 6 }}>
         <Container maxWidth="sm">
           <Stack spacing={5} textAlign="center" alignItems="center">
-            <Typography variant="h3" sx={{ fontWeight: 800, lineHeight: 1.3 }}>
+            <Typography variant="h3" sx={{ fontWeight: 800, lineHeight: 1.3, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>
               Interviews are a skill.<br />Skills improve with practice and feedback.
             </Typography>
 
-            <Stack direction="row" spacing={2.5} justifyContent="center">
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} justifyContent="center" sx={{ width: "100%" }}>
               {[
                 "Real interview experience",
                 "Honest observation",

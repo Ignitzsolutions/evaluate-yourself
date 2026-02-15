@@ -31,14 +31,14 @@ export default function PricingPage() {
           "radial-gradient(900px 360px at 10% 0%, rgba(37,99,235,0.16), transparent 60%), radial-gradient(700px 300px at 90% 10%, rgba(15,23,42,0.08), transparent 60%), #f8fafc",
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth="lg" sx={{ px: { xs: 2, md: 3 } }}>
         <Stack spacing={2} sx={{ mb: 5 }}>
           <Chip
             label={trialConfig.label}
             color="primary"
             sx={{ alignSelf: "flex-start", fontWeight: 700 }}
           />
-          <Typography variant="h3" sx={{ fontWeight: 800 }}>
+          <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: "2rem", md: "2.8rem" } }}>
             Pricing That Scales With Interview Goals
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 780 }}>
@@ -71,7 +71,7 @@ export default function PricingPage() {
                     </Typography>
 
                     <Box sx={{ pt: 1 }}>
-                      <Typography variant="h4" sx={{ fontWeight: 800 }}>
+                      <Typography variant="h4" sx={{ fontWeight: 800, fontSize: { xs: "1.8rem", md: "2.125rem" } }}>
                         {plan.priceLabel}
                       </Typography>
                       <Typography variant="body1" color="text.secondary">

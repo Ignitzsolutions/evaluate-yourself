@@ -30,11 +30,28 @@
 }
 .nav-right{
   display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .brand-badge{
   width:36px; height:36px; border-radius:12px;
   background: linear-gradient(135deg, #1E88E5, #42A5F5);
   box-shadow: 0 8px 24px rgba(30,136,229,.35), inset 0 6px 16px rgba(255,255,255,.35);
+}
+
+@media (max-width: 820px){
+  .glossy-inner{
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+  .brand-section{
+    justify-content: center;
+  }
+  .nav-right{
+    justify-content: center;
+    gap: 8px;
+  }
 }
 
 /* ===== Centered hero (keeps height; scales horizontally via max-width) ===== */
@@ -419,6 +436,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .meet-subtle{
   font-size: 13px;
@@ -538,7 +556,7 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  padding: 14px 16px 20px;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.85) 35%, rgba(255,255,255,0.95));
   display: grid;
   place-items: center;
@@ -617,12 +635,26 @@
 }
 
 @media (max-width: 720px){
+  .meet-topbar{
+    height: auto;
+    min-height: 60px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .meet-subtle{
+    font-size: 12px;
+  }
   .meet-stage{
-    height: min(420px, 52vh);
+    width: min(100%, 94vw);
+    height: min(430px, 56vh);
+    border-radius: 18px;
   }
   .meet-controls-row{
     flex-direction: column;
     gap: 10px;
+  }
+  .meet-controls-cluster{
+    width: 100%;
   }
   .meet-control-btn.end{
     margin-left: 0;

@@ -28,6 +28,12 @@ def generate_report(
     
     evaluations = session_state.evaluation_results if hasattr(session_state, 'evaluation_results') else []
     transcript_history = session_state.transcript_history if hasattr(session_state, 'transcript_history') else []
+    candidate_answers = [
+        (item.get("answer") or "").strip()
+        for item in transcript_history
+        if isinstance(item, dict) and (item.get("answer") or "").strip()
+    ]
+    capture_incomplete = len(candidate_answers) == 0 and len(evaluations) == 0
     
     # Handle missing get_performance_summary method
     if hasattr(session_state, 'get_performance_summary'):
@@ -39,17 +45,32 @@ def generate_report(
     avg_clarity = performance_summary.get("avg_clarity", 0)
     avg_depth = performance_summary.get("avg_depth", 0)
     avg_relevance = performance_summary.get("avg_relevance", 0)
+
+    # If running averages are missing, derive from turn evaluations directly.
+    if evaluations and (avg_clarity + avg_depth + avg_relevance) <= 0:
+        clarity_vals = [e.get("clarity_score", e.get("clarity")) for e in evaluations if e.get("clarity_score", e.get("clarity")) is not None]
+        depth_vals = [e.get("depth_score", e.get("depth")) for e in evaluations if e.get("depth_score", e.get("depth")) is not None]
+        relevance_vals = [e.get("relevance_score", e.get("relevance")) for e in evaluations if e.get("relevance_score", e.get("relevance")) is not None]
+
+        if clarity_vals:
+            avg_clarity = float(sum(clarity_vals) / len(clarity_vals))
+        if depth_vals:
+            avg_depth = float(sum(depth_vals) / len(depth_vals))
+        if relevance_vals:
+            avg_relevance = float(sum(relevance_vals) / len(relevance_vals))
     
     # Calculate overall score (0-100)
     overall_score = int((avg_clarity + avg_depth + avg_relevance) / 3 * 20) if (avg_clarity + avg_depth + avg_relevance) > 0 else 50
+    if capture_incomplete:
+        overall_score = 0
     
     # Build score breakdown
     scores = ScoreBreakdown(
-        communication=int(avg_clarity * 20),
-        clarity=int(avg_clarity * 20),
-        structure=_calculate_structure_score(evaluations),
-        technical_depth=int(avg_depth * 20) if interview_type in ["technical", "mixed"] else None,
-        relevance=int(avg_relevance * 20)
+        communication=0 if capture_incomplete else int(avg_clarity * 20),
+        clarity=0 if capture_incomplete else int(avg_clarity * 20),
+        structure=0 if capture_incomplete else _calculate_structure_score(evaluations),
+        technical_depth=(0 if capture_incomplete else int(avg_depth * 20)) if interview_type in ["technical", "mixed"] else None,
+        relevance=0 if capture_incomplete else int(avg_relevance * 20)
     )
     
     # Build transcript messages
@@ -68,23 +89,48 @@ def generate_report(
     
     # Generate recommendations
     recommendations = _generate_recommendations(evaluations, performance_summary, interview_type, session_state)
+    if capture_incomplete:
+        recommendations = [
+            "Evaluation incomplete: candidate speech was not captured.",
+            "Verify microphone permissions and selected input device.",
+            "Retry interview and confirm transcript includes both interviewer and candidate turns.",
+        ]
     
     # Get question index from session
     question_index = session_state.question_index if hasattr(session_state, 'question_index') else 0
     
     # Compute real metrics
+    candidate_word_count = getattr(session_state, "candidate_word_count", None)
+    interviewer_word_count = getattr(session_state, "interviewer_word_count", None)
     total_words = sum(len(msg.text.split()) for msg in transcript)
+    if candidate_word_count is None:
+        candidate_word_count = getattr(session_state, "total_words", None)
+    if candidate_word_count is None:
+        candidate_word_count = total_words
+    if interviewer_word_count is None:
+        interviewer_word_count = max(0, total_words - int(candidate_word_count))
     speaking_time = getattr(session_state, 'speaking_time', 0)
     silence_time = getattr(session_state, 'silence_time', 0)
     eye_contact_pct = getattr(session_state, 'eye_contact_pct', None)
     metrics = {
         'total_duration': duration_minutes,
         'questions_answered': question_index,
-        'total_words': total_words,
+        'total_words': int(candidate_word_count),
+        'candidate_word_count': int(candidate_word_count),
+        'interviewer_word_count': int(interviewer_word_count),
         'speaking_time': speaking_time,
         'silence_time': silence_time,
         'eye_contact_pct': eye_contact_pct,
+        'capture_status': "INCOMPLETE_NO_CANDIDATE_AUDIO" if capture_incomplete else "COMPLETE",
     }
+    if evaluations:
+        metrics['turn_evaluations'] = evaluations
+        metrics['turn_eval_summary'] = {
+            'turn_count': len(evaluations),
+            'avg_clarity': round(avg_clarity, 2),
+            'avg_depth': round(avg_depth, 2),
+            'avg_relevance': round(avg_relevance, 2),
+        }
 
     # Generate AI candidate feedback
     ai_feedback = None
@@ -95,19 +141,30 @@ def generate_report(
         "relevance": scores.relevance,
         "overall_score": overall_score
     }
-    try:
-        from services.llm.chains.candidate_feedback import generate_candidate_feedback
-        transcript_for_ai = [{"speaker": msg.speaker, "text": msg.text} for msg in transcript]
-        ai_feedback = generate_candidate_feedback(
-            transcript=transcript_for_ai,
-            scores=scores_for_ai,
-            interview_type=interview_type,
-            duration_minutes=duration_minutes
-        )
-    except Exception as e:
-        print(f"⚠️ Failed to generate AI feedback: {e}")
-    if not isinstance(ai_feedback, dict) or not ai_feedback:
-        ai_feedback = _build_deterministic_feedback(scores_for_ai)
+    if capture_incomplete:
+        ai_feedback = {
+            "overall_summary": "Evaluation incomplete because candidate speech was not captured.",
+            "strengths": [],
+            "areas_for_improvement": [
+                "Grant microphone permission in browser settings",
+                "Confirm correct microphone input device",
+                "Re-run interview and verify live transcription before ending",
+            ],
+        }
+    else:
+        try:
+            from services.llm.chains.candidate_feedback import generate_candidate_feedback
+            transcript_for_ai = [{"speaker": msg.speaker, "text": msg.text} for msg in transcript]
+            ai_feedback = generate_candidate_feedback(
+                transcript=transcript_for_ai,
+                scores=scores_for_ai,
+                interview_type=interview_type,
+                duration_minutes=duration_minutes
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to generate AI feedback: {e}")
+        if not isinstance(ai_feedback, dict) or not ai_feedback:
+            ai_feedback = _build_deterministic_feedback(scores_for_ai)
 
     # Create report
     report = InterviewReport(
