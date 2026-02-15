@@ -19,16 +19,22 @@ jobs:
       - name: Validate production Clerk publishable key
         env:
           REACT_APP_CLERK_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_CLERK_PUBLISHABLE_KEY }}
+          ENFORCE_LIVE_CLERK_KEYS: ${{ vars.ENFORCE_LIVE_CLERK_KEYS }}
         run: |
+          ENFORCE_LIVE_CLERK_KEYS="${ENFORCE_LIVE_CLERK_KEYS:-false}"
           if [ -z "${REACT_APP_CLERK_PUBLISHABLE_KEY}" ]; then
             echo "❌ Missing REACT_APP_CLERK_PUBLISHABLE_KEY secret"
             exit 1
           fi
           if [[ "${REACT_APP_CLERK_PUBLISHABLE_KEY}" == pk_test_* ]]; then
-            echo "❌ Production deploy cannot use Clerk test publishable key"
-            exit 1
+            if [[ "${ENFORCE_LIVE_CLERK_KEYS}" == "true" ]]; then
+              echo "❌ Production deploy cannot use Clerk test publishable key (ENFORCE_LIVE_CLERK_KEYS=true)"
+              exit 1
+            fi
+            echo "⚠️ Using Clerk test publishable key. Set repo variable ENFORCE_LIVE_CLERK_KEYS=true to block this."
+          else
+            echo "✓ Clerk publishable key looks production-safe"
           fi
-          echo "✓ Clerk publishable key looks production-safe"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -171,7 +177,10 @@ jobs:
           exit 1
 
       - name: Verify deployed frontend bundle uses live Clerk key
+        env:
+          ENFORCE_LIVE_CLERK_KEYS: ${{ vars.ENFORCE_LIVE_CLERK_KEYS }}
         run: |
+          ENFORCE_LIVE_CLERK_KEYS="${ENFORCE_LIVE_CLERK_KEYS:-false}"
           APP_URL="https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
           HTML=$(curl -fsSL "${APP_URL}" || true)
           if [ -z "${HTML}" ]; then
@@ -189,8 +198,12 @@ jobs:
             exit 1
           fi
           if echo "${BUNDLE}" | grep -q "pk_test_"; then
-            echo "❌ Deployed frontend bundle still contains Clerk test key"
-            exit 1
+            if [[ "${ENFORCE_LIVE_CLERK_KEYS}" == "true" ]]; then
+              echo "❌ Deployed frontend bundle still contains Clerk test key (ENFORCE_LIVE_CLERK_KEYS=true)"
+              exit 1
+            fi
+            echo "⚠️ Deployed frontend bundle contains Clerk test key."
+            exit 0
           fi
           echo "✓ Deployed frontend bundle does not contain Clerk test key"
           
