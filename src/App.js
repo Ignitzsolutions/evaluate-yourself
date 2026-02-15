@@ -20,7 +20,6 @@ import PreInterviewForm from "./pages/PreInterviewForm";
 import InterviewSessionRoom from "./pages/InterviewSessionRoom";
 import ReportPage from "./pages/ReportPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
-import HistoryPage from "./pages/HistoryPage";
 import InterviewsPage from "./pages/InterviewsPage";
 import RealtimeTestPage from "./pages/RealtimeTestPage";
 
@@ -129,7 +128,7 @@ export default function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/history" element={<Navigate to="/dashboard" replace />} />
             <Route path="/interviews" element={<InterviewsPage />} />
             <Route path="/interview-config" element={<PreInterviewForm />} />
             <Route path="/report" element={<ReportPage />} />

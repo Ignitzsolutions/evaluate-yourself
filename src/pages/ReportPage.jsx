@@ -29,7 +29,7 @@ import {
   Speed,
   Visibility,
 } from "@mui/icons-material";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   CartesianGrid,
   Legend,
@@ -64,6 +64,7 @@ function normalizeSpeaker(speaker = "") {
 
 export default function ReportPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { getToken } = useAuth();
   const { sessionId } = useParams();
 
@@ -75,6 +76,10 @@ export default function ReportPage() {
   const [experienceRating, setExperienceRating] = useState(0);
   const [feedback, setFeedback] = useState("");
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [savingFeedback, setSavingFeedback] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [showPostEndFeedbackDialog, setShowPostEndFeedbackDialog] = useState(false);
+  const [postEndPromptHandled, setPostEndPromptHandled] = useState(false);
 
   const fetchReport = useCallback(async () => {
     if (!sessionId) {
@@ -218,6 +223,15 @@ export default function ReportPage() {
   }, [metrics, totalWords, totalDuration]);
 
   const eyeContactPct = typeof metrics.eye_contact_pct === "number" ? metrics.eye_contact_pct : null;
+  const captureStatus = typeof metrics.capture_status === "string" ? metrics.capture_status : "COMPLETE";
+  const isIncompleteCapture = captureStatus === "INCOMPLETE_NO_CANDIDATE_AUDIO";
+  const turnEvaluations = Array.isArray(metrics.turn_evaluations) ? metrics.turn_evaluations : [];
+  const turnEvalSummary = metrics.turn_eval_summary && typeof metrics.turn_eval_summary === "object"
+    ? metrics.turn_eval_summary
+    : null;
+  const evaluationExplainability = metrics.evaluation_explainability && typeof metrics.evaluation_explainability === "object"
+    ? metrics.evaluation_explainability
+    : null;
   const sessionFeedback = metrics.session_feedback && typeof metrics.session_feedback === "object"
     ? metrics.session_feedback
     : null;
@@ -232,6 +246,15 @@ export default function ReportPage() {
     }
   }, [sessionFeedback]);
 
+  useEffect(() => {
+    if (loading || postEndPromptHandled) return;
+    if (sessionFeedback) return;
+    if (location.state?.openFeedbackDialog) {
+      setShowPostEndFeedbackDialog(true);
+      setPostEndPromptHandled(true);
+    }
+  }, [loading, postEndPromptHandled, sessionFeedback, location.state]);
+
   const formatSeconds = (seconds) => {
     if (typeof seconds !== "number" || Number.isNaN(seconds)) return "0:00";
     const mins = Math.floor(seconds / 60);
@@ -239,8 +262,59 @@ export default function ReportPage() {
     return `${mins}:${String(secs).padStart(2, "0")}`;
   };
 
+  const persistSessionFeedback = useCallback(async () => {
+    if (!report?.id) return;
+    if (!experienceRating || experienceRating < 1) {
+      setFeedbackError("Please select a rating before submitting.");
+      return;
+    }
+
+    setFeedbackError("");
+    setSavingFeedback(true);
+    try {
+      const token = await getToken();
+      const payload = {
+        rating: experienceRating,
+        comment: feedback.trim() || null,
+        submitted_at: new Date().toISOString(),
+      };
+
+      const response = await authFetch(
+        `${API_BASE_URL}/api/interview/reports/${report.id}/feedback`,
+        token,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Failed to save feedback (${response.status})`);
+      }
+
+      const data = await response.json();
+      setReport((prev) => {
+        if (!prev) return prev;
+        const nextMetrics = { ...(prev.metrics || {}) };
+        nextMetrics.session_feedback = data.session_feedback || payload;
+        return {
+          ...prev,
+          metrics: nextMetrics,
+        };
+      });
+      setShowSuccessPopup(true);
+      setShowPostEndFeedbackDialog(false);
+    } catch (err) {
+      setFeedbackError(err.message || "Failed to save feedback");
+    } finally {
+      setSavingFeedback(false);
+    }
+  }, [report, experienceRating, feedback, getToken]);
+
   const handleSubmitRating = () => {
-    setShowSuccessPopup(true);
+    persistSessionFeedback();
   };
 
   const handleDownload = async () => {
@@ -289,16 +363,16 @@ export default function ReportPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1200, mx: "auto" }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3, flexWrap: "wrap", gap: 1.5 }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" }, mb: 3, flexWrap: "wrap", gap: 1.5 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>
+          <Typography variant="h4" sx={{ fontWeight: 700, fontSize: { xs: "1.75rem", md: "2.125rem" } }}>
             Interview Analysis
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Session telemetry captured during the live interview.
           </Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 1.5 }}>
+        <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
           <Button variant="outlined" startIcon={<Download />} onClick={handleDownload} disabled={downloadLoading}>
             {downloadLoading ? "Preparing..." : "Download PDF"}
           </Button>
@@ -307,6 +381,24 @@ export default function ReportPage() {
           </Button>
         </Box>
       </Box>
+
+      {isIncompleteCapture && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Evaluation incomplete: candidate speech was not captured.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Retry interview after checking microphone permission and live transcription capture.
+          </Typography>
+        </Alert>
+      )}
+      {!isIncompleteCapture && (
+        <Alert severity="success" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Evaluation complete: candidate responses were captured and analyzed.
+          </Typography>
+        </Alert>
+      )}
 
       {sessionFeedback && (
         <Alert severity="success" sx={{ mb: 3 }}>
@@ -391,7 +483,7 @@ export default function ReportPage() {
           </Typography>
 
           {telemetry.timeline.length > 1 ? (
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={300}>
               <LineChart data={telemetry.timeline}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="time" tickFormatter={(v) => formatSeconds(v)} />
@@ -416,7 +508,74 @@ export default function ReportPage() {
         </CardContent>
       </Card>
 
-      {report?.ai_feedback && (
+      {!isIncompleteCapture && (turnEvalSummary || turnEvaluations.length > 0) && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Evaluation Transparency
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Scores are computed from candidate turns using clarity, depth, and relevance.
+            </Typography>
+
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={12} md={4}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Clarity</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_clarity ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Depth</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_depth ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Relevance</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_relevance ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+            </Grid>
+
+            {evaluationExplainability && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  Source: <strong>{evaluationExplainability.source}</strong> · Confidence: <strong>{evaluationExplainability.confidence || "unknown"}</strong> · Formula: <strong>{evaluationExplainability.formula}</strong> · Turns Evaluated: <strong>{evaluationExplainability.turns_evaluated}</strong>
+                </Typography>
+              </Alert>
+            )}
+
+            {turnEvaluations.length > 0 && (
+              <Box sx={{ display: "grid", gap: 1 }}>
+                {turnEvaluations.slice(0, 8).map((turn, index) => (
+                  <Card key={index} variant="outlined">
+                    <CardContent sx={{ py: 1.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        Turn {index + 1}: Clarity {turn.clarity ?? 0} · Depth {turn.depth ?? 0} · Relevance {turn.relevance ?? 0}
+                      </Typography>
+                      {turn.rationale && (
+                        <Typography variant="body2" color="text.secondary">
+                          {turn.rationale}
+                        </Typography>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!isIncompleteCapture && report?.ai_feedback && (
         <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
@@ -438,6 +597,19 @@ export default function ReportPage() {
                 ))}
               </Grid>
             </Grid>
+          </CardContent>
+        </Card>
+      )}
+
+      {isIncompleteCapture && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+              Next Steps
+            </Typography>
+            <Typography variant="body2" color="text.secondary">1. Confirm browser microphone permission is granted.</Typography>
+            <Typography variant="body2" color="text.secondary">2. Speak for 5–10 seconds and verify live transcript appears before ending.</Typography>
+            <Typography variant="body2" color="text.secondary">3. Re-run the interview to generate full candidate-centric scoring.</Typography>
           </CardContent>
         </Card>
       )}
@@ -466,13 +638,58 @@ export default function ReportPage() {
               </Grid>
             </Grid>
             <Box sx={{ mt: 2 }}>
-              <Button variant="contained" onClick={handleSubmitRating} disabled={experienceRating === 0}>
-                Submit Rating
+              <Button variant="contained" onClick={handleSubmitRating} disabled={experienceRating === 0 || savingFeedback}>
+                {savingFeedback ? "Saving..." : "Submit Rating"}
               </Button>
             </Box>
+            {feedbackError && (
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                {feedbackError}
+              </Alert>
+            )}
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={showPostEndFeedbackDialog} onClose={() => setShowPostEndFeedbackDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Interview Ended</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Your interview has ended. Share quick feedback before you continue.
+          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Session Rating
+            </Typography>
+            <Rating
+              value={experienceRating}
+              onChange={(_, v) => setExperienceRating(v || 0)}
+            />
+          </Box>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="Comments (Optional)"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="How was your interview flow and voice pacing?"
+          />
+          {feedbackError && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {feedbackError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowPostEndFeedbackDialog(false)}>
+            Skip
+          </Button>
+          <Button variant="contained" onClick={persistSessionFeedback} disabled={savingFeedback}>
+            {savingFeedback ? "Saving..." : "Submit"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={showSuccessPopup} onClose={() => setShowSuccessPopup(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Thank you</DialogTitle>

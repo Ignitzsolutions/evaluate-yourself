@@ -19,7 +19,6 @@ import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
   Analytics as AnalyticsIcon,
-  History as HistoryIcon,
   Work as InterviewsIcon,
   Sell as PricingIcon,
   PlayArrow,
@@ -32,7 +31,6 @@ import { useClerk } from "@clerk/clerk-react";   // ✅ Clerk
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
   { label: 'Analytics', path: '/analytics', icon: <AnalyticsIcon /> },
-  { label: 'History', path: '/history', icon: <HistoryIcon /> },
   { label: 'Interviews', path: '/interviews', icon: <InterviewsIcon /> },
   { label: 'Pricing', path: '/pricing', icon: <PricingIcon /> },
 ];
@@ -52,7 +50,7 @@ const Logo = ({ onClick }) => {
       <img 
         src="/assets/logo.png" 
         alt="Evaluate Yourself Logo" 
-        style={{ height: '60px', width: 'auto' }}
+        style={{ height: 'clamp(42px, 6vw, 60px)', width: 'auto' }}
       />
     </Box>
   );

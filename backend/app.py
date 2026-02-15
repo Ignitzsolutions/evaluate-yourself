@@ -58,6 +58,7 @@ from services.interview_state_store import InterviewStateStore
 from db.redis_client import get_redis_client
 from services.interview_evaluator import evaluate_response
 from services.report_generator import generate_report as generate_interview_report
+from services.interview.adaptive_engine import decide_next_turn, normalize_difficulty
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -247,6 +248,7 @@ AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
 TRIAL_MODE_ENABLED = os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 FREE_TRIAL_MINUTES = max(1, int(os.getenv("FREE_TRIAL_MINUTES", "5")))
 
@@ -328,12 +330,18 @@ def validate_environment():
             try:
                 resource_name, domain, region = extract_azure_endpoint_info(AZURE_OPENAI_ENDPOINT)
                 derived_realtime_host = f"{resource_name}.openai.azure.com"
+                chat_deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
                 
                 print("✅ Azure OpenAI Realtime API configured")
                 print(f"   Configured endpoint: {AZURE_OPENAI_ENDPOINT}")
                 print(f"   Derived realtime host: {derived_realtime_host}")
                 print(f"   Deployment: {AZURE_OPENAI_DEPLOYMENT}")
                 print(f"   API version: {AZURE_OPENAI_API_VERSION}")
+                print(f"   Realtime voice: {REALTIME_VOICE}")
+                if chat_deployment:
+                    print(f"   Chat deployment: {chat_deployment}")
+                else:
+                    warnings.append("⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.")
                 if region:
                     print(f"   Region: {region}")
             except Exception as e:
@@ -781,6 +789,10 @@ def _save_runtime_session(
     interview_type: str,
     difficulty: str,
     plan_tier: str,
+    role: Optional[str] = None,
+    company: Optional[str] = None,
+    question_mix: Optional[str] = None,
+    interview_style: Optional[str] = None,
 ) -> Dict[str, Any]:
     runtime_payload = {
         "session_id": session_id,
@@ -791,6 +803,10 @@ def _save_runtime_session(
         "duration_minutes_effective": effective_minutes,
         "interview_type": interview_type,
         "difficulty": difficulty,
+        "role": role,
+        "company": company,
+        "question_mix": question_mix or "balanced",
+        "interview_style": interview_style or "neutral",
         "plan_tier": plan_tier,
         "trial_mode": plan_tier == "trial",
     }
@@ -866,6 +882,19 @@ class WebRTCRequest(BaseModel):
     questionMixRatio: Optional[float] = None
     interviewStyle: Optional[str] = "neutral"
 
+
+class AdaptiveTurnRequest(BaseModel):
+    last_user_turn: str
+    transcript_window: Optional[List[Dict[str, Any]]] = None
+    interviewType: Optional[str] = "mixed"
+    difficulty: Optional[str] = "mid"
+    role: Optional[str] = None
+    company: Optional[str] = None
+    questionMix: Optional[str] = "balanced"
+    interviewStyle: Optional[str] = "neutral"
+    durationMinutes: Optional[int] = None
+    askedQuestionIds: Optional[List[str]] = None
+
 def build_azure_realtime_url(resource_name: str, domain: str, path: str, region: Optional[str] = None) -> str:
     """Build Azure Realtime API URL."""
     base_url = f"https://{resource_name}.{domain}"
@@ -932,6 +961,7 @@ async def webrtc_proxy(
             raise HTTPException(status_code=500, detail=str(e))
         
         plan_tier = _resolve_plan_tier_for_user(clerk_user_id)
+        normalized_difficulty = normalize_difficulty(request.difficulty or "mid")
         requested_minutes = request.durationMinutes if request.durationMinutes and request.durationMinutes > 0 else FREE_TRIAL_MINUTES
         effective_minutes = _effective_duration_minutes(requested_minutes, plan_tier)
         session_id = request.sessionId or f"session_{uuid.uuid4().hex[:16]}"
@@ -942,15 +972,19 @@ async def webrtc_proxy(
             requested_minutes=requested_minutes,
             effective_minutes=effective_minutes,
             interview_type=request.interviewType or "mixed",
-            difficulty=request.difficulty or "mid",
+            difficulty=normalized_difficulty,
             plan_tier=plan_tier,
+            role=request.role,
+            company=request.company,
+            question_mix=request.questionMix,
+            interview_style=request.interviewStyle,
         )
         _upsert_interview_session_row(
             db=db,
             session_id=session_id,
             clerk_user_id=clerk_user_id,
             interview_type=request.interviewType or "mixed",
-            difficulty=request.difficulty or "mid",
+            difficulty=normalized_difficulty,
             requested_minutes=requested_minutes,
             effective_minutes=effective_minutes,
             runtime_payload=runtime_payload,
@@ -959,7 +993,7 @@ async def webrtc_proxy(
         # Build system prompt with new form fields
         system_prompt = _build_interviewer_system_prompt(
             interview_type=request.interviewType or "mixed",
-            difficulty=request.difficulty or "mid",
+            difficulty=normalized_difficulty,
             duration_minutes=effective_minutes,
             role=request.role,
             company=request.company,
@@ -986,17 +1020,21 @@ async def webrtc_proxy(
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.85,
-                            "prefix_padding_ms": 400,
-                            "silence_duration_ms": 1000,
+                            "threshold": 0.55,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 500,
                             "create_response": True,
-                            "interrupt_response": False
-                        }
+                            "interrupt_response": True
+                        },
+                        "transcription": {
+                            "model": "gpt-4o-mini-transcribe",
+                            "language": "en"
+                        },
                     },
                     "output": {
-                        "voice": "alloy"
+                        "voice": REALTIME_VOICE
                     }
-                }
+                },
             }
         }
         
@@ -1004,6 +1042,16 @@ async def webrtc_proxy(
         include_inline_instructions = os.getenv("REALTIME_INLINE_INSTRUCTIONS", "1").strip() != "0"
         if system_prompt and include_inline_instructions:
             client_secrets_request["session"]["instructions"] = system_prompt
+        print(
+            "🎙️ Realtime session config:",
+            json.dumps(
+                {
+                    "voice": REALTIME_VOICE,
+                    "turn_detection": client_secrets_request["session"]["audio"]["input"]["turn_detection"],
+                    "include_inline_instructions": include_inline_instructions,
+                }
+            ),
+        )
         
         # #region agent log
         try:
@@ -1051,25 +1099,162 @@ async def webrtc_proxy(
         # #endregion
         
         try:
-            token_resp = None
-            for attempt in range(3):
+            def _extract_activity_id(resp: Optional[requests.Response]) -> Optional[str]:
+                if not resp:
+                    return None
                 try:
-                    token_resp = requests.post(
-                        token_url,
-                        headers={
-                            "api-key": AZURE_OPENAI_API_KEY,
-                            "content-type": "application/json"
+                    body = resp.json()
+                    if isinstance(body, dict):
+                        for key in ("activityId", "activity_id", "activityid"):
+                            val = body.get(key)
+                            if val:
+                                return str(val)
+                        err_obj = body.get("error")
+                        if isinstance(err_obj, dict):
+                            for key in ("activityId", "activity_id", "activityid"):
+                                val = err_obj.get(key)
+                                if val:
+                                    return str(val)
+                except Exception:
+                    return None
+                return None
+
+            def _minimal_payload(include_instructions: bool) -> Dict[str, Any]:
+                payload = {
+                    "expires_after": client_secrets_request["expires_after"],
+                    "session": {
+                        "type": "realtime",
+                        "model": AZURE_OPENAI_DEPLOYMENT,
+                        "audio": {
+                            "input": {
+                                "format": {"type": "audio/pcm", "rate": 24000},
+                                "turn_detection": {
+                                    "type": "server_vad",
+                                    "threshold": 0.55,
+                                    "prefix_padding_ms": 300,
+                                    "silence_duration_ms": 600,
+                                    "create_response": True,
+                                    "interrupt_response": True,
+                                },
+                            },
+                            "output": {"voice": REALTIME_VOICE},
                         },
-                        json=client_secrets_request,
-                        timeout=20.0
-                    )
+                    },
+                }
+                if include_instructions and system_prompt:
+                    payload["session"]["instructions"] = system_prompt
+                return payload
+
+            payload_attempts: List[Dict[str, Any]] = [
+                {"name": "full_payload", "profile": "full_vad_transcription_instructions", "payload": client_secrets_request},
+                {"name": "minimal_payload", "profile": "minimal_vad_with_instructions", "payload": _minimal_payload(include_inline_instructions)},
+                {"name": "minimal_no_instructions", "profile": "minimal_vad_no_instructions", "payload": _minimal_payload(False)},
+            ]
+
+            token_resp = None
+            last_timeout = None
+            last_activity_id = None
+            last_error_detail = None
+
+            for attempt_cfg in payload_attempts:
+                attempt_name = attempt_cfg["name"]
+                payload_profile = attempt_cfg["profile"]
+                payload = attempt_cfg["payload"]
+
+                # Avoid duplicate attempt bodies when instructions are already disabled.
+                if attempt_name == "minimal_no_instructions" and payload_attempts[1]["payload"] == payload:
+                    continue
+
+                for transport_attempt in range(2):
+                    try:
+                        token_resp = requests.post(
+                            token_url,
+                            headers={
+                                "api-key": AZURE_OPENAI_API_KEY,
+                                "content-type": "application/json"
+                            },
+                            json=payload,
+                            timeout=20.0
+                        )
+                        break
+                    except requests.Timeout as timeout_err:
+                        last_timeout = timeout_err
+                        if transport_attempt == 1:
+                            token_resp = None
+                        else:
+                            time.sleep(0.5)
+
+                if token_resp is None:
+                    print(json.dumps({
+                        "event": "realtime_token_attempt",
+                        "attempt_name": attempt_name,
+                        "payload_profile": payload_profile,
+                        "status_code": "timeout",
+                        "activityId": None,
+                    }))
+                    continue
+
+                response_body = token_resp.text[:500] if token_resp.text else ""
+                activity_id = _extract_activity_id(token_resp)
+                if activity_id:
+                    last_activity_id = activity_id
+                print(json.dumps({
+                    "event": "realtime_token_attempt",
+                    "attempt_name": attempt_name,
+                    "payload_profile": payload_profile,
+                    "status_code": token_resp.status_code,
+                    "activityId": activity_id,
+                }))
+                print(f"   Status: {token_resp.status_code} Body: {response_body[:200]}")
+
+                if token_resp.status_code == 200:
+                    if attempt_name != "full_payload":
+                        print(f"⚠️ Realtime token created with fallback payload ({attempt_name})")
                     break
-                except requests.Timeout:
-                    if attempt == 2:
-                        raise
-                    time.sleep(0.5 * (attempt + 1))
-            response_body = token_resp.text[:500] if token_resp.text else ""
-            print(f"   Status: {token_resp.status_code} Body: {response_body[:200]}")
+
+                # Non-transient errors should fail fast.
+                if token_resp.status_code in (401, 403, 404):
+                    if token_resp.status_code == 401:
+                        raise HTTPException(status_code=401, detail="Authentication failed. Check API key matches the Azure resource.")
+                    if token_resp.status_code == 403:
+                        raise HTTPException(status_code=403, detail="Forbidden by Azure OpenAI. Verify deployment permissions and API key scope.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=(
+                            "Realtime endpoint not found (404). Verify hostname, path, and Realtime availability on this Azure resource."
+                        ),
+                    )
+
+                if token_resp.status_code >= 500:
+                    last_error_detail = response_body
+                    continue
+
+                # 4xx validation/user errors should return immediately.
+                if token_resp.status_code == 400 and "API version not supported" in response_body:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"API version {api_version} not supported for Realtime on this resource. "
+                            f"Endpoint used: https://{base_endpoint}/openai/v1/realtime/client_secrets"
+                        ),
+                    )
+
+                raise HTTPException(
+                    status_code=token_resp.status_code,
+                    detail=f"Token creation failed ({token_resp.status_code}): {response_body[:200]}",
+                )
+
+            if token_resp is None and last_timeout:
+                raise requests.Timeout() from last_timeout
+
+            if not token_resp or token_resp.status_code != 200:
+                retry_hint = "Retry in a few seconds. If this persists, verify Azure Realtime deployment health."
+                activity_text = f" activityId={last_activity_id}." if last_activity_id else ""
+                detail_text = f"{last_error_detail[:160]} " if last_error_detail else ""
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Realtime token creation failed after retries.{activity_text} {detail_text}{retry_hint}".strip(),
+                )
             
             # #region agent log
             try:
@@ -1081,38 +1266,8 @@ async def webrtc_proxy(
                 print(f"DEBUG LOG ERROR: {log_err}")
             # #endregion
             
-            if token_resp.status_code == 200:
-                print(f"✅ Token created successfully")
-                token_resp.raise_for_status()
-            elif token_resp.status_code == 400 and "API version not supported" in response_body:
-                # #region agent log
-                try:
-                    with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:530","message":"API version not supported error","data":{"api_version":api_version,"base_endpoint":base_endpoint,"deployment":AZURE_OPENAI_DEPLOYMENT,"full_response":token_resp.text if token_resp.text else "","token_url":token_url},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
-                except: pass
-                # #endregion
-                error_detail = (
-                    f"API version {api_version} not supported. This usually indicates:\n"
-                    f"1. Wrong endpoint hostname (should be *.openai.azure.com)\n"
-                    f"2. Realtime API not enabled on this Azure resource\n"
-                    f"3. Deployment '{AZURE_OPENAI_DEPLOYMENT}' is not Realtime-capable\n\n"
-                    f"Endpoint used: https://{base_endpoint}/openai/v1/realtime/client_secrets\n"
-                    f"Verify the endpoint in Azure Portal matches this hostname."
-                )
-                raise HTTPException(status_code=400, detail=error_detail)
-            elif token_resp.status_code == 401:
-                raise HTTPException(status_code=401, detail="Authentication failed. Check API key matches the resource.")
-            elif token_resp.status_code == 404:
-                error_detail = (
-                    f"Endpoint not found (404). Verify:\n"
-                    f"1. Hostname is correct: {base_endpoint}\n"
-                    f"2. Path is correct: /openai/v1/realtime/client_secrets\n"
-                    f"3. Realtime API is enabled on this Azure resource"
-                )
-                raise HTTPException(status_code=404, detail=error_detail)
-            else:
-                error_detail = f"Token creation failed: {token_resp.status_code}. Response: {response_body[:200]}"
-                raise HTTPException(status_code=token_resp.status_code, detail=error_detail)
+            print(f"✅ Token created successfully")
+            token_resp.raise_for_status()
                 
         except requests.Timeout:
             # #region agent log
@@ -1213,6 +1368,7 @@ async def webrtc_proxy(
             "effectiveDurationMinutes": effective_minutes,
             "trialMode": plan_tier == "trial",
             "planTier": plan_tier,
+            "voice": REALTIME_VOICE,
         }
         
     except HTTPException as http_ex:
@@ -1573,19 +1729,18 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
                 # CRITICAL: Use ONLY audio modality to prevent duplicate audio streams
                 # IMPORTANT: Use audio.speed (not rate) - this is the correct field for OpenAI Realtime
                 # CRITICAL: Strong English-only enforcement - MUST be first and most prominent
-                english_only_instructions = """YOU MUST SPEAK ONLY IN ENGLISH. THIS IS MANDATORY.
+                english_only_instructions = """You are Sonia, conducting an English-only professional interview.
 
-LANGUAGE RULE #1: You are an English-only interviewer. You MUST respond ONLY in English.
-LANGUAGE RULE #2: Never use Portuguese, Spanish, Hindi, French, German, Italian, Turkish, Chinese, Japanese, Korean, Arabic, or ANY other language.
-LANGUAGE RULE #3: If the user speaks in another language, respond ONLY in English: "Please continue in English so I can evaluate your interview responses."
-LANGUAGE RULE #4: Do NOT detect or respond to non-English languages - always respond in English.
-LANGUAGE RULE #5: Never translate, never mirror user input language, never switch languages.
-LANGUAGE RULE #6: Do NOT use greetings in other languages (no "Opa", "Hola", "Namaste", "Bonjour", "Ciao", etc.).
-LANGUAGE RULE #7: ONLY English. ALWAYS English. NO EXCEPTIONS. NO OTHER LANGUAGE IS ALLOWED.
+Language policy:
+- Respond in English only.
+- If the candidate clearly speaks non-English, ask once in English to continue in English, then continue the interview.
+- Do not repeatedly warn about language during normal English conversation.
 
-Speak slowly and clearly in English only. Maintain a calm, steady, interview-style pace. Avoid rushing.
-Provide only one response per user turn. Never produce multiple responses.
-
+Interview behavior:
+- Ask one question at a time.
+- Give one response per candidate turn.
+- Maintain a calm, professional interview tone.
+- Keep responses concise and avoid repeating yourself.
 """ + system_prompt
                 
                 session_update_payload = {
@@ -1595,24 +1750,31 @@ Provide only one response per user turn. Never produce multiple responses.
                         "modalities": ["audio"],  # ONLY audio - prevents text+audio duplicate streams
                         "input_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz input
                         "output_audio_format": {"type": "pcm16", "sample_rate_hz": 24000},  # 24kHz output - CRITICAL for correct playback speed
-                        "voice": "alloy",
+                        "voice": REALTIME_VOICE,
                         "audio": {
-                            "voice": "alloy",
+                            "voice": REALTIME_VOICE,
                             "speed": 1.0
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.85,
-                            "prefix_padding_ms": 400,
-                            "silence_duration_ms": 1000,
+                            "threshold": 0.55,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 500,
                             "create_response": True
+                        },
+                        "input_audio_transcription": {
+                            "model": "gpt-4o-mini-transcribe",
+                            "language": "en"
                         },
                         "instructions": english_only_instructions
                     }
                 }
                 
                 # Log first 500 chars of instructions to verify English-only enforcement
-                print(f"📝 Sending session.update with instructions (first 500 chars): {english_only_instructions[:500]}")
+                print(
+                    f"📝 Sending session.update with voice={REALTIME_VOICE}, "
+                    f"instructions(first 500): {english_only_instructions[:500]}"
+                )
                 
                 await azure_ws.send(json.dumps(session_update_payload))
                 
@@ -1878,89 +2040,25 @@ def _build_interviewer_system_prompt(
     interview_style: Optional[str] = None
 ) -> str:
     """Build system prompt for the interviewer agent."""
-    # ⚠️ CRITICAL: ENGLISH-ONLY RULES MUST BE FIRST - HIGHEST PRIORITY
-    base_prompt = """🚨🚨🚨 CRITICAL LANGUAGE REQUIREMENT - READ THIS FIRST 🚨🚨🚨
+    base_prompt = """You are Sonia, a professional interviewer conducting a formal job interview.
 
-YOU MUST SPEAK ONLY IN ENGLISH. THIS IS THE ABSOLUTE HIGHEST PRIORITY RULE. NO EXCEPTIONS.
+Core rules:
+1. Speak only in English.
+2. If the candidate clearly speaks non-English, ask once to continue in English, then proceed.
+3. Ask one question at a time.
+4. Produce one response per candidate turn.
+5. Keep a calm, professional, Indian-English cadence that is globally clear.
+6. Speak at a slightly slower pace than default and include short pauses between sentences.
+7. Do not repeat language warnings during normal English conversation.
 
-LANGUAGE RULE #1: You are an English-only interviewer. You MUST respond ONLY in English. This is non-negotiable.
-LANGUAGE RULE #2: NEVER use Portuguese, Spanish, Hindi, French, German, Italian, Turkish, Chinese, Japanese, Korean, Arabic, or ANY other language.
-LANGUAGE RULE #3: NEVER translate user input to another language.
-LANGUAGE RULE #4: NEVER mirror the user's language if they speak in a non-English language.
-LANGUAGE RULE #5: If the user speaks in another language, respond ONLY in English with: "Please continue in English so I can evaluate your interview responses."
-LANGUAGE RULE #6: Do NOT detect or respond to non-English languages - always respond in English.
-LANGUAGE RULE #7: Do NOT switch languages under any circumstances.
-LANGUAGE RULE #8: Do NOT use greetings in other languages (no "Opa", "Hola", "Namaste", "Bonjour", "Ciao", "Olá", etc.).
-LANGUAGE RULE #9: ONLY English. ALWAYS English. NO EXCEPTIONS. NO OTHER LANGUAGE IS ALLOWED.
+Interview style:
+- Professional and focused, never casual chat.
+- Briefly acknowledge candidate answers, then ask the next relevant question.
+- Probe for specifics and outcomes.
+- Do not provide scores or final feedback during the interview.
 
-REMEMBER: Every single word you speak must be in English. Every response must be in English. There are no exceptions to this rule. Your first words must be in English. Your greeting must be in English. Everything must be in English.
-
----
-
-You are Sonia, a professional interviewer conducting a formal job interview. Your name is Sonia. This is NOT a casual conversation. You are evaluating a candidate for a position.
-    
-IMPORTANT: You must introduce yourself as Sonia at the start of the interview. Say: "Hello, I'm Sonia, and I'll be conducting your interview today." (IN ENGLISH ONLY)
-
-CRITICAL: You are conducting an INTERVIEW, not having a friendly chat. Your role is to:
-- Ask professional interview questions
-- Assess the candidate's qualifications, experience, and fit
-- Probe deeper into their answers
-- Maintain professional boundaries
-- Evaluate their communication skills, problem-solving abilities, and technical knowledge
-
-You are an English-only interview coach. You respond with one clear, concise English response per user turn. Never speak multiple languages. Never produce more than one response. Never repeat the same answer.
-
-You are a single interviewer agent conducting a professional interview.
-You must produce strictly one response per user turn.
-Never generate more than one answer for a single input.
-Never overlap or interrupt yourself.
-
-Maintain a calm, slow speaking pace suitable for interviews.
-Avoid short greetings or filler sentences.
-Do not reset, do not switch personas.
-
-## Your Personality
-- Professional and focused on the interview objectives
-- Warm but business-appropriate - like a hiring manager, not a friend
-- Encouraging but maintains professional distance
-- Ask follow-up questions to assess depth ("Can you give me a specific example?", "How did you handle that situation?", "What was the outcome?")
-- Do NOT engage in casual small talk or friendly banter
-
-## Interview Rules
-1. Ask ONE professional interview question at a time - never multiple questions
-2. Produce ONE response per user turn - never multiple responses
-3. Listen carefully and ask thoughtful follow-up questions based on their specific answers
-4. Use their name if they introduce themselves
-5. Acknowledge their answers professionally before moving on ("Thank you for that example. Can you tell me more about...")
-6. Ask behavioral questions (STAR method: Situation, Task, Action, Result) or technical questions based on interview type
-7. If they give a short answer, probe deeper with "Can you walk me through a specific example?" or "What was your role in that project?" or "How did you measure success?"
-8. If they seem nervous, be encouraging but maintain professional tone
-9. Focus on their work experience, skills, problem-solving abilities, and achievements
-10. Do NOT engage in casual small talk - keep the conversation focused on interview topics
-
-## What You're Assessing (but don't tell them):
-- Communication clarity and confidence
-- Problem-solving approach
-- Self-awareness and growth mindset
-- Technical depth (if applicable)
-- Cultural fit and collaboration style
-
-## Do NOT:
-- Give feedback or scores during the interview
-- Ask multiple questions at once
-- Generate multiple responses for a single user turn
-- Overlap or interrupt yourself
-- Sound scripted or robotic
-- Rush through questions
-- Interrupt them
-- Switch languages or translate
-- Mirror user input language
-- Use any language other than English
-- Engage in casual conversation or small talk
-- Use informal greetings like "Hey", "Hi there", "Great to hear from you"
-- Ask casual questions like "How's it going?" or "What's on your mind?"
-- Treat this like a friendly chat - maintain professional interview tone at all times
-
+Opening line:
+"Hello, I'm Sonia, and I'll be conducting your interview today."
     """
     
     # Add role and company context if provided
@@ -3055,23 +3153,19 @@ async def list_interview_reports(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
-    """List interview reports.
-
-    - If no auth provided: return only sample reports.
-    - If auth provided and valid: return user's reports plus sample reports.
-    """
+    """List interview reports for the authenticated user only."""
     try:
-        user_id = get_user_id_from_auth(authorization)
+        current_user = get_current_user(authorization=authorization, db=db)
+        user_id = current_user.clerk_user_id
+    except HTTPException:
+        raise
     except Exception:
-        user_id = None
+        raise HTTPException(status_code=401, detail="Authentication required")
 
-    # TODO: Replace this with DB-backed InterviewReport later
-    user_reports = [
-        r for r in interview_reports.values()
-        if (user_id and r.user_id == user_id) or r.is_sample
-    ]
-
-    user_reports.sort(key=lambda x: x.date, reverse=True)
+    user_reports = db.query(models.InterviewReport).filter(
+        models.InterviewReport.user_id == user_id,
+        models.InterviewReport.is_sample == False,  # noqa: E712
+    ).order_by(models.InterviewReport.date.desc()).all()
 
     summaries = []
     for report in user_reports:
@@ -3087,6 +3181,64 @@ async def list_interview_reports(
         ))
 
     return summaries
+
+
+@app.put("/api/interview/reports/{report_id}/feedback")
+async def upsert_report_feedback(
+    report_id: str,
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Persist post-interview user feedback into report metrics."""
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.clerk_user_id
+
+    report = db.query(models.InterviewReport).filter(
+        models.InterviewReport.id == report_id
+    ).first()
+    if not report:
+        report = db.query(models.InterviewReport).filter(
+            models.InterviewReport.session_id == report_id
+        ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if report.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    rating = payload.get("rating")
+    if not isinstance(rating, (int, float)) or int(rating) < 1 or int(rating) > 5:
+        raise HTTPException(status_code=400, detail="rating must be between 1 and 5")
+    comment = payload.get("comment")
+    if comment is not None:
+        comment = str(comment).strip()
+        if not comment:
+            comment = None
+
+    submitted_at = payload.get("submitted_at")
+    if not submitted_at:
+        submitted_at = datetime.utcnow().isoformat()
+
+    metrics = {}
+    try:
+        metrics = json.loads(report.metrics) if report.metrics else {}
+    except Exception:
+        metrics = {}
+
+    session_feedback = {
+        "rating": int(rating),
+        "comment": comment,
+        "submitted_at": submitted_at,
+    }
+    metrics["session_feedback"] = session_feedback
+    report.metrics = json.dumps(metrics)
+    db.commit()
+
+    return {
+        "report_id": report.id,
+        "session_feedback": session_feedback,
+    }
 
 def _parse_duration_minutes(duration_str: Optional[str], metrics: Optional[dict]) -> int:
     if metrics and isinstance(metrics, dict) and metrics.get("total_duration") is not None:
@@ -3361,6 +3513,7 @@ async def download_interview_report(
     metrics = report.metrics if isinstance(report.metrics, dict) else {}
     recommendations = report.recommendations if isinstance(report.recommendations, list) else []
     transcript = report.transcript if isinstance(report.transcript, list) else []
+    capture_status = metrics.get("capture_status")
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -3378,22 +3531,27 @@ async def download_interview_report(
     content.append(Paragraph(f"<b>Duration:</b> {report.duration}", body_style))
     content.append(Spacer(1, 12))
 
-    content.append(Paragraph("Summary Scores", h_style))
-    overall = report.overall_score if report.overall_score is not None else 0
-    content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
-    if scores:
-        # Simple horizontal bar chart for top skills
-        drawing = Drawing(480, 140)
-        y = 110
-        for k, v in scores.items():
-            label = k.replace("_", " ").title()
-            value = max(0, min(100, int(v))) if v is not None else 0
-            drawing.add(String(0, y, label, fontSize=9, fillColor=colors.HexColor("#0f172a")))
-            drawing.add(Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
-            drawing.add(Rect(140, y - 4, 3 * value, 8, fillColor=colors.HexColor("#2563eb"), strokeColor=None))
-            drawing.add(String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a")))
-            y -= 18
-        content.append(drawing)
+    if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+        content.append(Paragraph("Evaluation Status", h_style))
+        content.append(Paragraph("<b>Evaluation incomplete:</b> candidate speech was not captured in this session.", body_style))
+        content.append(Paragraph("Please retry after verifying microphone permission and transcription capture.", body_style))
+    else:
+        content.append(Paragraph("Summary Scores", h_style))
+        overall = report.overall_score if report.overall_score is not None else 0
+        content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
+        if scores:
+            # Simple horizontal bar chart for top skills
+            drawing = Drawing(480, 140)
+            y = 110
+            for k, v in scores.items():
+                label = k.replace("_", " ").title()
+                value = max(0, min(100, int(v))) if v is not None else 0
+                drawing.add(String(0, y, label, fontSize=9, fillColor=colors.HexColor("#0f172a")))
+                drawing.add(Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
+                drawing.add(Rect(140, y - 4, 3 * value, 8, fillColor=colors.HexColor("#2563eb"), strokeColor=None))
+                drawing.add(String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a")))
+                y -= 18
+            content.append(drawing)
     content.append(Spacer(1, 12))
 
     content.append(Paragraph("Metrics", h_style))
@@ -3547,6 +3705,94 @@ def get_interview_session_status(
         "meta": session_meta,
     }
 
+
+@app.post("/api/interview/{session_id}/adaptive-turn")
+async def adaptive_turn(
+    session_id: str,
+    payload: AdaptiveTurnRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Evaluate one candidate turn and return the next adaptive question."""
+    row = db.query(models.InterviewSession).filter(
+        models.InterviewSession.session_id == session_id
+    ).first()
+    if row and row.clerk_user_id != current_user.clerk_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    runtime_data = _load_runtime_session(session_id) or {}
+    asked_ids_runtime = runtime_data.get("asked_question_ids", [])
+    asked_ids_payload = payload.askedQuestionIds or []
+    asked_ids = list(dict.fromkeys([*(asked_ids_runtime or []), *asked_ids_payload]))
+
+    transcript_window = payload.transcript_window or []
+    decision = decide_next_turn(
+        last_user_turn=payload.last_user_turn,
+        recent_transcript=transcript_window,
+        interview_type=payload.interviewType or (row.interview_type if row else "mixed"),
+        difficulty=payload.difficulty or (row.difficulty if row else "mid"),
+        role=payload.role or runtime_data.get("role"),
+        company=payload.company or runtime_data.get("company"),
+        question_mix=payload.questionMix or "balanced",
+        interview_style=payload.interviewStyle or "neutral",
+        duration_minutes=payload.durationMinutes,
+        asked_question_ids=asked_ids,
+    )
+
+    question_id = decision.get("question_id")
+    if question_id and not str(question_id).startswith("followup_") and question_id != "fallback_generic":
+        asked_ids.append(str(question_id))
+
+    turn_eval_history = runtime_data.get("turn_eval_history", [])
+    if not isinstance(turn_eval_history, list):
+        turn_eval_history = []
+    turn_eval_history.append(
+        {
+            "timestamp": datetime.utcnow().isoformat(),
+            "turn_scores": decision.get("turn_scores", {}),
+            "reason": decision.get("reason"),
+            "followup_type": decision.get("followup_type"),
+            "difficulty_next": decision.get("difficulty_next"),
+            "question_id": question_id,
+        }
+    )
+    turn_eval_history = turn_eval_history[-30:]
+
+    runtime_data["asked_question_ids"] = asked_ids
+    runtime_data["turn_eval_history"] = turn_eval_history
+    runtime_data["adaptive_last"] = decision
+
+    ttl_seconds = max(300, int((payload.durationMinutes or FREE_TRIAL_MINUTES) * 60) + 600)
+    try:
+        redis_client = get_redis_client()
+        redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_data))
+    except Exception as redis_err:
+        if is_production:
+            raise HTTPException(status_code=500, detail=f"Failed to persist adaptive runtime state: {redis_err}")
+        print(f"⚠️ Adaptive runtime state not saved in Redis (dev): {redis_err}")
+
+    if row:
+        session_meta = {}
+        if row.session_meta_json:
+            try:
+                session_meta = json.loads(row.session_meta_json)
+            except Exception:
+                session_meta = {}
+        session_meta["asked_question_ids"] = asked_ids
+        session_meta["turn_eval_history"] = turn_eval_history
+        row.session_meta_json = json.dumps(session_meta)
+        db.commit()
+
+    return {
+        "next_question": decision.get("next_question"),
+        "question_id": question_id,
+        "reason": decision.get("reason"),
+        "turn_scores": decision.get("turn_scores", {}),
+        "difficulty_next": decision.get("difficulty_next"),
+        "followup_type": decision.get("followup_type"),
+        "adaptive_path": decision.get("adaptive_path", {}),
+    }
+
 @app.post("/api/interview/{session_id}/transcript")
 async def save_interview_transcript(
     session_id: str, 
@@ -3563,11 +3809,20 @@ async def save_interview_transcript(
         questions = request.get("questions", [])  # Can be list or integer
         questions_answered = request.get("questions_answered")  # Explicit count
         metrics = request.get("metrics", {})
+        turn_evaluations = request.get("turn_evaluations", [])
         session_feedback = request.get("session_feedback")
+        capture_stats = request.get("capture_stats")
+        meta_payload = request.get("meta", {}) if isinstance(request.get("meta", {}), dict) else {}
         interview_type = request.get("interview_type", "mixed")
         duration_minutes = request.get("duration_minutes", 0)
         if not session_feedback and isinstance(metrics, dict):
             session_feedback = metrics.get("session_feedback")
+        if not turn_evaluations and isinstance(metrics, dict):
+            turn_evaluations = metrics.get("turn_evaluations", [])
+        if not capture_stats and isinstance(metrics, dict):
+            capture_stats = metrics.get("capture_stats")
+        if not capture_stats and isinstance(meta_payload, dict):
+            capture_stats = meta_payload.get("capture_stats")
 
         # Parse canonical transcript format (mode, qa_pairs, unpaired, raw_messages)
         # or legacy format (list of {question, answer})
@@ -3655,6 +3910,31 @@ async def save_interview_transcript(
             for m in ordered_messages
             if (m.get("speaker") or "").lower() in ["ai", "interviewer", "sonia"]
         )
+        if user_words_derived == 0 and isinstance(transcript, list):
+            user_words_derived = sum(
+                len(str((entry or {}).get("answer", "")).split())
+                for entry in transcript
+                if isinstance(entry, dict)
+            )
+        if ai_words_derived == 0 and isinstance(transcript, list):
+            ai_words_derived = sum(
+                len(str((entry or {}).get("question", "")).split())
+                for entry in transcript
+                if isinstance(entry, dict)
+            )
+        candidate_turn_count = sum(
+            1
+            for m in ordered_messages
+            if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
+        )
+        if candidate_turn_count == 0 and isinstance(transcript, list):
+            candidate_turn_count = sum(
+                1
+                for entry in transcript
+                if isinstance(entry, dict) and str((entry or {}).get("answer", "")).strip()
+            )
+        candidate_word_count = user_words_derived
+        interviewer_word_count = ai_words_derived
         total_duration_derived = 0
         try:
             total_duration_derived = int(duration_minutes) if duration_minutes else 0
@@ -3688,24 +3968,118 @@ async def save_interview_transcript(
                     response_times.append(delta)
                 last_ai_ts = None
 
-        avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else None
+        avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
         eye_contact_pct_derived = None
         if isinstance(metrics, dict):
             eye_contact_pct_derived = metrics.get("eye_contact_pct")
+
+        capture_status = "COMPLETE"
+        if candidate_turn_count <= 0:
+            capture_status = "INCOMPLETE_NO_CANDIDATE_AUDIO"
+
+        clean_turn_evaluations = []
+        if isinstance(turn_evaluations, list):
+            for item in turn_evaluations:
+                if isinstance(item, dict):
+                    clean_turn_evaluations.append(item)
+
+        evaluation_source = "client_turn_evaluations"
+        confidence = "high"
+        if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+            clean_turn_evaluations = []
+            evaluation_source = "none_no_candidate_audio"
+            confidence = "low"
+        elif not clean_turn_evaluations:
+            # Deterministic server-side fallback so reports remain explainable
+            # even if client-side adaptive evaluation events are missed.
+            candidate_turns = []
+            if isinstance(transcript, list) and transcript:
+                candidate_turns = [
+                    (entry.get("answer") or "").strip()
+                    for entry in transcript
+                    if isinstance(entry, dict) and (entry.get("answer") or "").strip()
+                ]
+            if not candidate_turns:
+                candidate_turns = [
+                    (m.get("text") or "").strip()
+                    for m in ordered_messages
+                    if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
+                ]
+
+            for answer in candidate_turns:
+                try:
+                    eval_result = evaluate_response(answer, interview_type)
+                except Exception:
+                    continue
+                clean_turn_evaluations.append(
+                    {
+                        "clarity": int(eval_result.get("clarity_score", 3) or 3),
+                        "depth": int(eval_result.get("depth_score", 3) or 3),
+                        "relevance": int(eval_result.get("relevance_score", 3) or 3),
+                        "confidence": str(eval_result.get("confidence_signal", "med")),
+                        "star_completeness": eval_result.get("star_completeness", {}) if isinstance(eval_result.get("star_completeness"), dict) else {},
+                        "technical_correctness": eval_result.get("technical_correctness"),
+                        "rationale": "; ".join(eval_result.get("notes", [])[:2]) if isinstance(eval_result.get("notes"), list) else "",
+                    }
+                )
+            if clean_turn_evaluations:
+                evaluation_source = "server_fallback_heuristic"
+                confidence = "medium"
+            else:
+                evaluation_source = "no_turn_evaluations_from_candidate_text"
+                confidence = "low"
+                if candidate_turn_count <= 0:
+                    evaluation_source = "none_no_candidate_audio"
+                    capture_status = "INCOMPLETE_NO_CANDIDATE_AUDIO"
+
+        turn_eval_summary = None
+        if clean_turn_evaluations:
+            clarity_vals = [e.get("clarity") for e in clean_turn_evaluations if isinstance(e.get("clarity"), (int, float))]
+            depth_vals = [e.get("depth") for e in clean_turn_evaluations if isinstance(e.get("depth"), (int, float))]
+            relevance_vals = [e.get("relevance") for e in clean_turn_evaluations if isinstance(e.get("relevance"), (int, float))]
+
+            def _avg(values):
+                return round(sum(values) / len(values), 2) if values else None
+
+            turn_eval_summary = {
+                "turn_count": len(clean_turn_evaluations),
+                "avg_clarity": _avg(clarity_vals),
+                "avg_depth": _avg(depth_vals),
+                "avg_relevance": _avg(relevance_vals),
+            }
 
         derived_metrics = {
             "questions_answered": effective_questions_answered,
             "total_words": user_words_derived,
             "ai_total_words": ai_words_derived,
+            "candidate_word_count": candidate_word_count,
+            "interviewer_word_count": interviewer_word_count,
             "total_duration": total_duration_derived,
             "avg_response_time_seconds": avg_response_time_derived,
             "words_per_minute": round(user_words_derived / max(total_duration_derived, 1)),
             "eye_contact_pct": eye_contact_pct_derived,
             "session_feedback": session_feedback,
+            "turn_evaluations": clean_turn_evaluations,
+            "turn_eval_summary": turn_eval_summary,
+            "capture_status": capture_status,
+            "candidate_turn_count": candidate_turn_count,
+            "capture_stats": capture_stats if isinstance(capture_stats, dict) else None,
+            "evaluation_explainability": {
+                "source": evaluation_source,
+                "formula": "overall = avg(clarity, depth, relevance) * 20",
+                "turns_evaluated": len(clean_turn_evaluations),
+                "confidence": confidence,
+                "candidate_word_count": candidate_word_count,
+                "interviewer_word_count": interviewer_word_count,
+            },
         }
         runtime_session_data = _load_runtime_session(session_id)
         if runtime_session_data:
             derived_metrics["runtime_session"] = runtime_session_data
+            if "adaptive_last" in runtime_session_data:
+                derived_metrics["adaptive_path"] = runtime_session_data.get("adaptive_last")
+        if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+            print(f"⚠️ Capture incomplete for session {session_id}: no candidate turns detected")
 
         # Resolve authenticated user. Production disallows guest transcript writes.
         user_id = None
@@ -3778,6 +4152,8 @@ async def save_interview_transcript(
         if metrics:
             for k, v in metrics.items():
                 setattr(session_state, k, v)
+        if clean_turn_evaluations:
+            session_state.evaluation_results = clean_turn_evaluations
 
         save_interview_state(session_state)
 
@@ -3845,6 +4221,30 @@ async def save_interview_transcript(
                     duration_minutes = 1
 
                 report_data = generate_interview_report(session_state, interview_type, duration_minutes)
+                if derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+                    report_data.overall_score = 0
+                    report_data.scores = ScoreBreakdown(
+                        communication=0,
+                        clarity=0,
+                        structure=0,
+                        technical_depth=0 if interview_type in ["technical", "mixed"] else None,
+                        relevance=0,
+                    )
+                    report_data.questions = 0
+                    report_data.recommendations = [
+                        "We could not evaluate this interview because candidate speech was not captured.",
+                        "Please retry after verifying microphone permission and input device.",
+                        "Confirm that live transcription events are received before ending the session.",
+                    ]
+                    report_data.ai_feedback = {
+                        "overall_summary": "Evaluation incomplete: candidate speech was not captured.",
+                        "strengths": [],
+                        "areas_for_improvement": [
+                            "Verify microphone selection and browser permission",
+                            "Run a short audio check before starting interview",
+                            "Retry the session to generate a full evaluation",
+                        ],
+                    }
                 merged_metrics = report_data.metrics if isinstance(report_data.metrics, dict) else {}
                 merged_metrics.update({k: v for k, v in derived_metrics.items() if v is not None})
                 db_report = models.InterviewReport(
@@ -3871,8 +4271,31 @@ async def save_interview_transcript(
                 report_id = db_report.id
                 print(f"✅ Report generated and saved to database: {db_report.id}")
             else:
+                merged_existing_metrics = {}
+                try:
+                    merged_existing_metrics = json.loads(existing_report.metrics) if existing_report.metrics else {}
+                except Exception:
+                    merged_existing_metrics = {}
+                merged_existing_metrics.update({k: v for k, v in derived_metrics.items() if v is not None})
+                existing_report.metrics = json.dumps(merged_existing_metrics)
+                existing_report.transcript = json.dumps(ordered_messages)
+                if derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+                    existing_report.overall_score = 0
+                    existing_report.scores = json.dumps({
+                        "communication": 0,
+                        "clarity": 0,
+                        "structure": 0,
+                        "technical_depth": 0 if interview_type in ["technical", "mixed"] else None,
+                        "relevance": 0,
+                    })
+                    existing_report.recommendations = json.dumps([
+                        "We could not evaluate this interview because candidate speech was not captured.",
+                        "Please retry after verifying microphone permission and input device.",
+                        "Confirm that live transcription events are received before ending the session.",
+                    ])
+                db.commit()
                 report_id = existing_report.id
-                print(f"ℹ️ Report already exists for session {session_id}, skipping generation (id={report_id})")
+                print(f"ℹ️ Report already exists for session {session_id}, updated metrics/transcript (id={report_id})")
         except Exception as report_err:
             # Don't fail the entire request if report generation fails; transcript is still saved
             print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")
@@ -3923,6 +4346,9 @@ async def save_interview_transcript(
             "message": "Transcript saved successfully",
             "session_id": session_id,
             "report_id": report_id,
+            "capture_status": derived_metrics.get("capture_status"),
+            "evaluation_source": derived_metrics.get("evaluation_explainability", {}).get("source"),
+            "turns_evaluated": len(clean_turn_evaluations),
             "files": {
                 "json": json_filename,
                 "text": text_filename

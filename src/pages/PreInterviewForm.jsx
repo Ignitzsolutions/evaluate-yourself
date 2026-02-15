@@ -85,7 +85,7 @@ export default function PreInterviewForm() {
           boxShadow: "0 18px 60px rgba(0, 59, 122, 0.12)",
         }}
       >
-        <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+        <CardContent sx={{ p: { xs: 2.5, md: 5 } }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} sx={{ mb: 4 }}>
             <Box>
               <Typography variant="h4" sx={{ fontWeight: 700 }}>

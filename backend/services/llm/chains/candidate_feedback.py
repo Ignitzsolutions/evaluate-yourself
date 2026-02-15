@@ -23,6 +23,8 @@ except ImportError:
     SCHEMAS_AVAILABLE = False
     print("⚠️ Feedback schemas not available - using unstructured output")
 
+_missing_chat_deployment_warned = False
+
 CANDIDATE_FEEDBACK_PROMPT = """You are an expert interview coach and HR professional. Analyze the following interview transcript and provide detailed, constructive feedback for the candidate.
 
 Interview Type: {interview_type}
@@ -104,7 +106,13 @@ def _get_openai_client():
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
 
     if azure_key and azure_endpoint and (azure_key != "your-azure-openai-api-key-here"):
-        deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+        global _missing_chat_deployment_warned
+        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
+        if not deployment:
+            if not _missing_chat_deployment_warned:
+                print("⚠️ AZURE_OPENAI_CHAT_DEPLOYMENT is not set; skipping Azure chat feedback generation.")
+                _missing_chat_deployment_warned = True
+            return None, None
         client = AzureOpenAI(
             api_key=azure_key,
             azure_endpoint=azure_endpoint.rstrip("/"),
@@ -126,7 +134,13 @@ def _get_langchain_client():
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     
     if azure_key and azure_endpoint and (azure_key != "your-azure-openai-api-key-here"):
-        deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+        global _missing_chat_deployment_warned
+        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
+        if not deployment:
+            if not _missing_chat_deployment_warned:
+                print("⚠️ AZURE_OPENAI_CHAT_DEPLOYMENT is not set; skipping LangChain Azure chat client.")
+                _missing_chat_deployment_warned = True
+            return None
         try:
             return AzureChatOpenAI(
                 api_key=azure_key,
@@ -253,9 +267,11 @@ def _generate_structured_feedback(
         return feedback
         
     except Exception as e:
-        print(f"❌ Structured feedback generation error: {e}")
-        import traceback
-        traceback.print_exc()
+        msg = str(e)
+        if "404" in msg or "Resource not found" in msg:
+            print("⚠️ Structured feedback deployment not found; using deterministic fallback feedback.")
+        else:
+            print(f"❌ Structured feedback generation error: {e}")
         return None
 
 
@@ -302,9 +318,11 @@ def _generate_legacy_feedback(
             print(f"❌ CandidateFeedbackChain TypeError: {e}")
         return _generate_fallback_feedback(active_scores)
     except Exception as e:
-        print(f"❌ CandidateFeedbackChain error: {e}")
-        import traceback
-        traceback.print_exc()
+        msg = str(e)
+        if "404" in msg or "Resource not found" in msg:
+            print("⚠️ Candidate feedback deployment not found; using deterministic fallback feedback.")
+        else:
+            print(f"❌ CandidateFeedbackChain error: {e}")
         return _generate_fallback_feedback(active_scores)
 
     # Parse JSON from response (allow wrapped in markdown code block)

@@ -4,6 +4,7 @@ import { useUser } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
 import { authFetch } from '../utils/apiClient';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { classifyConversationItem, extractTranscriptText } from '../utils/realtimeTranscript';
 import {
   Mic,
   MicOff,
@@ -20,12 +21,16 @@ import {
   Typography,
   Avatar,
   Box,
-  Rating,
-  TextField,
 } from '@mui/material';
 import '../ui.css';
 
 const API_BASE_URL = getApiBaseUrl();
+const REALTIME_VOICE = (process.env.REACT_APP_REALTIME_VOICE || 'alloy').trim() || 'alloy';
+const ADAPTIVE_MANUAL_TURN_CONTROL = String(process.env.REACT_APP_ADAPTIVE_MANUAL_TURN_CONTROL || 'false').toLowerCase() === 'true';
+const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'false').toLowerCase() === 'true';
+const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'false').toLowerCase() === 'true';
+const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe';
+const DEDUPE_TTL_MS = 8000;
 
 export default function InterviewSessionRoom() {
   const params = useParams();
@@ -100,8 +105,8 @@ export default function InterviewSessionRoom() {
   const [, setQuestionCount] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
-  const capturedAiRef = useRef(new Set());
-  const capturedUserRef = useRef(new Set());
+  const capturedAiRef = useRef(new Map());
+  const capturedUserRef = useRef(new Map());
 
   // Collect all AI and user messages for saving
   const aiMessagesRef = useRef([]);
@@ -112,6 +117,20 @@ export default function InterviewSessionRoom() {
   const lastCommittedInputItemRef = useRef(null);
   // Track counted response IDs to avoid double-counting questions
   const countedResponseIdsRef = useRef(new Set());
+  const turnEvaluationsRef = useRef([]);
+  const askedQuestionIdsRef = useRef([]);
+  const adaptiveInFlightRef = useRef(false);
+  const requestAdaptiveTurnRef = useRef(null);
+  const pendingUserTranscriptRef = useRef({});
+  const finalUserTranscriptItemIdsRef = useRef(new Set());
+  const browserSpeechRef = useRef(null);
+  const browserSpeechShouldRunRef = useRef(false);
+  const lastUserTranscriptRef = useRef({ text: '', at: 0 });
+  const captureStatsRef = useRef({
+    captured_user_turns: 0,
+    captured_ai_turns: 0,
+    dropped_events: {},
+  });
 
   // --- End / transcript reliability guards ---
   const endInProgressRef = useRef(false);
@@ -122,23 +141,42 @@ export default function InterviewSessionRoom() {
   const [endError, setEndError] = useState(null);
   const [showEndErrorDialog, setShowEndErrorDialog] = useState(false);
   const pendingTranscriptPayloadRef = useRef(null);
-  const [showEndFeedbackDialog, setShowEndFeedbackDialog] = useState(false);
-  const [endExperienceRating, setEndExperienceRating] = useState(0);
-  const [endFeedbackComment, setEndFeedbackComment] = useState('');
-  const [endFeedbackError, setEndFeedbackError] = useState('');
 
   // Utility
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  const incrementDroppedEvent = useCallback((reason) => {
+    if (!reason) return;
+    const stats = captureStatsRef.current;
+    const key = String(reason);
+    stats.dropped_events[key] = (stats.dropped_events[key] || 0) + 1;
+  }, []);
+
+  const rememberByTtl = useCallback((storeRef, key, ttlMs = DEDUPE_TTL_MS) => {
+    if (!key) return false;
+    const now = Date.now();
+    const prev = storeRef.current.get(key);
+    if (prev && now - prev < ttlMs) {
+      return true;
+    }
+    storeRef.current.set(key, now);
+
+    // small in-place cleanup to keep map bounded in long calls
+    if (storeRef.current.size > 500) {
+      const cutoff = now - ttlMs;
+      Array.from(storeRef.current.entries()).forEach(([entryKey, ts]) => {
+        if (ts < cutoff) {
+          storeRef.current.delete(entryKey);
+        }
+      });
+    }
+
+    return false;
+  }, []);
+
   // Add transcript entry
   // eslint-disable-next-line react-hooks/exhaustive-deps -- callback uses refs only; adding state deps would re-register listeners
   const addTranscript = useCallback((speaker, text) => {
-    // Stop accepting new transcript writes when ending interview
-    if (isEndingRef.current) {
-      console.log('[addTranscript] BLOCKED - interview is ending');
-      return;
-    }
-    
     const ts = new Date().toISOString();
     console.log(`[addTranscript] speaker: ${speaker}, text:`, text);
     
@@ -153,12 +191,28 @@ export default function InterviewSessionRoom() {
 
     // Also collect for saving (refs are source of truth)
     if (speaker === 'ai') {
-      aiMessagesRef.current.push({ text, timestamp: ts });
+      aiMessagesRef.current.push({ speaker: 'ai', text, timestamp: ts });
+      captureStatsRef.current.captured_ai_turns += 1;
     } else if (speaker === 'user') {
-      userMessagesRef.current.push({ text, timestamp: ts });
+      const normalized = String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const now = Date.now();
+      if (
+        normalized &&
+        lastUserTranscriptRef.current.text === normalized &&
+        now - lastUserTranscriptRef.current.at < 4000
+      ) {
+        incrementDroppedEvent('duplicate_user_recent_text');
+        return;
+      }
+      lastUserTranscriptRef.current = { text: normalized, at: now };
+      userMessagesRef.current.push({ speaker: 'user', text, timestamp: ts });
+      captureStatsRef.current.captured_user_turns += 1;
       console.log(`[addTranscript] userMessagesRef now:`, JSON.stringify(userMessagesRef.current, null, 2));
+      if (!isEndingRef.current && typeof requestAdaptiveTurnRef.current === 'function') {
+        requestAdaptiveTurnRef.current(text, ts);
+      }
     }
-  }, []);
+  }, [incrementDroppedEvent]);
 
   // Timer
   useEffect(() => {
@@ -170,6 +224,176 @@ export default function InterviewSessionRoom() {
     }
     return () => clearInterval(interval);
   }, [hasJoined, status]);
+
+  useEffect(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !micMuted;
+    });
+  }, [micMuted]);
+
+  const requestAdaptiveTurn = useCallback(async (userTurnText) => {
+    if (!userTurnText || !userTurnText.trim()) return;
+    if (adaptiveInFlightRef.current) return;
+    if (isEndingRef.current) return;
+    if (!dcRef.current || dcRef.current.readyState !== 'open') return;
+
+    adaptiveInFlightRef.current = true;
+    try {
+      const token = await getToken();
+      const transcriptWindow = [...aiMessagesRef.current, ...userMessagesRef.current]
+        .map((m) => ({
+          speaker: m.speaker || 'ai',
+          text: m.text,
+          timestamp: m.timestamp,
+        }))
+        .filter((m) => m.text && m.text.trim().length > 0)
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        .slice(-16);
+
+      const resp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/adaptive-turn`, token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          last_user_turn: userTurnText,
+          transcript_window: transcriptWindow,
+          interviewType,
+          difficulty,
+          role: targetRole || null,
+          company: targetCompany || null,
+          questionMix,
+          interviewStyle,
+          durationMinutes,
+          askedQuestionIds: askedQuestionIdsRef.current,
+        }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        console.warn('[adaptive-turn] failed:', resp.status, text);
+        return;
+      }
+
+      const decision = await resp.json();
+      if (decision?.turn_scores) {
+        turnEvaluationsRef.current.push({
+          ...decision.turn_scores,
+          question_id: decision.question_id || null,
+          reason: decision.reason || null,
+          followup_type: decision.followup_type || null,
+          difficulty_next: decision.difficulty_next || null,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (decision?.question_id && !String(decision.question_id).startsWith('followup_') && decision.question_id !== 'fallback_generic') {
+        askedQuestionIdsRef.current = Array.from(new Set([...askedQuestionIdsRef.current, decision.question_id]));
+      }
+
+      if (ADAPTIVE_MANUAL_TURN_CONTROL && decision?.next_question && dcRef.current && dcRef.current.readyState === 'open') {
+        dcRef.current.send(
+          JSON.stringify({
+            type: 'response.create',
+            response: {
+              instructions: decision.next_question,
+            },
+          }),
+        );
+      }
+    } catch (err) {
+      console.warn('[adaptive-turn] error:', err);
+    } finally {
+      adaptiveInFlightRef.current = false;
+    }
+  }, [
+    getToken,
+    sessionId,
+    interviewType,
+    difficulty,
+    targetRole,
+    targetCompany,
+    questionMix,
+    interviewStyle,
+    durationMinutes,
+  ]);
+
+  useEffect(() => {
+    requestAdaptiveTurnRef.current = requestAdaptiveTurn;
+  }, [requestAdaptiveTurn]);
+
+  const stopBrowserSpeechRecognition = useCallback(() => {
+    browserSpeechShouldRunRef.current = false;
+    if (browserSpeechRef.current) {
+      try {
+        browserSpeechRef.current.onresult = null;
+        browserSpeechRef.current.onerror = null;
+        browserSpeechRef.current.onend = null;
+        browserSpeechRef.current.stop();
+      } catch (e) {
+        try {
+          browserSpeechRef.current.abort();
+        } catch (_) {
+          // no-op
+        }
+      }
+      browserSpeechRef.current = null;
+    }
+  }, []);
+
+  const startBrowserSpeechRecognition = useCallback(() => {
+    if (!ENABLE_BROWSER_SR_FALLBACK) {
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      incrementDroppedEvent('browser_speech_not_supported');
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          if (!result || !result.isFinal || !result[0]) continue;
+          const text = String(result[0].transcript || '').trim();
+          if (!text) continue;
+          const key = `browser-sr:${text.toLowerCase().replace(/\s+/g, ' ')}`;
+          if (!rememberByTtl(capturedUserRef, key)) {
+            addTranscript('user', text);
+          } else {
+            incrementDroppedEvent('duplicate_browser_speech_text');
+          }
+        }
+      };
+
+      recognition.onerror = (event) => {
+        const code = event?.error || 'unknown';
+        incrementDroppedEvent(`browser_speech_error_${code}`);
+      };
+
+      recognition.onend = () => {
+        if (!browserSpeechShouldRunRef.current) return;
+        try {
+          recognition.start();
+        } catch (e) {
+          incrementDroppedEvent('browser_speech_restart_failed');
+        }
+      };
+
+      browserSpeechRef.current = recognition;
+      browserSpeechShouldRunRef.current = true;
+      recognition.start();
+      addTranscript('system', 'Browser speech fallback enabled');
+    } catch (e) {
+      incrementDroppedEvent('browser_speech_start_failed');
+    }
+  }, [addTranscript, incrementDroppedEvent, rememberByTtl]);
 
   // Connect to Realtime API (proven logic from RealtimeTestPage)
   const handleConnect = useCallback(async () => {
@@ -187,6 +411,19 @@ export default function InterviewSessionRoom() {
     setTranscript([]);
     aiMessagesRef.current = [];
     userMessagesRef.current = [];
+    turnEvaluationsRef.current = [];
+    askedQuestionIdsRef.current = [];
+    adaptiveInFlightRef.current = false;
+    pendingUserTranscriptRef.current = {};
+    finalUserTranscriptItemIdsRef.current = new Set();
+    capturedAiRef.current = new Map();
+    capturedUserRef.current = new Map();
+    stopBrowserSpeechRecognition();
+    captureStatsRef.current = {
+      captured_user_turns: 0,
+      captured_ai_turns: 0,
+      dropped_events: {},
+    };
 
     try {
       // Step 1: Get user media
@@ -224,6 +461,7 @@ export default function InterviewSessionRoom() {
       localStreamRef.current = stream;
       setMicActive(true);
       addTranscript('system', 'Microphone access granted');
+      startBrowserSpeechRecognition();
 
       // Step 2: Create RTCPeerConnection
       const pc = new RTCPeerConnection();
@@ -279,7 +517,7 @@ export default function InterviewSessionRoom() {
         // Send session.update with turn detection
         if (dc.readyState === 'open') {
           try {
-            dc.send(JSON.stringify({
+            const sessionPayload = {
               type: 'session.update',
               session: {
                 type: 'realtime',
@@ -287,24 +525,44 @@ export default function InterviewSessionRoom() {
                   input: {
                     turn_detection: {
                       type: 'server_vad',
-                      threshold: 0.7,
+                      threshold: 0.55,
                       prefix_padding_ms: 300,
-                      silence_duration_ms: 600,
+                      silence_duration_ms: 500,
                       create_response: true,
-                      interrupt_response: false
+                      interrupt_response: true
                     },
                     transcription: {
-                      model: 'gpt-4o-mini-transcribe',
+                      model: TRANSCRIPTION_MODEL,
                       language: 'en'
                     }
                   },
                   output: {
-                    voice: 'alloy'
+                    voice: REALTIME_VOICE
                   }
-                }
+                },
               }
-            }));
-            addTranscript('system', 'Sent session.update (audio.input.turn_detection + voice)');
+            };
+
+            if (DUAL_TRANSCRIPTION_KEYS) {
+              sessionPayload.session.turn_detection = {
+                type: 'server_vad',
+                threshold: 0.55,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 500,
+                create_response: true,
+                interrupt_response: true,
+              };
+              sessionPayload.session.input_audio_transcription = {
+                model: TRANSCRIPTION_MODEL,
+                language: 'en',
+              };
+            }
+
+            dc.send(JSON.stringify(sessionPayload));
+            addTranscript(
+              'system',
+              `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${DUAL_TRANSCRIPTION_KEYS ? 'on' : 'off'})`,
+            );
           } catch (err) {
             console.error('Error sending session.update:', err);
           }
@@ -314,7 +572,7 @@ export default function InterviewSessionRoom() {
             dc.send(JSON.stringify({
               type: 'response.create',
               response: {
-                instructions: "You MUST speak ONLY in English. Introduce yourself as Sonia in English: 'Hello, I'm Sonia, and I'll be conducting your interview today.' Then ask the first interview question in English only."
+                instructions: "Introduce yourself as Sonia and ask the first interview question in English. Speak clearly at a slightly slower pace with short pauses."
               }
             }));
             addTranscript('system', 'Sent response.create');
@@ -329,12 +587,20 @@ export default function InterviewSessionRoom() {
           const msg = JSON.parse(e.data);
           console.log('Message received:', msg.type, msg);
           const msgType = msg?.type || '';
+          if (!msgType) {
+            console.debug('[realtime] Received event without type', msg);
+            return;
+          }
 
           // Handle messages
           if (msgType === 'session.created') {
             addTranscript('system', 'Azure session created');
           } else if (msgType === 'session.updated') {
-            addTranscript('system', 'Session updated');
+            const configuredVoice =
+              msg?.session?.audio?.output?.voice ||
+              msg?.session?.voice ||
+              REALTIME_VOICE;
+            addTranscript('system', `Session updated (voice=${configuredVoice})`);
           } else if (msgType === 'error') {
             // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI
             const errMsg = msg.error?.message || 'Azure API error';
@@ -353,8 +619,7 @@ export default function InterviewSessionRoom() {
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'text';
             const key = `${responseId}:${finalText}`;
-            if (finalText && finalText.trim().length > 0 && !capturedAiRef.current.has(key)) {
-              capturedAiRef.current.add(key);
+            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
               addTranscript('ai', finalText);
             }
           } else if (msgType === 'response.output_item.added') {
@@ -376,8 +641,7 @@ export default function InterviewSessionRoom() {
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'audio';
             const key = `${responseId}:${finalText}`;
-            if (finalText && finalText.trim().length > 0 && !capturedAiRef.current.has(key)) {
-              capturedAiRef.current.add(key);
+            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
               addTranscript('ai', finalText);
             }
             // Count question if we haven't seen response.completed for this response_id
@@ -406,6 +670,16 @@ export default function InterviewSessionRoom() {
 
           // Handle user transcription events (fallbacks + conversation items)
           else if (
+            msgType.includes('input_audio_transcription') &&
+            msgType.endsWith('.delta')
+          ) {
+            const itemId = msg.item_id || msg.itemId || msg.conversation_item_id || msg.conversationItemId;
+            const delta = typeof msg.delta === 'string' ? msg.delta : '';
+            if (itemId && delta && !finalUserTranscriptItemIdsRef.current.has(itemId)) {
+              pendingUserTranscriptRef.current[itemId] = `${pendingUserTranscriptRef.current[itemId] || ''}${delta}`;
+            }
+          }
+          else if (
             msgType === 'input_audio_buffer.committed' ||
             msgType === 'input_audio_buffer.commit'
           ) {
@@ -418,26 +692,27 @@ export default function InterviewSessionRoom() {
             (msgType.includes('input_audio_transcription') || msgType.includes('input_audio_buffer.transcription')) &&
             (msgType.endsWith('.completed') || msgType.endsWith('.done') || msgType.endsWith('completed') || msgType.endsWith('done'))
           ) {
-            let text = msg.text || msg.transcript || msg.content || null;
-            if ((!text || !String(text).trim()) && msg.item?.input_audio_transcription) {
-              text = msg.item.input_audio_transcription.text || msg.item.input_audio_transcription.transcript || null;
+            const itemId = msg.item_id || msg.itemId || msg.conversation_item_id || msg.conversationItemId || 'user';
+            if (itemId) {
+              finalUserTranscriptItemIdsRef.current.add(itemId);
             }
-            if ((!text || !String(text).trim()) && Array.isArray(msg.item?.content)) {
-              text = msg.item.content
-                .map((c) => c?.transcript || c?.text || c?.content || null)
-                .filter(Boolean)
-                .join(' ')
-                .trim();
+            let text = extractTranscriptText(msg);
+            if (!text && itemId && pendingUserTranscriptRef.current[itemId]) {
+              text = pendingUserTranscriptRef.current[itemId].trim();
             }
-            const itemId = msg.item_id || msg.conversation_item_id || 'user';
+            if (itemId && pendingUserTranscriptRef.current[itemId]) {
+              delete pendingUserTranscriptRef.current[itemId];
+            }
             const key = `${itemId}:${text}`;
             console.log('[input_audio_transcription.*] text:', text);
-            if (text && text.trim().length > 0 && !capturedUserRef.current.has(key)) {
-              capturedUserRef.current.add(key);
+            if (text && text.trim().length > 0 && !rememberByTtl(capturedUserRef, key)) {
               addTranscript('user', text);
               setMicActive(false);
             } else if (!text) {
+              incrementDroppedEvent('empty_user_transcription');
               console.warn('[input_audio_transcription.*] No user text found in message:', msg);
+            } else {
+              incrementDroppedEvent('duplicate_user_transcription');
             }
           } else if (
             msgType === 'conversation.item.added' ||
@@ -445,67 +720,31 @@ export default function InterviewSessionRoom() {
             msgType === 'conversation.item.created' ||
             msgType === 'conversation.item.completed'
           ) {
-            // Debug: log the full message object for diagnosis
-            console.log('[DEBUG][conversation.item.*] FULL MSG:', JSON.stringify(msg, null, 2));
-            // Some events include user contributions as conversation items
-            const item = msg.item || msg;
             try {
-              // Extract text robustly from several possible shapes
-              let text = null;
-              if (item.content && Array.isArray(item.content) && item.content.length > 0) {
-                text = item.content.map(c => {
-                  if (typeof c === 'string') return c;
-                  if (c.text) return c.text;
-                  if (c.transcript) return c.transcript;
-                  if (c.input_audio_transcription) return c.input_audio_transcription.text || c.input_audio_transcription.transcript;
-                  if (c.parts && Array.isArray(c.parts)) return c.parts.map(p => p.text || p).join('');
-                  return null;
-                }).filter(Boolean).join(' ');
-              }
-              if (!text && item.text) text = item.text;
-              if (!text && item.content_text) text = item.content_text;
-              if ((!text || text.trim().length === 0) && item.input_audio_transcription) {
-                text = item.input_audio_transcription.text || item.input_audio_transcription.transcript || null;
-              }
-              // Fallback: check for user_transcript field added by backend patch
-              if ((!text || text.trim().length === 0) && msg.user_transcript) {
-                text = msg.user_transcript;
+              const parsed = classifyConversationItem({
+                msg,
+              });
+              if (!parsed.text && parsed.itemId && pendingUserTranscriptRef.current[parsed.itemId]) {
+                parsed.text = pendingUserTranscriptRef.current[parsed.itemId].trim();
+                delete pendingUserTranscriptRef.current[parsed.itemId];
               }
 
-              // Determine if this conversation item is a user reply by checking role or relation to last AI item
-              const role = item.role || (item.metadata && item.metadata.role) || item.author?.role || null;
-              const prevId = msg.previous_item_id || item.previous_item_id || null;
-              const itemId = item.id || item.item_id || item.itemId || msg.item_id || null;
-              const hasUserAudioContent = Array.isArray(item.content) && item.content.some((c) => (
-                c?.type === 'input_audio' ||
-                c?.type === 'input_text' ||
-                Boolean(c?.input_audio_transcription)
-              ));
+              console.log('[conversation.item.*]', parsed);
 
-              const isUserReply =
-                (role && (role === 'user' || role === 'candidate')) ||
-                hasUserAudioContent ||
-                (prevId && lastAIItemRef.current && prevId === lastAIItemRef.current) ||
-                (itemId && lastCommittedInputItemRef.current && itemId === lastCommittedInputItemRef.current);
-
-              // Log the full item object for user turns for debugging
-              if (isUserReply) {
-                console.log('[conversation.item.*][FULL USER ITEM]', JSON.stringify(item, null, 2));
-              }
-
-              console.log('[conversation.item.*] text:', text, '| isUserReply:', isUserReply, '| role:', role, '| prevId:', prevId, '| lastAIItemRef:', lastAIItemRef.current);
-
-              if (isUserReply && text && text.trim().length > 0) {
-                const key = `${itemId || prevId || 'item'}:${text}`;
-                if (!capturedUserRef.current.has(key)) {
-                  capturedUserRef.current.add(key);
-                  addTranscript('user', text);
+              if (parsed.isUserReply && parsed.text) {
+                const key = `${parsed.itemId || 'item'}:${parsed.text}`;
+                if (!rememberByTtl(capturedUserRef, key)) {
+                  addTranscript('user', parsed.text);
+                } else {
+                  incrementDroppedEvent('duplicate_user_conversation_item');
                 }
-              } else if (text && text.trim().length > 0) {
-                // Fallback: if text exists but isUserReply is false, still log it for debugging
-                console.warn('[conversation.item.*] Text found but not classified as user reply:', text, item);
+              } else if (parsed.isAssistantReply && parsed.text) {
+                incrementDroppedEvent('assistant_conversation_item');
+              } else {
+                incrementDroppedEvent(parsed.dropReason || 'unclassified_conversation_item');
               }
             } catch (e) {
+              incrementDroppedEvent('conversation_item_parse_error');
               console.warn('Error extracting conversation item text:', e);
             }
           } else if (msg.type === 'input_audio_buffer.speech_started') {
@@ -617,6 +856,7 @@ export default function InterviewSessionRoom() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      stopBrowserSpeechRecognition();
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
@@ -635,6 +875,10 @@ export default function InterviewSessionRoom() {
     questionMix,
     interviewStyle,
     durationMinutes,
+    incrementDroppedEvent,
+    rememberByTtl,
+    startBrowserSpeechRecognition,
+    stopBrowserSpeechRecognition,
   ]);
 
   // Build canonical transcript payload (structured/hybrid/raw)
@@ -659,7 +903,7 @@ export default function InterviewSessionRoom() {
         if (pendingQuestion) {
           // Previous question had no answer
           unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
-          console.warn('[transcript] ⚠️ AI question without answer:', pendingQuestion.text);
+          console.info('[transcript] AI question without paired user answer yet:', pendingQuestion.text);
         }
         pendingQuestion = { text: m.text, timestamp: m.timestamp };
       } else {
@@ -673,14 +917,14 @@ export default function InterviewSessionRoom() {
           pendingQuestion = null;
         } else {
           unpaired.push({ type: 'answer_without_question', text: m.text, timestamp: m.timestamp, speaker: 'user' });
-          console.warn('[transcript] ⚠️ User answer without AI question:', m.text);
+          console.info('[transcript] User answer without paired AI question:', m.text);
         }
       }
     }
 
     if (pendingQuestion) {
       unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
-      console.warn('[transcript] ⚠️ Trailing AI question:', pendingQuestion.text);
+      console.info('[transcript] Trailing AI question at end of call:', pendingQuestion.text);
     }
 
     // Determine mode
@@ -707,8 +951,10 @@ export default function InterviewSessionRoom() {
     try {
       const transcriptPayload = options.transcript || buildCanonicalTranscriptPayload();
       const sessionFeedback = options.sessionFeedback || null;
+      const captureStats = captureStatsRef.current || {};
       
       console.log('📦 Transcript payload:', JSON.stringify(transcriptPayload, null, 2));
+      console.log('[capture-summary]', captureStats);
 
       // If absolutely no messages, cannot save
       if (transcriptPayload.raw_messages.length === 0) {
@@ -733,6 +979,7 @@ export default function InterviewSessionRoom() {
       }, 0);
 
       const durationMinutes = Math.max(1, Math.round(timeElapsed / 60));
+      const answeredCount = Math.max(transcriptPayload.qa_pairs.length, userMessages.length);
 
       // Auth header
       let headers = { 'Content-Type': 'application/json' };
@@ -752,22 +999,28 @@ export default function InterviewSessionRoom() {
         body: JSON.stringify({
           session_id: sessionId,
           transcript: transcriptPayload,
+          turn_evaluations: turnEvaluationsRef.current,
           interview_type: interviewType || 'mixed',
           duration_minutes: durationMinutes,
-          questions_answered: transcriptPayload.qa_pairs.length,
+          questions_answered: answeredCount,
           metrics: {
-            questions_answered: transcriptPayload.qa_pairs.length,
+            questions_answered: answeredCount,
             total_words: userWordCount,
             ai_total_words: aiWordCount,
+            candidate_word_count: userWordCount,
+            interviewer_word_count: aiWordCount,
             total_duration: durationMinutes,
             speaking_time: durationMinutes * 60,
             silence_time: 0,
             eye_contact_pct: null,
             session_feedback: sessionFeedback,
+            turn_evaluations: turnEvaluationsRef.current,
             duration_minutes_requested: durationMinutes,
             duration_minutes_effective: effectiveDurationMinutes,
             trial_mode: trialMode,
             plan_tier: planTier,
+            asked_question_ids: askedQuestionIdsRef.current,
+            capture_stats: captureStats,
           },
           session_feedback: sessionFeedback,
           meta: {
@@ -777,6 +1030,8 @@ export default function InterviewSessionRoom() {
             duration_minutes_effective: effectiveDurationMinutes,
             trial_mode: trialMode,
             plan_tier: planTier,
+            adaptive_asked_question_ids: askedQuestionIdsRef.current,
+            capture_stats: captureStats,
           }
         })
       });
@@ -799,6 +1054,13 @@ export default function InterviewSessionRoom() {
       }
 
       console.log('✅ Parsed transcript response:', data);
+      if (data.capture_status || data.evaluation_source) {
+        console.log('[evaluation-summary]', {
+          capture_status: data.capture_status,
+          evaluation_source: data.evaluation_source,
+          turns_evaluated: data.turns_evaluated,
+        });
+      }
 
       if (!data.report_id) {
         throw new Error('Backend did not return report_id');
@@ -817,7 +1079,6 @@ export default function InterviewSessionRoom() {
   // Production-grade disconnect flow with single-flight guard and drain
   const runSaveFlow = useCallback(async (sessionFeedback = null) => {
     // Drain in-flight messages before building transcript payload
-    isEndingRef.current = true;
     console.log('[runSaveFlow] Starting drain...');
     const drainStart = Date.now();
     const quietMs = 200;
@@ -832,6 +1093,7 @@ export default function InterviewSessionRoom() {
     }
 
     const transcriptPayload = buildCanonicalTranscriptPayload();
+    isEndingRef.current = true;
     pendingTranscriptPayloadRef.current = transcriptPayload;
 
     console.log('[runSaveFlow] Calling saveAndGenerateReport...');
@@ -859,6 +1121,7 @@ export default function InterviewSessionRoom() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
         dcRef.current = null;
@@ -878,18 +1141,19 @@ export default function InterviewSessionRoom() {
       setAiSpeaking(false);
       endInProgressRef.current = false;
 
-      navigate(`/report/${reportId}`);
+      navigate(`/report/${reportId}`, { state: { openFeedbackDialog: true } });
 
     } catch (err) {
       console.error('[handleDisconnect] Save failed:', err);
       setEndError(err);
       setShowEndErrorDialog(true);
       setStatus('connected'); // Revert to allow retry
+      isEndingRef.current = false;
       // DO NOT close connections - keep them alive for retry
       // DO NOT reset endInProgressRef - modal controls that
     } finally {
     }
-  }, [runSaveFlow, navigate]);
+  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition]);
 
   // Retry handler
   const handleRetryEnd = useCallback(async () => {
@@ -897,17 +1161,14 @@ export default function InterviewSessionRoom() {
     setShowEndErrorDialog(false);
 
     try {
-      const reportId = await runSaveFlow({
-        rating: endExperienceRating,
-        comment: endFeedbackComment.trim() || null,
-        submitted_at: new Date().toISOString(),
-      });
+      const reportId = await runSaveFlow();
 
       // Close connections after successful retry
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
         dcRef.current = null;
@@ -925,36 +1186,16 @@ export default function InterviewSessionRoom() {
       setStatus('idle');
       endInProgressRef.current = false;
 
-      navigate(`/report/${reportId}`);
+      navigate(`/report/${reportId}`, { state: { openFeedbackDialog: true } });
 
     } catch (err) {
       console.error('[handleRetryEnd] Retry failed:', err);
       setEndError(err);
       setShowEndErrorDialog(true);
+      isEndingRef.current = false;
     } finally {
     }
-  }, [runSaveFlow, navigate, endExperienceRating, endFeedbackComment]);
-
-  const handleOpenEndFeedback = useCallback(() => {
-    if (endInProgressRef.current || status === 'ending') {
-      return;
-    }
-    setEndFeedbackError('');
-    setShowEndFeedbackDialog(true);
-  }, [status]);
-
-  const handleConfirmEndFeedback = useCallback(async () => {
-    if (!endExperienceRating || endExperienceRating < 1) {
-      setEndFeedbackError('Please provide a rating before ending the interview.');
-      return;
-    }
-    setShowEndFeedbackDialog(false);
-    await handleDisconnect({
-      rating: endExperienceRating,
-      comment: endFeedbackComment.trim() || null,
-      submitted_at: new Date().toISOString(),
-    });
-  }, [endExperienceRating, endFeedbackComment, handleDisconnect]);
+  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition]);
 
   // End without saving handler
   const handleEndWithoutSaving = useCallback(async () => {
@@ -966,6 +1207,7 @@ export default function InterviewSessionRoom() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
         dcRef.current = null;
@@ -988,7 +1230,7 @@ export default function InterviewSessionRoom() {
       pendingTranscriptPayloadRef.current = null;
       navigate('/dashboard');
     }
-  }, [navigate]);
+  }, [navigate, stopBrowserSpeechRecognition]);
 
   if (!user) {
     return (
@@ -1044,7 +1286,7 @@ export default function InterviewSessionRoom() {
                 handleConnect();
               }}
               disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
-              sx={{ minWidth: '200px', borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: '15px', fontWeight: 600, padding: '10px 30px', textTransform: 'none' }}
+              sx={{ minWidth: { xs: '170px', md: '200px' }, borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: { xs: '14px', md: '15px' }, fontWeight: 600, padding: { xs: '10px 22px', md: '10px 30px' }, textTransform: 'none' }}
             >
               Join Interview
             </Button>
@@ -1076,7 +1318,7 @@ export default function InterviewSessionRoom() {
             <button
               type="button"
               className="meet-control-btn end"
-              onClick={handleOpenEndFeedback}
+              onClick={() => handleDisconnect()}
               disabled={endInProgressRef.current}
               aria-label="End call"
               title="End call"
@@ -1125,54 +1367,6 @@ export default function InterviewSessionRoom() {
           <Button onClick={() => setShowPermissionModal(false)}>Close</Button>
           <Button onClick={() => setShowPermissionModal(false)} variant="contained">
             Try Again
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={showEndFeedbackDialog}
-        onClose={() => setShowEndFeedbackDialog(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Before You End</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            Please share a quick rating for this interview session before generating your results.
-          </Typography>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              Session Rating (Required)
-            </Typography>
-            <Rating
-              value={endExperienceRating}
-              onChange={(_, value) => {
-                setEndExperienceRating(value || 0);
-                if (value && value > 0) {
-                  setEndFeedbackError('');
-                }
-              }}
-            />
-          </Box>
-          <TextField
-            label="Comments (Optional)"
-            multiline
-            rows={3}
-            fullWidth
-            value={endFeedbackComment}
-            onChange={(e) => setEndFeedbackComment(e.target.value)}
-            placeholder="Anything we should improve?"
-          />
-          {endFeedbackError && (
-            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-              {endFeedbackError}
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowEndFeedbackDialog(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleConfirmEndFeedback}>
-            Submit & End Interview
           </Button>
         </DialogActions>
       </Dialog>

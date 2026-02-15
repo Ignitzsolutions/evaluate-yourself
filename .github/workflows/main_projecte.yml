@@ -16,6 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate production Clerk publishable key
+        env:
+          REACT_APP_CLERK_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "${REACT_APP_CLERK_PUBLISHABLE_KEY}" ]; then
+            echo "❌ Missing REACT_APP_CLERK_PUBLISHABLE_KEY secret"
+            exit 1
+          fi
+          if [[ "${REACT_APP_CLERK_PUBLISHABLE_KEY}" == pk_test_* ]]; then
+            echo "❌ Production deploy cannot use Clerk test publishable key"
+            exit 1
+          fi
+          echo "✓ Clerk publishable key looks production-safe"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -155,4 +169,28 @@ jobs:
           done
           echo "Deployment failed after 3 attempts"
           exit 1
+
+      - name: Verify deployed frontend bundle uses live Clerk key
+        run: |
+          APP_URL="https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
+          HTML=$(curl -fsSL "${APP_URL}" || true)
+          if [ -z "${HTML}" ]; then
+            echo "❌ Unable to fetch deployed app HTML"
+            exit 1
+          fi
+          JS_PATH=$(echo "${HTML}" | grep -oE '/static/js/main[^"]+\.js' | head -n 1)
+          if [ -z "${JS_PATH}" ]; then
+            echo "❌ Could not locate main JS bundle in deployed HTML"
+            exit 1
+          fi
+          BUNDLE=$(curl -fsSL "${APP_URL}${JS_PATH}" || true)
+          if [ -z "${BUNDLE}" ]; then
+            echo "❌ Could not fetch deployed JS bundle"
+            exit 1
+          fi
+          if echo "${BUNDLE}" | grep -q "pk_test_"; then
+            echo "❌ Deployed frontend bundle still contains Clerk test key"
+            exit 1
+          fi
+          echo "✓ Deployed frontend bundle does not contain Clerk test key"
           
