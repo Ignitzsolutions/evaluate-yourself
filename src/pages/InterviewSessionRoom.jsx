@@ -27,8 +27,8 @@ import '../ui.css';
 const API_BASE_URL = getApiBaseUrl();
 const REALTIME_VOICE = (process.env.REACT_APP_REALTIME_VOICE || 'alloy').trim() || 'alloy';
 const ADAPTIVE_MANUAL_TURN_CONTROL = String(process.env.REACT_APP_ADAPTIVE_MANUAL_TURN_CONTROL || 'false').toLowerCase() === 'true';
-const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'false').toLowerCase() === 'true';
-const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'false').toLowerCase() === 'true';
+const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
+const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'true').toLowerCase() === 'true';
 const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe';
 const DEDUPE_TTL_MS = 8000;
 
@@ -123,6 +123,7 @@ export default function InterviewSessionRoom() {
   const requestAdaptiveTurnRef = useRef(null);
   const pendingUserTranscriptRef = useRef({});
   const finalUserTranscriptItemIdsRef = useRef(new Set());
+  const transcriptionReapplyAttemptedRef = useRef(false);
   const browserSpeechRef = useRef(null);
   const browserSpeechShouldRunRef = useRef(false);
   const lastUserTranscriptRef = useRef({ text: '', at: 0 });
@@ -416,6 +417,7 @@ export default function InterviewSessionRoom() {
     adaptiveInFlightRef.current = false;
     pendingUserTranscriptRef.current = {};
     finalUserTranscriptItemIdsRef.current = new Set();
+    transcriptionReapplyAttemptedRef.current = false;
     capturedAiRef.current = new Map();
     capturedUserRef.current = new Map();
     stopBrowserSpeechRecognition();
@@ -510,6 +512,57 @@ export default function InterviewSessionRoom() {
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
+      const sendSessionUpdate = (forceDualKeys = DUAL_TRANSCRIPTION_KEYS) => {
+        if (dc.readyState !== 'open') return false;
+        const sessionPayload = {
+          type: 'session.update',
+          session: {
+            type: 'realtime',
+            audio: {
+              input: {
+                turn_detection: {
+                  type: 'server_vad',
+                  threshold: 0.55,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 500,
+                  create_response: true,
+                  interrupt_response: true,
+                },
+                transcription: {
+                  model: TRANSCRIPTION_MODEL,
+                  language: 'en',
+                },
+              },
+              output: {
+                voice: REALTIME_VOICE,
+              },
+            },
+          },
+        };
+
+        if (forceDualKeys) {
+          sessionPayload.session.turn_detection = {
+            type: 'server_vad',
+            threshold: 0.55,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 500,
+            create_response: true,
+            interrupt_response: true,
+          };
+          sessionPayload.session.input_audio_transcription = {
+            model: TRANSCRIPTION_MODEL,
+            language: 'en',
+          };
+        }
+
+        dc.send(JSON.stringify(sessionPayload));
+        addTranscript(
+          'system',
+          `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${forceDualKeys ? 'on' : 'off'})`,
+        );
+        return true;
+      };
+
       dc.onopen = () => {
         addTranscript('system', 'DataChannel opened');
         setStatus('connected');
@@ -517,52 +570,7 @@ export default function InterviewSessionRoom() {
         // Send session.update with turn detection
         if (dc.readyState === 'open') {
           try {
-            const sessionPayload = {
-              type: 'session.update',
-              session: {
-                type: 'realtime',
-                audio: {
-                  input: {
-                    turn_detection: {
-                      type: 'server_vad',
-                      threshold: 0.55,
-                      prefix_padding_ms: 300,
-                      silence_duration_ms: 500,
-                      create_response: true,
-                      interrupt_response: true
-                    },
-                    transcription: {
-                      model: TRANSCRIPTION_MODEL,
-                      language: 'en'
-                    }
-                  },
-                  output: {
-                    voice: REALTIME_VOICE
-                  }
-                },
-              }
-            };
-
-            if (DUAL_TRANSCRIPTION_KEYS) {
-              sessionPayload.session.turn_detection = {
-                type: 'server_vad',
-                threshold: 0.55,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 500,
-                create_response: true,
-                interrupt_response: true,
-              };
-              sessionPayload.session.input_audio_transcription = {
-                model: TRANSCRIPTION_MODEL,
-                language: 'en',
-              };
-            }
-
-            dc.send(JSON.stringify(sessionPayload));
-            addTranscript(
-              'system',
-              `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${DUAL_TRANSCRIPTION_KEYS ? 'on' : 'off'})`,
-            );
+            sendSessionUpdate(DUAL_TRANSCRIPTION_KEYS);
           } catch (err) {
             console.error('Error sending session.update:', err);
           }
@@ -600,7 +608,26 @@ export default function InterviewSessionRoom() {
               msg?.session?.audio?.output?.voice ||
               msg?.session?.voice ||
               REALTIME_VOICE;
-            addTranscript('system', `Session updated (voice=${configuredVoice})`);
+            const hasTranscriptionConfig = Boolean(
+              msg?.session?.input_audio_transcription ||
+              msg?.session?.audio?.input?.transcription
+            );
+            addTranscript(
+              'system',
+              `Session updated (voice=${configuredVoice}, transcription=${hasTranscriptionConfig ? 'enabled' : 'missing'})`
+            );
+            if (!hasTranscriptionConfig && !transcriptionReapplyAttemptedRef.current) {
+              transcriptionReapplyAttemptedRef.current = true;
+              try {
+                const resent = sendSessionUpdate(true);
+                if (resent) {
+                  addTranscript('system', 'Re-applied transcription config for compatibility');
+                }
+              } catch (reapplyErr) {
+                console.warn('Failed to re-apply transcription config:', reapplyErr);
+                incrementDroppedEvent('transcription_reapply_failed');
+              }
+            }
           } else if (msgType === 'error') {
             // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI
             const errMsg = msg.error?.message || 'Azure API error';
@@ -885,9 +912,17 @@ export default function InterviewSessionRoom() {
   const buildCanonicalTranscriptPayload = useCallback(() => {
     const ai = aiMessagesRef.current.map(m => ({ ...m, speaker: 'ai' }));
     const user = userMessagesRef.current.map(m => ({ ...m, speaker: 'user' }));
+    const pendingUserMessages = Object.values(pendingUserTranscriptRef.current || {})
+      .map((value) => String(value || '').trim())
+      .filter((text) => text.length > 0)
+      .map((text, idx) => ({
+        speaker: 'user',
+        text,
+        timestamp: new Date(Date.now() - (idx + 1) * 100).toISOString(),
+      }));
 
     // Merge into a single ordered list
-    const raw_messages = [...ai, ...user]
+    const raw_messages = [...ai, ...user, ...pendingUserMessages]
       .filter(m => m.text && String(m.text).trim().length > 0)
       .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
@@ -1081,11 +1116,12 @@ export default function InterviewSessionRoom() {
     // Drain in-flight messages before building transcript payload
     console.log('[runSaveFlow] Starting drain...');
     const drainStart = Date.now();
-    const quietMs = 200;
-    const timeoutMs = 800;
+    const quietMs = 700;
+    const timeoutMs = 4500;
     while (Date.now() - drainStart < timeoutMs) {
       const quietFor = Date.now() - lastMessageAtRef.current;
-      if (quietFor >= quietMs) {
+      const hasPendingTranscriptDeltas = Object.keys(pendingUserTranscriptRef.current || {}).length > 0;
+      if (quietFor >= quietMs && !hasPendingTranscriptDeltas) {
         console.log(`[Drain] Quiescence reached after ${Date.now() - drainStart}ms`);
         break;
       }
