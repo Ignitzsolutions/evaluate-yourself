@@ -82,6 +82,7 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [enrichmentPending, setEnrichmentPending] = useState(false);
 
   const [experienceRating, setExperienceRating] = useState(0);
   const [feedback, setFeedback] = useState("");
@@ -114,6 +115,7 @@ export default function ReportPage() {
 
       const data = await response.json();
       setReport(data);
+      setEnrichmentPending(data?.enrichment_status === "pending");
 
       const sessionKey = data?.session_id || sessionId;
       if (sessionKey) {
@@ -144,6 +146,26 @@ export default function ReportPage() {
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
+
+  // Poll for v2 enrichment completion when status is pending
+  useEffect(() => {
+    if (!enrichmentPending || !sessionId) return;
+    const poll = async () => {
+      try {
+        const token = await getToken();
+        const res = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {});
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.enrichment_status !== "pending") {
+            setReport(data);
+            setEnrichmentPending(false);
+          }
+        }
+      } catch (_) { /* silent */ }
+    };
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, [enrichmentPending, sessionId, getToken]);
 
   const metrics = useMemo(() => {
     if (!report?.metrics) return {};
@@ -488,6 +510,18 @@ export default function ReportPage() {
         <Alert severity="success" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             Evaluation complete: candidate responses were captured and analyzed.
+          </Typography>
+        </Alert>
+      )}
+
+      {/* ── Enrichment pending banner ────────────────────────────────────── */}
+      {enrichmentPending && (
+        <Alert severity="info" icon={<CircularProgress size={16} />} sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Generating detailed analysis… this takes a few seconds.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Hiring recommendation, per-question breakdown, and improvement roadmap will appear shortly.
           </Typography>
         </Alert>
       )}

@@ -12,7 +12,8 @@ from models.interview import (
 def generate_report(
     session_state: Any,  # InterviewState
     interview_type: str,
-    duration_minutes: int
+    duration_minutes: int,
+    skip_v2: bool = False,
 ) -> InterviewReport:
     """
     Generate a comprehensive interview report from session state and evaluations.
@@ -240,7 +241,7 @@ def generate_report(
     hiring_recommendation = None
     score_context = None
 
-    if not capture_incomplete and transcript_history:
+    if not capture_incomplete and transcript_history and not skip_v2:
         turn_analyses = _build_turn_analyses(
             transcript_history=transcript_history,
             evaluations=evaluations,
@@ -312,6 +313,84 @@ def generate_report(
     )
 
     return report
+
+
+def enrich_v2_fields(
+    session_state: Any,
+    interview_type: str,
+    overall_score: int,
+    ai_feedback: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Compute v2 enrichment fields (turn analyses, competency scores, hiring signal,
+    improvement roadmap) without rerunning the full report generation.
+
+    Returns a dict suitable for merging into the metrics JSON blob stored in DB.
+    All keys are prefixed with 'v2_' to avoid collisions.
+    """
+    evaluations = session_state.evaluation_results if hasattr(session_state, 'evaluation_results') else []
+    transcript_history = session_state.transcript_history if hasattr(session_state, 'transcript_history') else []
+    candidate_answers = [
+        (item.get("answer") or "").strip()
+        for item in transcript_history
+        if isinstance(item, dict) and (item.get("answer") or "").strip()
+    ]
+    if not candidate_answers:
+        return {"v2_enrichment_status": "skipped_no_audio"}
+
+    turn_analyses = _build_turn_analyses(
+        transcript_history=transcript_history,
+        evaluations=evaluations,
+        interview_type=interview_type,
+    )
+
+    competency_scores: Dict[str, int] = {}
+    score_context: Optional[str] = None
+    try:
+        from services.interview.competency_map import aggregate_competency_scores
+        competency_scores = aggregate_competency_scores(
+            [{"competency": t.competency, "score_0_100": t.score_0_100} for t in turn_analyses]
+        )
+        if competency_scores:
+            best_comp = max(competency_scores, key=lambda k: competency_scores[k])
+            worst_comp = min(competency_scores, key=lambda k: competency_scores[k])
+            score_context = (
+                f"Your {best_comp.replace('_', ' ')} ({competency_scores[best_comp]}/100) "
+                f"was your strongest dimension; "
+                f"{worst_comp.replace('_', ' ')} ({competency_scores[worst_comp]}/100) "
+                f"has the most room to grow."
+            )
+    except Exception as e:
+        print(f"⚠️ V2 enrichment competency aggregation failed: {e}")
+
+    hiring_recommendation = None
+    try:
+        from services.interview.hiring_signal import compute_hiring_signal
+        hiring_raw = compute_hiring_signal(
+            overall_score=overall_score,
+            turn_analyses=[t.model_dump() for t in turn_analyses],
+            competency_scores=competency_scores,
+            interview_type=interview_type,
+        )
+        hiring_recommendation = hiring_raw
+    except Exception as e:
+        print(f"⚠️ V2 enrichment hiring signal failed: {e}")
+
+    improvement_roadmap = _build_improvement_roadmap(
+        turn_analyses=turn_analyses,
+        competency_scores=competency_scores,
+        ai_feedback=ai_feedback or {},
+        interview_type=interview_type,
+    )
+
+    return {
+        "v2_enrichment_status": "complete",
+        "v2_turn_analyses": [t.model_dump() for t in turn_analyses],
+        "v2_competency_scores": competency_scores,
+        "v2_score_context": score_context,
+        "v2_hiring_recommendation": hiring_recommendation,
+        "v2_improvement_roadmap": [item.model_dump() for item in improvement_roadmap],
+    }
 
 
 def _build_turn_analyses(

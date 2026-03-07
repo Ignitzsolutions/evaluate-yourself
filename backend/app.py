@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -1089,6 +1089,45 @@ def _load_runtime_session(session_id: str) -> Dict[str, Any]:
     except Exception:
         return {}
 
+
+def _run_v2_enrichment(
+    report_id: str,
+    session_state: Any,
+    interview_type: str,
+    overall_score: int,
+    ai_feedback: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Background task: compute v2 enrichment (LLM STAR, competency, hiring signal)
+    and persist the results back into the metrics JSON of the report row."""
+    try:
+        from services.report_generator import enrich_v2_fields
+        v2 = enrich_v2_fields(
+            session_state=session_state,
+            interview_type=interview_type,
+            overall_score=overall_score,
+            ai_feedback=ai_feedback,
+        )
+    except Exception as e:
+        logging.warning("V2 enrichment computation failed for report %s: %s", report_id, e)
+        v2 = {"v2_enrichment_status": "failed"}
+
+    try:
+        from db.database import SessionLocal
+        with SessionLocal() as bg_db:
+            row = bg_db.query(models.InterviewReport).filter(
+                models.InterviewReport.id == report_id
+            ).first()
+            if row:
+                try:
+                    existing = json.loads(row.metrics) if row.metrics else {}
+                except Exception:
+                    existing = {}
+                existing.update(v2)
+                row.metrics = json.dumps(existing)
+                bg_db.commit()
+                logging.info("V2 enrichment saved for report %s (status=%s)", report_id, v2.get("v2_enrichment_status"))
+    except Exception as e:
+        logging.warning("V2 enrichment DB save failed for report %s: %s", report_id, e)
 
 def _utc_dt_from_ms(ts_ms: int) -> datetime:
     return datetime.fromtimestamp(float(ts_ms) / 1000.0, tz=timezone.utc)
@@ -4576,8 +4615,38 @@ async def get_interview_report(
                     report.ai_feedback = json.loads(report.ai_feedback)
             except Exception:
                 report.ai_feedback = None
-        
-        return report
+
+        # Extract v2 enrichment fields from metrics and expose them at top level
+        metrics_obj = report.metrics if isinstance(report.metrics, dict) else {}
+        enrichment_status = metrics_obj.get("v2_enrichment_status", "pending")
+
+        # Build the API response dict so we can attach v2 fields cleanly
+        report_dict = {
+            "id": report.id,
+            "session_id": report.session_id,
+            "user_id": report.user_id,
+            "title": report.title,
+            "date": report.date.isoformat() if report.date else None,
+            "type": report.type,
+            "mode": report.mode,
+            "duration": report.duration,
+            "overall_score": report.overall_score,
+            "scores": report.scores,
+            "transcript": report.transcript,
+            "recommendations": report.recommendations,
+            "questions": report.questions,
+            "is_sample": report.is_sample,
+            "metrics": metrics_obj,
+            "ai_feedback": report.ai_feedback,
+            # v2 enrichment fields
+            "enrichment_status": enrichment_status,
+            "turn_analyses": metrics_obj.get("v2_turn_analyses"),
+            "competency_scores": metrics_obj.get("v2_competency_scores"),
+            "score_context": metrics_obj.get("v2_score_context"),
+            "hiring_recommendation": metrics_obj.get("v2_hiring_recommendation"),
+            "improvement_roadmap": metrics_obj.get("v2_improvement_roadmap"),
+        }
+        return report_dict
 
     except HTTPException:
         raise
@@ -4964,6 +5033,7 @@ async def adaptive_turn(
 async def save_interview_transcript(
     session_id: str, 
     request: Dict,
+    background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
@@ -5757,6 +5827,19 @@ async def save_interview_transcript(
                     report_data.metrics if isinstance(report_data.metrics, dict) else {},
                     contract_payload,
                 )
+                # Inline v2 fields if already computed (skip_v2=False was used)
+                v2_inline = {}
+                if report_data.turn_analyses:
+                    v2_inline["v2_enrichment_status"] = "complete"
+                    v2_inline["v2_turn_analyses"] = [t.model_dump() for t in report_data.turn_analyses]
+                    v2_inline["v2_competency_scores"] = report_data.competency_scores or {}
+                    v2_inline["v2_score_context"] = report_data.score_context
+                    v2_inline["v2_hiring_recommendation"] = report_data.hiring_recommendation.model_dump() if report_data.hiring_recommendation else None
+                    v2_inline["v2_improvement_roadmap"] = [i.model_dump() for i in (report_data.improvement_roadmap or [])]
+                else:
+                    v2_inline["v2_enrichment_status"] = "pending"
+                merged_metrics.update(v2_inline)
+
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
@@ -5780,6 +5863,16 @@ async def save_interview_transcript(
                 db.refresh(db_report)
                 report_id = db_report.id
                 print(f"✅ Report generated and saved to database: {db_report.id}")
+                # If v2 enrichment not yet done, schedule it as a background task
+                if v2_inline.get("v2_enrichment_status") == "pending":
+                    background_tasks.add_task(
+                        _run_v2_enrichment,
+                        report_id=report_id,
+                        session_state=session_state,
+                        interview_type=interview_type,
+                        overall_score=int(report_data.overall_score or 0),
+                        ai_feedback=report_data.ai_feedback,
+                    )
             else:
                 merged_existing_metrics = {}
                 try:
