@@ -155,7 +155,7 @@ function MultiSelectChips({ title, options, value, onChange }) {
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
 
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -164,6 +164,8 @@ export default function OnboardingPage() {
   const [form, setForm] = useState(initialForm);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) { setLoading(false); return; }
     let mounted = true;
     async function loadProfile() {
       try {
@@ -223,7 +225,7 @@ export default function OnboardingPage() {
     return () => {
       mounted = false;
     };
-  }, [getToken]);
+  }, [isLoaded, isSignedIn, getToken]);
 
   const categoryLabel = useMemo(() => {
     if (form.userCategory === "student") return "Student";
