@@ -5,6 +5,7 @@ import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 
 const API_BASE = getApiBaseUrl();
 
@@ -332,7 +333,7 @@ export default function Dashboard() {
                         </Typography>
                       </Box>
                       <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
-                        {progressSummary.latestType || "--"}
+                        {progressSummary.latestType ? formatInterviewTypeLabel(progressSummary.latestType) : "--"}
                       </Typography>
                       <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
                         Most recent interview mode
@@ -373,7 +374,7 @@ export default function Dashboard() {
                         <Box>
                           <Typography sx={{ fontWeight: 600 }}>{report.title || "Interview Session"}</Typography>
                           <Typography variant="body2" sx={{ opacity: 0.65 }}>
-                            {report.type} • {new Date(report.date).toLocaleString()}
+                            {formatInterviewTypeLabel(report.type)} • {new Date(report.date).toLocaleString()}
                           </Typography>
                         </Box>
                         <Stack direction="row" spacing={1} alignItems="center">

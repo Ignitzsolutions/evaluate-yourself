@@ -2,7 +2,7 @@
 
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import jwt
 
@@ -33,7 +33,7 @@ class TokenService:
         tenant_id: str
     ) -> str:
         """Create JWT session token (no PII)."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         payload = {
             "iss": self.issuer,
             "aud": self.audience,
@@ -74,7 +74,7 @@ class TokenService:
 
     def create_refresh_token(self, session_id: str, candidate_id: str, tenant_id: str) -> str:
         """Create a longer-lived refresh token."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         payload = {
             "iss": self.issuer,
             "aud": self.audience,

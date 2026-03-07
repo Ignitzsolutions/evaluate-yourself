@@ -13,6 +13,7 @@ class ScoreBreakdown(BaseModel):
     structure: int
     technical_depth: Optional[int] = None
     relevance: int
+    eye_contact: Optional[int] = None
 
 class InterviewReport(BaseModel):
     id: str

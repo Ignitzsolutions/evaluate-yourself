@@ -45,32 +45,80 @@ def generate_report(
     avg_clarity = performance_summary.get("avg_clarity", 0)
     avg_depth = performance_summary.get("avg_depth", 0)
     avg_relevance = performance_summary.get("avg_relevance", 0)
+    avg_communication = 0.0  # Separate from clarity — derived below from per-turn data
+
+    # Confidence weights: high=1.0, med=0.7, low=0.4
+    _CONF_WEIGHTS = {"high": 1.0, "medium": 1.0, "med": 0.7, "low": 0.4}
+
+    def _weighted_avg(vals_and_confs):
+        """Compute confidence-weighted average from list of (value, confidence_str) tuples."""
+        if not vals_and_confs:
+            return 0.0
+        total_w = sum(_CONF_WEIGHTS.get(c, 1.0) for _, c in vals_and_confs)
+        if total_w == 0:
+            return 0.0
+        return sum(v * _CONF_WEIGHTS.get(c, 1.0) for v, c in vals_and_confs) / total_w
 
     # If running averages are missing, derive from turn evaluations directly.
     if evaluations and (avg_clarity + avg_depth + avg_relevance) <= 0:
-        clarity_vals = [e.get("clarity_score", e.get("clarity")) for e in evaluations if e.get("clarity_score", e.get("clarity")) is not None]
-        depth_vals = [e.get("depth_score", e.get("depth")) for e in evaluations if e.get("depth_score", e.get("depth")) is not None]
-        relevance_vals = [e.get("relevance_score", e.get("relevance")) for e in evaluations if e.get("relevance_score", e.get("relevance")) is not None]
+        clarity_pairs = [
+            (float(e.get("clarity_score", e.get("clarity")) or 0), e.get("confidence", "medium"))
+            for e in evaluations
+            if e.get("clarity_score", e.get("clarity")) is not None
+        ]
+        depth_pairs = [
+            (float(e.get("depth_score", e.get("depth")) or 0), e.get("confidence", "medium"))
+            for e in evaluations
+            if e.get("depth_score", e.get("depth")) is not None
+        ]
+        relevance_pairs = [
+            (float(e.get("relevance_score", e.get("relevance")) or 0), e.get("confidence", "medium"))
+            for e in evaluations
+            if e.get("relevance_score", e.get("relevance")) is not None
+        ]
 
-        if clarity_vals:
-            avg_clarity = float(sum(clarity_vals) / len(clarity_vals))
-        if depth_vals:
-            avg_depth = float(sum(depth_vals) / len(depth_vals))
-        if relevance_vals:
-            avg_relevance = float(sum(relevance_vals) / len(relevance_vals))
+        if clarity_pairs:
+            avg_clarity = _weighted_avg(clarity_pairs)
+        if depth_pairs:
+            avg_depth = _weighted_avg(depth_pairs)
+        if relevance_pairs:
+            avg_relevance = _weighted_avg(relevance_pairs)
+
+    # Compute avg_communication from per-turn data (separate from clarity)
+    if evaluations:
+        comm_pairs = [
+            (float(e.get("communication") or 0), e.get("confidence", "medium"))
+            for e in evaluations
+            if e.get("communication") is not None
+        ]
+        if comm_pairs:
+            avg_communication = _weighted_avg(comm_pairs)
+        else:
+            # Fallback: estimate communication from filler density in rationale or use clarity
+            avg_communication = avg_clarity * 0.9  # slight discount if no separate signal
     
-    # Calculate overall score (0-100)
-    overall_score = int((avg_clarity + avg_depth + avg_relevance) / 3 * 20) if (avg_clarity + avg_depth + avg_relevance) > 0 else 50
+    # Calculate overall score (0-100) with deterministic floor/ceiling.
     if capture_incomplete:
         overall_score = 0
+    else:
+        # Weight: clarity 25%, communication 20%, depth 30%, relevance 25%
+        signal_sum = (avg_clarity * 0.25 + avg_communication * 0.20 + avg_depth * 0.30 + avg_relevance * 0.25)
+        if signal_sum > 0:
+            raw_score = int(round(signal_sum * 20))
+            overall_score = max(20, min(100, raw_score))
+        else:
+            overall_score = 40
     
     # Build score breakdown
+    def _score_0_100(value: float) -> int:
+        return max(0, min(100, int(round(value))))
+
     scores = ScoreBreakdown(
-        communication=0 if capture_incomplete else int(avg_clarity * 20),
-        clarity=0 if capture_incomplete else int(avg_clarity * 20),
-        structure=0 if capture_incomplete else _calculate_structure_score(evaluations),
-        technical_depth=(0 if capture_incomplete else int(avg_depth * 20)) if interview_type in ["technical", "mixed"] else None,
-        relevance=0 if capture_incomplete else int(avg_relevance * 20)
+        communication=0 if capture_incomplete else _score_0_100(avg_communication * 20),
+        clarity=0 if capture_incomplete else _score_0_100(avg_clarity * 20),
+        structure=0 if capture_incomplete else _score_0_100(_calculate_structure_score(evaluations)),
+        technical_depth=(0 if capture_incomplete else _score_0_100(avg_depth * 20)) if interview_type in ["technical", "mixed"] else None,
+        relevance=0 if capture_incomplete else _score_0_100(avg_relevance * 20)
     )
     
     # Build transcript messages
@@ -123,11 +171,27 @@ def generate_report(
         'eye_contact_pct': eye_contact_pct,
         'capture_status': "INCOMPLETE_NO_CANDIDATE_AUDIO" if capture_incomplete else "COMPLETE",
     }
+    if capture_incomplete:
+        metrics['evaluation_explainability'] = {
+            'source': 'none_no_candidate_audio',
+            'confidence': 'low',
+            'turns_evaluated': 0,
+            'formula': 'overall = avg(clarity, depth, relevance) * 20',
+        }
+    elif evaluations:
+        confidence = "high" if len(evaluations) >= 3 else "medium"
+        metrics['evaluation_explainability'] = {
+            'source': 'session_evaluation_results',
+            'confidence': confidence,
+            'turns_evaluated': len(evaluations),
+            'formula': 'overall = avg(clarity, depth, relevance) * 20',
+        }
     if evaluations:
         metrics['turn_evaluations'] = evaluations
         metrics['turn_eval_summary'] = {
             'turn_count': len(evaluations),
             'avg_clarity': round(avg_clarity, 2),
+            'avg_communication': round(avg_communication, 2),
             'avg_depth': round(avg_depth, 2),
             'avg_relevance': round(avg_relevance, 2),
         }
@@ -164,7 +228,7 @@ def generate_report(
         except Exception as e:
             print(f"⚠️ Failed to generate AI feedback: {e}")
         if not isinstance(ai_feedback, dict) or not ai_feedback:
-            ai_feedback = _build_deterministic_feedback(scores_for_ai)
+            ai_feedback = _build_deterministic_feedback(scores_for_ai, evaluations=evaluations, interview_type=interview_type)
 
     # Create report
     report = InterviewReport(
@@ -223,46 +287,115 @@ def _generate_minimal_report(interview_type: str, duration_minutes: int) -> Inte
     )
 
 
-def _build_deterministic_feedback(scores: Dict[str, int]) -> Dict[str, Any]:
-    """Deterministic fallback so report generation never returns empty feedback."""
+def _build_deterministic_feedback(scores: Dict[str, int], evaluations: List[Dict[str, Any]] = None, interview_type: str = "behavioral") -> Dict[str, Any]:
+    """Build feedback grounded in actual transcript content, not just score tiers."""
     overall = int(scores.get("overall_score", 50) or 50)
-    if overall >= 80:
-        summary = "Strong performance with clear communication and relevant examples."
-        strengths = [
-            "Clear communication under interview pressure",
-            "Good structure in responses",
-            "Relevant examples matched to questions",
-        ]
-    elif overall >= 60:
-        summary = "Solid interview with good fundamentals and clear room to improve depth."
-        strengths = [
-            "Consistent participation and engagement",
-            "Basic structure in most responses",
-            "Reasonable alignment with interview prompts",
-        ]
+    communication = int(scores.get("communication", overall) or overall)
+    clarity = int(scores.get("clarity", overall) or overall)
+    structure_score = int(scores.get("structure", overall) or overall)
+    relevance = int(scores.get("relevance", overall) or overall)
+
+    evals = evaluations or []
+
+    # Extract best answer excerpt
+    best_excerpt = ""
+    best_turn_depth = 0
+    for e in evals:
+        d = e.get("depth") or e.get("depth_score") or 0
+        if d > best_turn_depth and e.get("evidence_excerpt"):
+            best_turn_depth = d
+            best_excerpt = e["evidence_excerpt"]
+
+    # Detect STAR usage across turns
+    star_totals = {"situation": 0, "task": 0, "action": 0, "result": 0}
+    for e in evals:
+        sc = e.get("star_completeness") or {}
+        for k in star_totals:
+            if sc.get(k):
+                star_totals[k] += 1
+    n_turns = max(len(evals), 1)
+    star_coverage = {k: round(v / n_turns * 100) for k, v in star_totals.items()}
+
+    # Build rationale-grounded strengths
+    strengths = []
+    areas = []
+
+    # Communication assessment
+    if communication >= 75:
+        strengths.append("Confident delivery with low filler word usage — answers came across as polished and direct.")
+    elif communication >= 55:
+        areas.append("Reduce hedging phrases (e.g., 'I think', 'sort of', 'I guess') to sound more assertive and confident.")
     else:
-        summary = "Interview fundamentals are present, but response clarity and depth need improvement."
-        strengths = [
-            "Willingness to answer and engage",
-            "Baseline understanding of interview flow",
-        ]
+        areas.append("Communication needs work: high filler/hedging density detected. Practice speaking in complete, assertive sentences.")
+
+    # Clarity assessment
+    if clarity >= 75:
+        strengths.append("Well-structured sentences with appropriate length and pacing.")
+    elif clarity < 50:
+        areas.append("Shorten overly long sentences and avoid run-ons. Aim for 20–30 words per sentence for maximum clarity.")
+
+    # Structure / STAR assessment
+    missing_star = [k for k, pct in star_coverage.items() if pct < 40]
+    present_star = [k for k, pct in star_coverage.items() if pct >= 60]
+    if present_star:
+        strengths.append(f"Used STAR components effectively: {', '.join(present_star)} detected in most answers.")
+    if missing_star:
+        areas.append(
+            f"STAR coverage gaps: '{', '.join(missing_star)}' components were missing in many answers. "
+            "Add explicit Situation/Task context and close each answer with a measurable Result."
+        )
+
+    # Relevance assessment
+    if relevance >= 75:
+        strengths.append("Answers stayed on-topic and addressed what was asked directly.")
+    elif relevance < 55:
+        areas.append("Some answers drifted off-topic. Pause briefly to confirm you understand the question before answering.")
+
+    # Best answer excerpt
+    best_excerpt_note = ""
+    if best_excerpt:
+        best_excerpt_note = f'Your strongest answer excerpt: "{best_excerpt[:120]}…"' if len(best_excerpt) > 120 else f'Your strongest answer excerpt: "{best_excerpt}"'
+
+    # Summary
+    if overall >= 80:
+        summary = f"Strong performance overall (score: {overall}/100). Delivery was confident and answers were structured well."
+    elif overall >= 60:
+        summary = f"Solid interview fundamentals (score: {overall}/100) with clear room to deepen answers and sharpen communication."
+    elif overall > 0:
+        summary = f"Interview captured with room to grow (score: {overall}/100). Focus on STAR structure and reducing fillers."
+    else:
+        summary = "Evaluation incomplete: not enough candidate speech was captured to score this session."
+
+    if best_excerpt_note and overall > 0:
+        summary += f" {best_excerpt_note}"
+
+    # Standard improvement tips
+    standard_tips = [
+        "Prepare 4–5 STAR stories: leadership, conflict, failure, cross-team delivery, and a technical win.",
+        "Open each answer with the Situation in 1–2 sentences to set context immediately.",
+        "Close every answer with a concrete Result: numbers, timelines, or team impact work best.",
+        "Record yourself answering mock questions and listen back for filler density.",
+    ]
+    if interview_type in ["technical", "mixed"]:
+        standard_tips.append("For technical questions: state your assumptions, walk through tradeoffs, then give your final recommendation.")
 
     return {
         "overall_summary": summary,
-        "strengths": strengths,
-        "areas_for_improvement": [
+        "strengths": strengths if strengths else ["Baseline engagement and participation throughout the session."],
+        "areas_for_improvement": areas if areas else [
             "Use STAR format for behavioral answers",
             "Add concrete examples with measurable outcomes",
             "State assumptions and tradeoffs more explicitly",
         ],
-        "communication_feedback": "Keep answers concise, structured, and specific. Avoid filler and aim for clear start-middle-end delivery.",
-        "content_feedback": "Increase depth with concrete project details, constraints, decisions, and impact metrics.",
-        "tips_for_next_interview": [
-            "Prepare 4-5 STAR stories across leadership, conflict, failure, and delivery",
-            "Practice technical explanations with architecture tradeoffs",
-            "Use a brief structure before each answer: context, action, outcome",
-            "Close answers with what you learned and how you improved",
-        ],
+        "communication_feedback": (
+            "Delivery was clean and confident." if communication >= 75
+            else "Reduce hedging and filler words. Aim for direct, declarative sentences with clear beginnings and ends."
+        ),
+        "content_feedback": (
+            "Good depth and specificity in answers." if clarity >= 70 and relevance >= 70
+            else "Increase depth with concrete project details, constraints, decisions, and impact metrics."
+        ),
+        "tips_for_next_interview": standard_tips,
     }
 
 
@@ -281,8 +414,11 @@ def _calculate_structure_score(evaluations: List[Dict[str, Any]]) -> int:
     if star_scores:
         return int(sum(star_scores) / len(star_scores))
     else:
-        # Fallback: use clarity as proxy for structure
-        clarity_scores = [e.get("clarity_score", 3) * 20 for e in evaluations]
+        # Fallback: use clarity as proxy for structure.
+        clarity_scores = [
+            (e.get("clarity_score") if e.get("clarity_score") is not None else e.get("clarity", 3)) * 20
+            for e in evaluations
+        ]
         return int(sum(clarity_scores) / len(clarity_scores)) if clarity_scores else 60
 
 
@@ -296,9 +432,9 @@ def _generate_recommendations(
     recommendations = []
     
     # Analyze patterns
-    clarity_scores = [e.get("clarity_score", 3) for e in evaluations]
-    depth_scores = [e.get("depth_score", 3) for e in evaluations]
-    relevance_scores = [e.get("relevance_score", 3) for e in evaluations]
+    clarity_scores = [e.get("clarity_score", e.get("clarity", 3)) for e in evaluations]
+    depth_scores = [e.get("depth_score", e.get("depth", 3)) for e in evaluations]
+    relevance_scores = [e.get("relevance_score", e.get("relevance", 3)) for e in evaluations]
     
     # Analyze gaze metrics if available
     gaze_metrics = []

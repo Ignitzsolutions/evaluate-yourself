@@ -1,0 +1,10 @@
+# Main requirements file for Azure App Service deployment
+# Oryx (Azure build system) looks for requirements.txt at repo root
+# This file references backend/requirements.txt which contains all dependencies
+
+# Backend dependencies (used by Azure App Service)
+-r backend/requirements.txt
+
+# Note: For optional face detection (dlib), see requirements-face.txt
+# Uncomment below if you need dlib for server.py:
+# -r requirements-face.txt

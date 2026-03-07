@@ -2,6 +2,7 @@
 
 import logging
 import json
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ class TranscriptService:
                 "session_id": session_id,
                 "candidate_id": candidate_id,
                 "content": transcript_text,
-                "created_at": str(__import__('datetime').datetime.utcnow())
+                "created_at": str(datetime.now(timezone.utc))
             }
             logger.info(f"Stored transcript {transcript_id} for session {session_id}")
             return transcript_id

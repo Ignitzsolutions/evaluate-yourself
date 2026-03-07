@@ -19,24 +19,83 @@ import {
   DialogActions,
   Button,
   Typography,
-  Avatar,
   Box,
 } from '@mui/material';
 import '../ui.css';
 
 const API_BASE_URL = getApiBaseUrl();
 const REALTIME_VOICE = (process.env.REACT_APP_REALTIME_VOICE || 'alloy').trim() || 'alloy';
-const ADAPTIVE_MANUAL_TURN_CONTROL = String(process.env.REACT_APP_ADAPTIVE_MANUAL_TURN_CONTROL || 'false').toLowerCase() === 'true';
+const resolveSoniaAvatarSrc = () => {
+  if (typeof window !== 'undefined') {
+    const runtimeAvatar = (window.sessionStorage.getItem('soniaAvatarSrc') || '').trim();
+    if (runtimeAvatar) {
+      return runtimeAvatar;
+    }
+  }
+  return (process.env.REACT_APP_SONIA_AVATAR_SRC || '/assets/sonia-avatar.png').trim() || '/assets/sonia-avatar.png';
+};
+const INTERVIEW_SERVER_CONTROL_ENABLED = String(process.env.REACT_APP_INTERVIEW_SERVER_CONTROL_ENABLED || 'true').toLowerCase() === 'true';
 const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
-const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'true').toLowerCase() === 'true';
+const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'false').toLowerCase() === 'true';
 const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe';
 const DEDUPE_TTL_MS = 8000;
+
+const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = null) => {
+  const question = String(questionText || '').trim();
+  const refusal = String(refusalMessage || '').trim();
+  const script = [refusal, question].filter(Boolean).join(' ');
+  return [
+    'Role: You are Sonia, the interviewer.',
+    'Task: Speak the SCRIPT exactly as provided.',
+    'Rules:',
+    '- Output only the script text, exactly once.',
+    '- Do not add prefixes like "Sure", "Here is the question", or any meta commentary.',
+    '- Do not explain, paraphrase, or answer the question.',
+    `SCRIPT: ${script}`,
+  ].join('\n');
+};
+
+const extractResponseDoneText = (msg) => {
+  const direct = [
+    msg?.text,
+    msg?.transcript,
+    msg?.response?.text,
+    msg?.response?.transcript,
+  ].find((value) => typeof value === 'string' && value.trim().length > 0);
+  if (direct) return String(direct).trim();
+
+  const outputs = Array.isArray(msg?.response?.output) ? msg.response.output : [];
+  const fragments = [];
+
+  outputs.forEach((item) => {
+    if (typeof item?.text === 'string' && item.text.trim()) {
+      fragments.push(item.text.trim());
+    }
+    if (typeof item?.transcript === 'string' && item.transcript.trim()) {
+      fragments.push(item.transcript.trim());
+    }
+    const content = Array.isArray(item?.content) ? item.content : [];
+    content.forEach((part) => {
+      const candidate = [
+        part?.text,
+        part?.transcript,
+        part?.audio?.transcript,
+      ].find((value) => typeof value === 'string' && value.trim().length > 0);
+      if (candidate) {
+        fragments.push(String(candidate).trim());
+      }
+    });
+  });
+
+  return fragments.join(' ').trim();
+};
 
 export default function InterviewSessionRoom() {
   const params = useParams();
   const navigate = useNavigate();
   const { user } = useUser();
   const { getToken } = useAuth();
+  const soniaAvatarSrc = useMemo(() => resolveSoniaAvatarSrc(), []);
 
   // Generate sessionId
   const sessionId = useMemo(() => {
@@ -53,11 +112,12 @@ export default function InterviewSessionRoom() {
   const [interviewType, setInterviewType] = useState(typeFromUrl || 'behavioral');
   const [durationMinutes, setDurationMinutes] = useState(15);
   const [effectiveDurationMinutes, setEffectiveDurationMinutes] = useState(15);
-  const [difficulty, setDifficulty] = useState('medium');
+  const [difficulty, setDifficulty] = useState('easy');
   const [targetRole, setTargetRole] = useState('');
   const [targetCompany, setTargetCompany] = useState('');
   const [questionMix, setQuestionMix] = useState('balanced');
   const [interviewStyle, setInterviewStyle] = useState('neutral');
+  const [selectedSkills, setSelectedSkills] = useState([]);
   const [planTier, setPlanTier] = useState('trial');
   const [trialMode, setTrialMode] = useState(true);
 
@@ -70,11 +130,12 @@ export default function InterviewSessionRoom() {
         const configuredDuration = parsed.duration ? parseInt(parsed.duration, 10) : 15;
         setDurationMinutes(configuredDuration);
         setEffectiveDurationMinutes(configuredDuration);
-        setDifficulty(parsed.difficulty || 'medium');
+        setDifficulty(parsed.difficulty || 'easy');
         setTargetRole(parsed.role || '');
         setTargetCompany(parsed.company || '');
         setQuestionMix(parsed.questionMix || 'balanced');
         setInterviewStyle(parsed.interviewStyle || 'neutral');
+        setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
         if (typeof parsed.trialMode === 'boolean') {
           setTrialMode(parsed.trialMode);
         }
@@ -90,7 +151,21 @@ export default function InterviewSessionRoom() {
   const pcRef = useRef(null);
   const dcRef = useRef(null);
   const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
   const audioElementRef = useRef(null);
+  const gazeWsRef = useRef(null);
+  const gazeCanvasRef = useRef(null);
+  const gazeRafRef = useRef(0);
+  const cameraOffRef = useRef(false);
+  const faceDetectorRef = useRef(null);
+  const detectInFlightRef = useRef(false);
+  const clientGazeRef = useRef({
+    detectorReady: false,
+    gazeDirection: 'ON_SCREEN',
+    eyeContact: true,
+    conf: 0.0,
+    faceDetected: false,
+  });
 
   // State
   const [status, setStatus] = useState('idle');
@@ -105,6 +180,19 @@ export default function InterviewSessionRoom() {
   const [, setQuestionCount] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [networkOnline, setNetworkOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine,
+  );
+  const [selfViewHidden, setSelfViewHidden] = useState(false);
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
+  const [gazeMetrics, setGazeMetrics] = useState({
+    connected: false,
+    eyeContact: true,
+    eyeContactPct: null,
+    gazeDirection: 'ON_SCREEN',
+    activeFlag: null,
+    detectorReady: true,
+  });
   const capturedAiRef = useRef(new Map());
   const capturedUserRef = useRef(new Map());
 
@@ -123,7 +211,10 @@ export default function InterviewSessionRoom() {
   const requestAdaptiveTurnRef = useRef(null);
   const pendingUserTranscriptRef = useRef({});
   const finalUserTranscriptItemIdsRef = useRef(new Set());
+  const pendingOpeningQuestionRef = useRef(null);
   const transcriptionReapplyAttemptedRef = useRef(false);
+  const transcriptionFallbackNotifiedRef = useRef(false);
+  const legacySessionSchemaFallbackTriedRef = useRef(false);
   const browserSpeechRef = useRef(null);
   const browserSpeechShouldRunRef = useRef(false);
   const lastUserTranscriptRef = useRef({ text: '', at: 0 });
@@ -141,6 +232,9 @@ export default function InterviewSessionRoom() {
   // Error recovery state
   const [endError, setEndError] = useState(null);
   const [showEndErrorDialog, setShowEndErrorDialog] = useState(false);
+
+  // In-session capture warnings: null | 'fallback' | 'no_audio'
+  const [captureWarning, setCaptureWarning] = useState(null);
   const pendingTranscriptPayloadRef = useRef(null);
 
   // Utility
@@ -208,12 +302,37 @@ export default function InterviewSessionRoom() {
       lastUserTranscriptRef.current = { text: normalized, at: now };
       userMessagesRef.current.push({ speaker: 'user', text, timestamp: ts });
       captureStatsRef.current.captured_user_turns += 1;
+      setCaptureWarning(null); // audio confirmed — dismiss any capture warning
       console.log(`[addTranscript] userMessagesRef now:`, JSON.stringify(userMessagesRef.current, null, 2));
       if (!isEndingRef.current && typeof requestAdaptiveTurnRef.current === 'function') {
         requestAdaptiveTurnRef.current(text, ts);
       }
     }
   }, [incrementDroppedEvent]);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      setNetworkOnline(false);
+      if (hasJoined) {
+        setStatus((prev) => (prev === 'ending' ? prev : 'disconnected'));
+        setError('Internet disconnected. Interview paused. Reconnect when network is back.');
+        addTranscript('system', 'Network disconnected. Interview paused.');
+      }
+    };
+    const handleOnline = () => {
+      setNetworkOnline(true);
+      if (hasJoined) {
+        addTranscript('system', 'Network restored. Click Reconnect to continue.');
+      }
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [addTranscript, hasJoined]);
 
   // Timer
   useEffect(() => {
@@ -226,6 +345,20 @@ export default function InterviewSessionRoom() {
     return () => clearInterval(interval);
   }, [hasJoined, status]);
 
+  // Periodic no-audio silence check: if connected >30s with no user turns captured, warn
+  useEffect(() => {
+    if (!hasJoined || (status !== 'connected' && status !== 'ready')) return;
+    const silenceCheck = setInterval(() => {
+      const userTurns = captureStatsRef.current.captured_user_turns;
+      if (userTurns === 0) {
+        setCaptureWarning(prev => (prev === 'fallback' ? 'fallback' : 'no_audio'));
+      } else {
+        setCaptureWarning(null);
+      }
+    }, 30000);
+    return () => clearInterval(silenceCheck);
+  }, [hasJoined, status]);
+
   useEffect(() => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -233,6 +366,405 @@ export default function InterviewSessionRoom() {
       track.enabled = !micMuted;
     });
   }, [micMuted]);
+
+  const buildGazeWsUrl = useCallback((token) => {
+    const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000';
+    const base = API_BASE_URL || fallbackOrigin;
+    let url;
+    try {
+      url = new URL(`/ws/gaze/${sessionId}`, base);
+    } catch {
+      url = new URL(`/ws/gaze/${sessionId}`, fallbackOrigin);
+    }
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (token) {
+      url.searchParams.set('token', token);
+    }
+    return url.toString();
+  }, [sessionId]);
+
+  const stopGazeMonitoring = useCallback(() => {
+    if (gazeRafRef.current) {
+      cancelAnimationFrame(gazeRafRef.current);
+      gazeRafRef.current = 0;
+    }
+    faceDetectorRef.current = null;
+    detectInFlightRef.current = false;
+    clientGazeRef.current = {
+      detectorReady: false,
+      gazeDirection: 'ON_SCREEN',
+      eyeContact: true,
+      conf: 0.0,
+      faceDetected: false,
+    };
+    if (gazeWsRef.current) {
+      try {
+        gazeWsRef.current.close();
+      } catch {
+        // no-op
+      }
+      gazeWsRef.current = null;
+    }
+    setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null }));
+  }, []);
+
+  const createOrReuseFaceDetector = useCallback(() => {
+    if (faceDetectorRef.current) {
+      return faceDetectorRef.current;
+    }
+    const FaceDetectorCtor = typeof window !== 'undefined' ? window.FaceDetector : null;
+    if (!FaceDetectorCtor) {
+      return null;
+    }
+    try {
+      faceDetectorRef.current = new FaceDetectorCtor({
+        fastMode: true,
+        maxDetectedFaces: 1,
+      });
+      return faceDetectorRef.current;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const runGazePreflight = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const video = localVideoRef.current;
+    if (!stream || !video) {
+      return;
+    }
+
+    try {
+      video.srcObject = stream;
+      await video.play();
+    } catch {
+      // ignore preview warmup failure
+    }
+
+    const detector = createOrReuseFaceDetector();
+    if (!detector) {
+      clientGazeRef.current = {
+        detectorReady: false,
+        gazeDirection: 'ON_SCREEN',
+        eyeContact: true,
+        conf: 0.0,
+        faceDetected: false,
+      };
+      setGazeMetrics((prev) => ({
+        ...prev,
+        detectorReady: false,
+      }));
+      return;
+    }
+
+    const canvas = gazeCanvasRef.current || document.createElement('canvas');
+    gazeCanvasRef.current = canvas;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    canvas.width = 320;
+    canvas.height = 240;
+
+    const classifyFaceBox = (faceBox, frameW, frameH) => {
+      const x = Number(faceBox?.x ?? 0);
+      const y = Number(faceBox?.y ?? 0);
+      const w = Number(faceBox?.width ?? 0);
+      const h = Number(faceBox?.height ?? 0);
+      if (!w || !h || !frameW || !frameH) {
+        return {
+          detectorReady: true,
+          gazeDirection: 'NO_FACE',
+          eyeContact: false,
+          conf: 0.0,
+          faceDetected: false,
+        };
+      }
+      const faceCx = x + (w / 2);
+      const faceCy = y + (h / 2);
+      const normDx = (faceCx - (frameW / 2)) / Math.max(frameW / 2, 1);
+      const normDy = (faceCy - (frameH / 2)) / Math.max(frameH / 2, 1);
+      let gazeDirection = 'ON_SCREEN';
+      if (normDy < -0.22) gazeDirection = 'UP';
+      else if (normDy > 0.24) gazeDirection = 'DOWN';
+      else if (normDx < -0.28) gazeDirection = 'LEFT';
+      else if (normDx > 0.28) gazeDirection = 'RIGHT';
+      const faceAreaRatio = (w * h) / Math.max(frameW * frameH, 1);
+      const centerPenalty = Math.min(1, Math.sqrt((normDx ** 2) + (normDy ** 2)));
+      const conf = Math.min(1, Math.max(0, (faceAreaRatio * 6.5) * (1 - (0.45 * centerPenalty))));
+      return {
+        detectorReady: true,
+        gazeDirection,
+        eyeContact: gazeDirection === 'ON_SCREEN',
+        conf: Number(conf.toFixed(4)),
+        faceDetected: true,
+      };
+    };
+
+    const startedAt = Date.now();
+    let lastSample = {
+      detectorReady: true,
+      gazeDirection: 'NO_FACE',
+      eyeContact: false,
+      conf: 0.0,
+      faceDetected: false,
+    };
+    while (Date.now() - startedAt < 650) {
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const faces = await detector.detect(canvas);
+        if (Array.isArray(faces) && faces.length > 0) {
+          const topFace = [...faces].sort((a, b) => {
+            const areaA = (a.boundingBox?.width || 0) * (a.boundingBox?.height || 0);
+            const areaB = (b.boundingBox?.width || 0) * (b.boundingBox?.height || 0);
+            return areaB - areaA;
+          })[0];
+          lastSample = classifyFaceBox(topFace?.boundingBox, canvas.width, canvas.height);
+          break;
+        }
+      } catch {
+        // ignore transient detector errors during warmup
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    clientGazeRef.current = lastSample;
+    setGazeMetrics((prev) => ({
+      ...prev,
+      detectorReady: true,
+    }));
+  }, [createOrReuseFaceDetector]);
+
+  const startGazeMonitoring = useCallback(async (token) => {
+    const stream = localStreamRef.current;
+    if (!stream) return { connected: false, detectorReady: false, reason: 'NO_STREAM' };
+    const video = localVideoRef.current;
+    if (video) {
+      try {
+        video.srcObject = stream;
+        await video.play();
+      } catch (e) {
+        console.warn('Local preview play error:', e);
+      }
+    }
+
+    stopGazeMonitoring();
+    const ws = new WebSocket(buildGazeWsUrl(token));
+    gazeWsRef.current = ws;
+    let readyResolved = false;
+    let readyResolver = null;
+    const readyPromise = new Promise((resolve) => {
+      readyResolver = resolve;
+    });
+    const settleReady = (payload) => {
+      if (readyResolved || typeof readyResolver !== 'function') return;
+      readyResolved = true;
+      readyResolver(payload);
+    };
+
+    const sendCameraState = (enabled) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'camera_state', enabled, t: Date.now() }));
+    };
+
+    const classifyFaceBox = (faceBox, frameW, frameH) => {
+      const x = Number(faceBox?.x ?? 0);
+      const y = Number(faceBox?.y ?? 0);
+      const w = Number(faceBox?.width ?? 0);
+      const h = Number(faceBox?.height ?? 0);
+      if (!w || !h || !frameW || !frameH) {
+        return {
+          detectorReady: true,
+          gazeDirection: 'NO_FACE',
+          eyeContact: false,
+          conf: 0.0,
+          faceDetected: false,
+        };
+      }
+
+      const faceCx = x + (w / 2);
+      const faceCy = y + (h / 2);
+      const normDx = (faceCx - (frameW / 2)) / Math.max(frameW / 2, 1);
+      const normDy = (faceCy - (frameH / 2)) / Math.max(frameH / 2, 1);
+
+      let gazeDirection = 'ON_SCREEN';
+      if (normDy < -0.22) gazeDirection = 'UP';
+      else if (normDy > 0.24) gazeDirection = 'DOWN';
+      else if (normDx < -0.28) gazeDirection = 'LEFT';
+      else if (normDx > 0.28) gazeDirection = 'RIGHT';
+
+      const faceAreaRatio = (w * h) / Math.max(frameW * frameH, 1);
+      const centerPenalty = Math.min(1, Math.sqrt((normDx ** 2) + (normDy ** 2)));
+      const conf = Math.min(1, Math.max(0, (faceAreaRatio * 6.5) * (1 - (0.45 * centerPenalty))));
+      return {
+        detectorReady: true,
+        gazeDirection,
+        eyeContact: gazeDirection === 'ON_SCREEN',
+        conf: Number(conf.toFixed(4)),
+        faceDetected: true,
+      };
+    };
+
+    ws.onopen = () => {
+      const detector = createOrReuseFaceDetector();
+      if (!detector && !clientGazeRef.current.detectorReady) {
+        clientGazeRef.current = {
+          detectorReady: false,
+          gazeDirection: 'ON_SCREEN',
+          eyeContact: true,
+          conf: 0.0,
+          faceDetected: false,
+        };
+        settleReady({ connected: true, detectorReady: false, reason: 'NO_DETECTOR' });
+      }
+
+      setGazeMetrics((prev) => ({ ...prev, connected: true }));
+      ws.send(JSON.stringify({ type: 'init', t: Date.now() }));
+      sendCameraState(!cameraOffRef.current);
+
+      let lastSent = 0;
+      const interval = 1000 / 6; // 6 FPS
+      const canvas = gazeCanvasRef.current || document.createElement('canvas');
+      gazeCanvasRef.current = canvas;
+      const ctx = canvas.getContext('2d');
+      canvas.width = 320;
+      canvas.height = 240;
+
+      const loop = (ts) => {
+        gazeRafRef.current = requestAnimationFrame(loop);
+        if (!video || !ctx || ws.readyState !== WebSocket.OPEN) return;
+        if (cameraOffRef.current) return;
+        if (ts - lastSent < interval) return;
+        lastSent = ts;
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const detector = faceDetectorRef.current;
+          if (detector && !detectInFlightRef.current) {
+            detectInFlightRef.current = true;
+            detector.detect(canvas)
+              .then((faces) => {
+                if (Array.isArray(faces) && faces.length > 0) {
+                  const topFace = [...faces].sort((a, b) => {
+                    const areaA = (a.boundingBox?.width || 0) * (a.boundingBox?.height || 0);
+                    const areaB = (b.boundingBox?.width || 0) * (b.boundingBox?.height || 0);
+                    return areaB - areaA;
+                  })[0];
+                  clientGazeRef.current = classifyFaceBox(topFace?.boundingBox, canvas.width, canvas.height);
+                } else {
+                  clientGazeRef.current = {
+                    detectorReady: true,
+                    gazeDirection: 'NO_FACE',
+                    eyeContact: false,
+                    conf: 0.0,
+                    faceDetected: false,
+                  };
+                }
+              })
+              .catch(() => {
+                clientGazeRef.current = {
+                  detectorReady: false,
+                  gazeDirection: 'ON_SCREEN',
+                  eyeContact: true,
+                  conf: 0.0,
+                  faceDetected: false,
+                };
+              })
+              .finally(() => {
+                detectInFlightRef.current = false;
+              });
+          }
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          ws.send(JSON.stringify({
+            type: 'frame',
+            t: Date.now(),
+            data: dataUrl,
+            clientMetrics: clientGazeRef.current,
+          }));
+        } catch (e) {
+          // Ignore transient draw errors while camera initializes.
+        }
+      };
+      gazeRafRef.current = requestAnimationFrame(loop);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'metrics') {
+          const pctRaw = Number(message.eyeContactPct);
+          setGazeMetrics({
+            connected: true,
+            eyeContact: Boolean(message.eyeContact),
+            eyeContactPct: Number.isFinite(pctRaw) ? pctRaw : null,
+            gazeDirection: message.gazeDirection || 'ON_SCREEN',
+            activeFlag: message.activeFlag || null,
+            detectorReady: message.detectorReady !== false,
+          });
+          settleReady({
+            connected: true,
+            detectorReady: message.detectorReady !== false,
+            reason: 'METRICS',
+          });
+        } else if (message.type === 'error') {
+          console.warn('Gaze monitor error:', message.error || 'Unknown gaze websocket error');
+          setGazeMetrics((prev) => ({ ...prev, connected: false }));
+          settleReady({ connected: false, detectorReady: false, reason: 'WS_ERROR_MESSAGE' });
+        }
+      } catch {
+        // no-op
+      }
+    };
+
+    ws.onclose = () => {
+      if (gazeRafRef.current) {
+        cancelAnimationFrame(gazeRafRef.current);
+        gazeRafRef.current = 0;
+      }
+      setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null }));
+      gazeWsRef.current = null;
+      settleReady({ connected: false, detectorReady: false, reason: 'WS_CLOSE' });
+    };
+
+    ws.onerror = () => {
+      setGazeMetrics((prev) => ({ ...prev, connected: false }));
+      settleReady({ connected: false, detectorReady: false, reason: 'WS_ERROR' });
+    };
+
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          connected: true,
+          detectorReady: clientGazeRef.current.detectorReady !== false,
+          reason: 'TIMEOUT',
+        });
+      }, 650);
+    });
+    const startupState = await Promise.race([readyPromise, timeoutPromise]);
+    return startupState;
+  }, [buildGazeWsUrl, createOrReuseFaceDetector, stopGazeMonitoring]);
+
+  useEffect(() => {
+    cameraOffRef.current = cameraOff;
+    const stream = localStreamRef.current;
+    if (stream) {
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = !cameraOff;
+      });
+    }
+    if (gazeWsRef.current && gazeWsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        gazeWsRef.current.send(JSON.stringify({ type: 'camera_state', enabled: !cameraOff, t: Date.now() }));
+      } catch {
+        // no-op
+      }
+    }
+  }, [cameraOff]);
+
+  useEffect(() => {
+    return () => {
+      stopGazeMonitoring();
+    };
+  }, [stopGazeMonitoring]);
 
   const requestAdaptiveTurn = useCallback(async (userTurnText) => {
     if (!userTurnText || !userTurnText.trim()) return;
@@ -267,6 +799,7 @@ export default function InterviewSessionRoom() {
           interviewStyle,
           durationMinutes,
           askedQuestionIds: askedQuestionIdsRef.current,
+          selectedSkills: selectedSkills || [],
         }),
       });
 
@@ -292,15 +825,26 @@ export default function InterviewSessionRoom() {
         askedQuestionIdsRef.current = Array.from(new Set([...askedQuestionIdsRef.current, decision.question_id]));
       }
 
-      if (ADAPTIVE_MANUAL_TURN_CONTROL && decision?.next_question && dcRef.current && dcRef.current.readyState === 'open') {
-        dcRef.current.send(
-          JSON.stringify({
-            type: 'response.create',
-            response: {
-              instructions: decision.next_question,
-            },
-          }),
-        );
+      if (decision?.next_question && dcRef.current && dcRef.current.readyState === 'open') {
+        const nextQuestion = String(decision.next_question || '').trim();
+        if (nextQuestion) {
+          if (decision?.policy_action === 'REFUSED_META_CONTROL' && decision?.refusal_message) {
+            addTranscript('system', decision.refusal_message);
+          }
+          const wrappedInstruction = buildInterviewerUtteranceInstruction(
+            nextQuestion,
+            decision?.policy_action === 'REFUSED_META_CONTROL' ? decision?.refusal_message : null,
+          );
+
+          dcRef.current.send(
+            JSON.stringify({
+              type: 'response.create',
+              response: {
+                instructions: wrappedInstruction,
+              },
+            }),
+          );
+        }
       }
     } catch (err) {
       console.warn('[adaptive-turn] error:', err);
@@ -312,11 +856,13 @@ export default function InterviewSessionRoom() {
     sessionId,
     interviewType,
     difficulty,
+    addTranscript,
     targetRole,
     targetCompany,
     questionMix,
     interviewStyle,
     durationMinutes,
+    selectedSkills,
   ]);
 
   useEffect(() => {
@@ -407,62 +953,109 @@ export default function InterviewSessionRoom() {
       return;
     }
 
+    if (!networkOnline) {
+      setError('Internet disconnected. Please restore network and try reconnecting.');
+      return;
+    }
+
+    const isReconnectAttempt = hasJoined && (status === 'disconnected' || status === 'error' || status === 'failed');
+
     setStatus('connecting');
     setError(null);
-    setTranscript([]);
-    aiMessagesRef.current = [];
-    userMessagesRef.current = [];
-    turnEvaluationsRef.current = [];
-    askedQuestionIdsRef.current = [];
-    adaptiveInFlightRef.current = false;
-    pendingUserTranscriptRef.current = {};
-    finalUserTranscriptItemIdsRef.current = new Set();
-    transcriptionReapplyAttemptedRef.current = false;
-    capturedAiRef.current = new Map();
-    capturedUserRef.current = new Map();
+    setCaptureWarning(null);
+    transcriptionFallbackNotifiedRef.current = false;
+    if (!isReconnectAttempt) {
+      setTranscript([]);
+      aiMessagesRef.current = [];
+      userMessagesRef.current = [];
+      turnEvaluationsRef.current = [];
+      askedQuestionIdsRef.current = [];
+      adaptiveInFlightRef.current = false;
+      pendingUserTranscriptRef.current = {};
+      finalUserTranscriptItemIdsRef.current = new Set();
+      transcriptionReapplyAttemptedRef.current = false;
+      transcriptionFallbackNotifiedRef.current = false;
+      capturedAiRef.current = new Map();
+      capturedUserRef.current = new Map();
+      setCameraOff(false);
+      setSelfViewHidden(false);
+    } else {
+      addTranscript('system', 'Reconnecting interview session...');
+    }
+    stopGazeMonitoring();
     stopBrowserSpeechRecognition();
-    captureStatsRef.current = {
-      captured_user_turns: 0,
-      captured_ai_turns: 0,
-      dropped_events: {},
-    };
+    if (!isReconnectAttempt) {
+      captureStatsRef.current = {
+        captured_user_turns: 0,
+        captured_ai_turns: 0,
+        dropped_events: {},
+      };
+    }
 
     try {
       // Step 1: Get user media
-      addTranscript('system', 'Requesting microphone permission...');
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          },
-          video: false
-        });
-      } catch (mediaError) {
-        if (mediaError.name === 'NotAllowedError' || mediaError.name === 'PermissionDeniedError') {
-          const errorMsg = 'Microphone permission denied. Please allow microphone access in your browser settings and try again.';
-          setError(errorMsg);
-          addTranscript('system', errorMsg);
-          setStatus('error');
-          setShowPermissionModal(true);
-          setPermissionError(mediaError);
-          return;
-        } else if (mediaError.name === 'NotFoundError' || mediaError.name === 'DevicesNotFoundError') {
-          const errorMsg = 'No microphone found. Please connect a microphone and try again.';
-          setError(errorMsg);
-          addTranscript('system', errorMsg);
-          setStatus('error');
-          return;
-        } else {
-          throw mediaError;
+      let stream = localStreamRef.current;
+      const hasLiveStream = Boolean(
+        stream && stream.getTracks().some((track) => track.readyState === 'live'),
+      );
+      if (!hasLiveStream) {
+        addTranscript('system', 'Requesting camera and microphone permissions...');
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            },
+            video: {
+              width: { ideal: 960 },
+              height: { ideal: 540 },
+              facingMode: 'user'
+            }
+          });
+        } catch (mediaError) {
+          if (mediaError.name === 'NotAllowedError' || mediaError.name === 'PermissionDeniedError') {
+            const errorMsg = 'Camera and microphone permissions are required. Please allow access in your browser settings and try again.';
+            setError(errorMsg);
+            addTranscript('system', errorMsg);
+            setStatus('error');
+            if (!isReconnectAttempt) {
+              setHasJoined(false);
+            }
+            setShowPermissionModal(true);
+            setPermissionError(mediaError);
+            return;
+          } else if (mediaError.name === 'NotFoundError' || mediaError.name === 'DevicesNotFoundError') {
+            const errorMsg = 'Camera or microphone not found. Please connect both devices and try again.';
+            setError(errorMsg);
+            addTranscript('system', errorMsg);
+            setStatus('error');
+            if (!isReconnectAttempt) {
+              setHasJoined(false);
+            }
+            return;
+          } else {
+            throw mediaError;
+          }
         }
+      } else if (isReconnectAttempt) {
+        addTranscript('system', 'Reusing camera and microphone stream for reconnect.');
       }
 
       localStreamRef.current = stream;
       setMicActive(true);
-      addTranscript('system', 'Microphone access granted');
+      addTranscript('system', 'Camera and microphone access granted');
+      if (localVideoRef.current) {
+        try {
+          localVideoRef.current.srcObject = stream;
+          await localVideoRef.current.play();
+        } catch (previewErr) {
+          console.warn('Local video preview failed:', previewErr);
+        }
+      }
+      addTranscript('system', 'Running quick gaze pre-check...');
+      await runGazePreflight();
+      addTranscript('system', 'Gaze calibration complete.');
       startBrowserSpeechRecognition();
 
       // Step 2: Create RTCPeerConnection
@@ -477,6 +1070,11 @@ export default function InterviewSessionRoom() {
         if (state === 'connected') {
           setStatus('ready');
         } else if (state === 'failed' || state === 'disconnected') {
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setStatus('disconnected');
+            setError('Internet disconnected. Interview paused. Reconnect when network is back.');
+            return;
+          }
           setStatus('error');
           setError(`Connection ${state}`);
         }
@@ -494,6 +1092,10 @@ export default function InterviewSessionRoom() {
 
       // Step 4: Handle remote audio (AI voice)
       const audioElement = new Audio();
+      audioElement.autoplay = true;
+      audioElement.playsInline = true;
+      audioElement.preload = 'auto';
+      audioElement.volume = 1;
       audioElementRef.current = audioElement;
 
       pc.ontrack = async (event) => {
@@ -504,7 +1106,20 @@ export default function InterviewSessionRoom() {
           addTranscript('system', 'Audio playback started');
         } catch (err) {
           console.error('Audio play error:', err);
-          setError(`Audio playback failed: ${err.message}`);
+          if (err?.name === 'NotAllowedError') {
+            addTranscript('system', 'Click anywhere to enable Sonia audio playback.');
+            const resumeAudio = async () => {
+              try {
+                await audioElement.play();
+                addTranscript('system', 'Audio playback resumed');
+              } catch (resumeErr) {
+                console.error('Audio resume error:', resumeErr);
+              }
+            };
+            window.addEventListener('pointerdown', resumeAudio, { once: true });
+          } else {
+            setError(`Audio playback failed: ${err.message}`);
+          }
         }
       };
 
@@ -525,7 +1140,7 @@ export default function InterviewSessionRoom() {
                   threshold: 0.55,
                   prefix_padding_ms: 300,
                   silence_duration_ms: 500,
-                  create_response: true,
+                  create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
                   interrupt_response: true,
                 },
                 transcription: {
@@ -541,14 +1156,6 @@ export default function InterviewSessionRoom() {
         };
 
         if (forceDualKeys) {
-          sessionPayload.session.turn_detection = {
-            type: 'server_vad',
-            threshold: 0.55,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500,
-            create_response: true,
-            interrupt_response: true,
-          };
           sessionPayload.session.input_audio_transcription = {
             model: TRANSCRIPTION_MODEL,
             language: 'en',
@@ -563,6 +1170,22 @@ export default function InterviewSessionRoom() {
         return true;
       };
 
+      const sendServerQuestion = (questionText) => {
+        const q = String(questionText || '').trim();
+        if (!q || !dcRef.current || dcRef.current.readyState !== 'open') return false;
+        const wrappedInstruction = buildInterviewerUtteranceInstruction(q);
+        dcRef.current.send(
+          JSON.stringify({
+            type: 'response.create',
+            response: {
+              instructions: wrappedInstruction,
+            },
+          }),
+        );
+        addTranscript('system', 'Sent server-selected question');
+        return true;
+      };
+
       dc.onopen = () => {
         addTranscript('system', 'DataChannel opened');
         setStatus('connected');
@@ -574,18 +1197,13 @@ export default function InterviewSessionRoom() {
           } catch (err) {
             console.error('Error sending session.update:', err);
           }
-
-          // Send initial response.create (no modalities - configured on session)
-          try {
-            dc.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                instructions: "Introduce yourself as Sonia and ask the first interview question in English. Speak clearly at a slightly slower pace with short pauses."
-              }
-            }));
-            addTranscript('system', 'Sent response.create');
-          } catch (err) {
-            console.error('Error sending response.create:', err);
+          if (pendingOpeningQuestionRef.current) {
+            try {
+              const sent = sendServerQuestion(pendingOpeningQuestionRef.current);
+              if (sent) pendingOpeningQuestionRef.current = null;
+            } catch (err) {
+              console.error('Error sending pending opening question:', err);
+            }
           }
         }
       };
@@ -629,13 +1247,40 @@ export default function InterviewSessionRoom() {
               }
             }
           } else if (msgType === 'error') {
-            // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI
+            // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI.
             const errMsg = msg.error?.message || 'Azure API error';
             if (errMsg.includes("response.modalities")) {
               console.warn('Ignored Azure warning:', errMsg);
+              incrementDroppedEvent('azure_unknown_response_modalities');
+            } else if (
+              errMsg.includes("Unknown parameter: 'session.turn_detection'")
+              && !legacySessionSchemaFallbackTriedRef.current
+            ) {
+              legacySessionSchemaFallbackTriedRef.current = true;
+              console.warn('Realtime schema fallback: retrying session.update without legacy keys');
+              incrementDroppedEvent('legacy_turn_detection_param_rejected');
+              try {
+                const resent = sendSessionUpdate(false);
+                if (resent) {
+                  addTranscript('system', 'Applied compatibility fallback for realtime session schema');
+                }
+              } catch (reapplyErr) {
+                console.warn('Failed to retry session.update without legacy keys:', reapplyErr);
+                incrementDroppedEvent('legacy_schema_fallback_failed');
+              }
             } else {
               setError(errMsg);
               addTranscript('system', `Error: ${errMsg}`);
+            }
+          } else if (msgType === 'conversation.item.input_audio_transcription.failed') {
+            incrementDroppedEvent('input_audio_transcription_failed');
+            if (!transcriptionFallbackNotifiedRef.current) {
+              transcriptionFallbackNotifiedRef.current = true;
+              addTranscript('system', 'Realtime transcription failed, browser speech fallback is active.');
+              setCaptureWarning('fallback');
+            }
+            if (ENABLE_BROWSER_SR_FALLBACK && !browserSpeechRef.current) {
+              startBrowserSpeechRecognition();
             }
           } else if (msgType === 'response.output_text.delta') {
             if (msg.delta) {
@@ -678,6 +1323,22 @@ export default function InterviewSessionRoom() {
               setQuestionCount(prev => {
                 const newCount = prev + 1;
                 console.log(`📊 Question count incremented to ${newCount} (from response.output_audio_transcript.done, response_id: ${countId})`);
+                return newCount;
+              });
+            }
+          } else if (msgType === 'response.done') {
+            setAiSpeaking(false);
+            const responseId = msg.response_id || msg.response?.id || 'done';
+            const finalText = extractResponseDoneText(msg);
+            const key = `${responseId}:${finalText}`;
+            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
+              addTranscript('ai', finalText);
+            }
+            if (responseId && !countedResponseIdsRef.current.has(responseId)) {
+              countedResponseIdsRef.current.add(responseId);
+              setQuestionCount(prev => {
+                const newCount = prev + 1;
+                console.log(`📊 Question count incremented to ${newCount} (from response.done, response_id: ${responseId})`);
                 return newCount;
               });
             }
@@ -789,11 +1450,21 @@ export default function InterviewSessionRoom() {
 
       dc.onerror = (err) => {
         console.error('DataChannel error:', err);
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setStatus('disconnected');
+          setError('Internet disconnected. Interview paused. Reconnect when network is back.');
+          return;
+        }
         setError('DataChannel error occurred');
       };
 
       dc.onclose = () => {
-        addTranscript('system', 'DataChannel closed');
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          addTranscript('system', 'DataChannel closed due to network disconnect.');
+          setError('Internet disconnected. Interview paused. Reconnect when network is back.');
+        } else {
+          addTranscript('system', 'DataChannel closed');
+        }
         setStatus('disconnected');
       };
 
@@ -805,6 +1476,9 @@ export default function InterviewSessionRoom() {
       // Step 7: Send to backend with Clerk auth
       addTranscript('system', `Sending SDP offer to backend...`);
       const token = await getToken();
+      if (!token) {
+        throw new Error('Authentication token unavailable for interview session');
+      }
       const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -817,17 +1491,28 @@ export default function InterviewSessionRoom() {
           company: targetCompany || undefined,
           questionMix: questionMix || 'balanced',
           interviewStyle: interviewStyle || 'neutral',
-          durationMinutes: durationMinutes || 15
+          durationMinutes: durationMinutes || 15,
+          selectedSkills: selectedSkills || [],
         })
       });
 
       if (!resp.ok) {
         const text = await resp.text();
         let errorMessage = `HTTP ${resp.status} from backend`;
+        let trialCodeRequired = false;
 
         try {
           const errorData = JSON.parse(text);
-          errorMessage = errorData.detail || errorMessage;
+          if (errorData?.detail && typeof errorData.detail === "object") {
+            if (errorData.detail.code === "TRIAL_CODE_REQUIRED") {
+              trialCodeRequired = true;
+              errorMessage = errorData.detail.message || "Trial code is required before starting.";
+            } else {
+              errorMessage = JSON.stringify(errorData.detail);
+            }
+          } else {
+            errorMessage = errorData.detail || errorMessage;
+          }
         } catch {
           errorMessage = text || errorMessage;
         }
@@ -836,7 +1521,14 @@ export default function InterviewSessionRoom() {
           errorMessage = `Backend route not found (404). Check if server is running and route exists.`;
         }
 
-        addTranscript('system', `Backend error: ${errorMessage}`);
+        if (trialCodeRequired) {
+          addTranscript('system', `Backend error: ${errorMessage} Redirecting to interview configuration.`);
+          setTimeout(() => {
+            window.location.href = "/interview-config";
+          }, 1200);
+        } else {
+          addTranscript('system', `Backend error: ${errorMessage}`);
+        }
         throw new Error(errorMessage);
       }
 
@@ -853,6 +1545,31 @@ export default function InterviewSessionRoom() {
       if (data.planTier) {
         setPlanTier(data.planTier);
       }
+      if (Array.isArray(data.selectedSkills)) {
+        setSelectedSkills(data.selectedSkills);
+      }
+      if (
+        data.openingQuestionId &&
+        !String(data.openingQuestionId).startsWith('followup_') &&
+        data.openingQuestionId !== 'fallback_generic' &&
+        data.openingQuestionId !== 'fallback_opening'
+      ) {
+        askedQuestionIdsRef.current = Array.from(
+          new Set([...askedQuestionIdsRef.current, data.openingQuestionId]),
+        );
+      }
+
+      let gazeBootstrap = null;
+      try {
+        gazeBootstrap = await startGazeMonitoring(token);
+      } catch (gazeErr) {
+        console.warn('Failed to bootstrap gaze monitoring:', gazeErr);
+      }
+      if (!gazeBootstrap?.connected) {
+        addTranscript('system', 'Gaze monitoring is unavailable at startup.');
+      } else if (gazeBootstrap.detectorReady === false) {
+        addTranscript('system', 'Gaze detector is limited in this environment.');
+      }
 
       addTranscript('system', 'SDP answer received from backend');
       if (typeof data.effectiveDurationMinutes === 'number' && data.effectiveDurationMinutes > 0) {
@@ -861,6 +1578,14 @@ export default function InterviewSessionRoom() {
 
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
       addTranscript('system', 'Remote description set, connection establishing...');
+      if (data.openingQuestion && String(data.openingQuestion).trim()) {
+        const opening = String(data.openingQuestion).trim();
+        if (dcRef.current && dcRef.current.readyState === 'open') {
+          sendServerQuestion(opening);
+        } else {
+          pendingOpeningQuestionRef.current = opening;
+        }
+      }
 
     } catch (err) {
       console.error('Connection error:', err);
@@ -868,21 +1593,25 @@ export default function InterviewSessionRoom() {
 
       let errorMessage = err.message || 'Connection failed';
       if (err.message && err.message.includes('Permission denied')) {
-        errorMessage = 'Microphone permission denied. Please allow microphone access in your browser settings and try again.';
+        errorMessage = 'Camera and microphone permissions are required. Please allow access in browser settings and try again.';
       } else if (err.message && err.message.includes('NotAllowedError')) {
-        errorMessage = 'Microphone access was denied. Please check your browser permissions and try again.';
+        errorMessage = 'Camera and microphone access was denied. Please check your browser permissions and try again.';
       } else if (err.message && err.message.includes('NotFoundError')) {
-        errorMessage = 'No microphone found. Please connect a microphone and try again.';
+        errorMessage = 'Camera or microphone was not found. Please connect both devices and try again.';
       }
 
       setError(errorMessage);
       addTranscript('system', `Error: ${errorMessage}`);
+      if (!isReconnectAttempt) {
+        setHasJoined(false);
+      }
 
       // Cleanup on error
-      if (localStreamRef.current) {
+      if (localStreamRef.current && !isReconnectAttempt) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      stopGazeMonitoring();
       stopBrowserSpeechRecognition();
       if (pcRef.current) {
         pcRef.current.close();
@@ -891,6 +1620,8 @@ export default function InterviewSessionRoom() {
     }
   }, [
     status,
+    hasJoined,
+    networkOnline,
     addTranscript,
     getToken,
     user,
@@ -902,8 +1633,12 @@ export default function InterviewSessionRoom() {
     questionMix,
     interviewStyle,
     durationMinutes,
+    selectedSkills,
     incrementDroppedEvent,
     rememberByTtl,
+    startGazeMonitoring,
+    runGazePreflight,
+    stopGazeMonitoring,
     startBrowserSpeechRecognition,
     stopBrowserSpeechRecognition,
   ]);
@@ -1015,6 +1750,7 @@ export default function InterviewSessionRoom() {
 
       const durationMinutes = Math.max(1, Math.round(timeElapsed / 60));
       const answeredCount = Math.max(transcriptPayload.qa_pairs.length, userMessages.length);
+      const eyeContactMetric = Number.isFinite(gazeMetrics.eyeContactPct) ? gazeMetrics.eyeContactPct : null;
 
       // Auth header
       let headers = { 'Content-Type': 'application/json' };
@@ -1047,7 +1783,7 @@ export default function InterviewSessionRoom() {
             total_duration: durationMinutes,
             speaking_time: durationMinutes * 60,
             silence_time: 0,
-            eye_contact_pct: null,
+            eye_contact_pct: eyeContactMetric,
             session_feedback: sessionFeedback,
             turn_evaluations: turnEvaluationsRef.current,
             duration_minutes_requested: durationMinutes,
@@ -1055,6 +1791,7 @@ export default function InterviewSessionRoom() {
             trial_mode: trialMode,
             plan_tier: planTier,
             asked_question_ids: askedQuestionIdsRef.current,
+            selected_skills: selectedSkills,
             capture_stats: captureStats,
           },
           session_feedback: sessionFeedback,
@@ -1066,6 +1803,7 @@ export default function InterviewSessionRoom() {
             trial_mode: trialMode,
             plan_tier: planTier,
             adaptive_asked_question_ids: askedQuestionIdsRef.current,
+            selected_skills: selectedSkills,
             capture_stats: captureStats,
           }
         })
@@ -1094,6 +1832,14 @@ export default function InterviewSessionRoom() {
           capture_status: data.capture_status,
           evaluation_source: data.evaluation_source,
           turns_evaluated: data.turns_evaluated,
+          contract_passed: data.contract_passed,
+          validation_flags: data.validation_flags,
+        });
+      }
+      if (data.contract_passed === false) {
+        console.warn('[evaluation-contract]', {
+          contract_passed: false,
+          validation_flags: data.validation_flags || [],
         });
       }
 
@@ -1103,13 +1849,13 @@ export default function InterviewSessionRoom() {
 
       console.log("📄 Report ID:", data.report_id);
 
-      return data.report_id;
+      return data;
 
     } catch (err) {
       console.error('❌ Error saving report:', err);
       throw err;
     }
-  }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload, effectiveDurationMinutes, trialMode, planTier]);
+  }, [sessionId, getToken, interviewType, timeElapsed, buildCanonicalTranscriptPayload, effectiveDurationMinutes, trialMode, planTier, selectedSkills, gazeMetrics.eyeContactPct]);
 
   // Production-grade disconnect flow with single-flight guard and drain
   const runSaveFlow = useCallback(async (sessionFeedback = null) => {
@@ -1128,15 +1874,18 @@ export default function InterviewSessionRoom() {
       await sleep(50);
     }
 
+    // Flush gaze WS so backend persists finalized events before transcript/report aggregation.
+    stopGazeMonitoring();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
     const transcriptPayload = buildCanonicalTranscriptPayload();
     isEndingRef.current = true;
     pendingTranscriptPayloadRef.current = transcriptPayload;
 
     console.log('[runSaveFlow] Calling saveAndGenerateReport...');
-    const reportId = await saveAndGenerateReport({ transcript: transcriptPayload, sessionFeedback });
-
-    return reportId;
-  }, [buildCanonicalTranscriptPayload, saveAndGenerateReport]);
+    const saveData = await saveAndGenerateReport({ transcript: transcriptPayload, sessionFeedback });
+    return saveData;
+  }, [buildCanonicalTranscriptPayload, saveAndGenerateReport, stopGazeMonitoring]);
 
   const handleDisconnect = useCallback(async (sessionFeedback = null) => {
     // Single-flight guard
@@ -1150,13 +1899,18 @@ export default function InterviewSessionRoom() {
     setEndError(null);
 
     try {
-      const reportId = await runSaveFlow(sessionFeedback);
+      const saveData = await runSaveFlow(sessionFeedback);
+      const reportId = saveData?.report_id;
 
       // Close connections only AFTER successful save
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      stopGazeMonitoring();
       stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
@@ -1177,7 +1931,17 @@ export default function InterviewSessionRoom() {
       setAiSpeaking(false);
       endInProgressRef.current = false;
 
-      navigate(`/report/${reportId}`, { state: { openFeedbackDialog: true } });
+      navigate(`/report/${reportId}`, {
+        state: {
+          openFeedbackDialog: true,
+          contractWarning: saveData?.contract_passed === false
+            ? {
+                validation_flags: saveData?.validation_flags || [],
+                message: 'Score forced to 0 due to missing or invalid evaluation evidence.',
+              }
+            : null,
+        },
+      });
 
     } catch (err) {
       console.error('[handleDisconnect] Save failed:', err);
@@ -1189,7 +1953,7 @@ export default function InterviewSessionRoom() {
       // DO NOT reset endInProgressRef - modal controls that
     } finally {
     }
-  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition]);
+  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
 
   // Retry handler
   const handleRetryEnd = useCallback(async () => {
@@ -1197,13 +1961,18 @@ export default function InterviewSessionRoom() {
     setShowEndErrorDialog(false);
 
     try {
-      const reportId = await runSaveFlow();
+      const saveData = await runSaveFlow();
+      const reportId = saveData?.report_id;
 
       // Close connections after successful retry
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      stopGazeMonitoring();
       stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
@@ -1222,7 +1991,17 @@ export default function InterviewSessionRoom() {
       setStatus('idle');
       endInProgressRef.current = false;
 
-      navigate(`/report/${reportId}`, { state: { openFeedbackDialog: true } });
+      navigate(`/report/${reportId}`, {
+        state: {
+          openFeedbackDialog: true,
+          contractWarning: saveData?.contract_passed === false
+            ? {
+                validation_flags: saveData?.validation_flags || [],
+                message: 'Score forced to 0 due to missing or invalid evaluation evidence.',
+              }
+            : null,
+        },
+      });
 
     } catch (err) {
       console.error('[handleRetryEnd] Retry failed:', err);
@@ -1231,7 +2010,7 @@ export default function InterviewSessionRoom() {
       isEndingRef.current = false;
     } finally {
     }
-  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition]);
+  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
 
   // End without saving handler
   const handleEndWithoutSaving = useCallback(async () => {
@@ -1243,6 +2022,10 @@ export default function InterviewSessionRoom() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      stopGazeMonitoring();
       stopBrowserSpeechRecognition();
       if (dcRef.current) {
         dcRef.current.close();
@@ -1266,7 +2049,35 @@ export default function InterviewSessionRoom() {
       pendingTranscriptPayloadRef.current = null;
       navigate('/dashboard');
     }
-  }, [navigate, stopBrowserSpeechRecognition]);
+  }, [navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+
+  const gazeStatus = useMemo(() => {
+    if (cameraOff) {
+      return { label: 'Camera Off', tone: 'warn' };
+    }
+    if (!gazeMetrics.connected) {
+      if (status === 'connecting' && gazeMetrics.detectorReady) {
+        return { label: 'Gaze Ready', tone: 'ok' };
+      }
+      return { label: 'Gaze Offline', tone: 'neutral' };
+    }
+    if (!gazeMetrics.detectorReady) {
+      return { label: 'Gaze Limited', tone: 'neutral' };
+    }
+    if (gazeMetrics.activeFlag === 'FACE_NOT_VISIBLE') {
+      return { label: 'Face Not Visible', tone: 'warn' };
+    }
+    if (gazeMetrics.activeFlag === 'LOOKING_DOWN') {
+      return { label: 'Looking Down', tone: 'warn' };
+    }
+    if (gazeMetrics.activeFlag === 'LOOKING_UP') {
+      return { label: 'Looking Up', tone: 'warn' };
+    }
+    if (gazeMetrics.activeFlag === 'OFF_SCREEN') {
+      return { label: 'Looking Away', tone: 'warn' };
+    }
+    return { label: 'On Screen', tone: 'ok' };
+  }, [cameraOff, gazeMetrics, status]);
 
   if (!user) {
     return (
@@ -1293,21 +2104,86 @@ export default function InterviewSessionRoom() {
 
       {(status === 'error' || status === 'disconnected' || status === 'failed') && (
         <div className="meet-conn-banner">
-          Connection issue detected. Please check your network.
+          {networkOnline
+            ? 'Connection issue detected. Click Reconnect to continue.'
+            : 'Internet disconnected. Interview is paused until your network returns.'}
+        </div>
+      )}
+
+      {captureWarning === 'fallback' && (
+        <div className="meet-capture-banner meet-capture-banner--warn">
+          ⚠️ Transcription issue detected — browser fallback is active. Check your microphone and browser permissions.
+        </div>
+      )}
+      {captureWarning === 'no_audio' && (
+        <div className="meet-capture-banner meet-capture-banner--error">
+          🎙️ No speech detected yet. Please check your microphone is unmuted and permissions are granted.
         </div>
       )}
 
       {/* Main Stage */}
       <div className="meet-stage-wrap">
         <div className="meet-stage">
+          <div className={`meet-gaze-badge ${gazeStatus.tone}`}>
+            {gazeStatus.label}
+            {gazeMetrics.connected && gazeMetrics.detectorReady && Number.isFinite(gazeMetrics.eyeContactPct) && (
+              <span className="meet-gaze-score">{Math.round(gazeMetrics.eyeContactPct || 0)}%</span>
+            )}
+          </div>
           <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
-            <div className="meet-memoji" aria-hidden="true" />
-            <Avatar className="meet-avatar">S</Avatar>
+            {!avatarLoadError && (
+              <img
+                src={soniaAvatarSrc}
+                alt="Sonia interviewer avatar"
+                className={`meet-sonia-avatar-image ${aiSpeaking ? 'speaking' : 'idle'}`}
+                onError={() => setAvatarLoadError(true)}
+                onLoad={() => setAvatarLoadError(false)}
+              />
+            )}
+            {avatarLoadError && (
+              <div className="meet-sonia-head">
+                <div className="meet-sonia-face">
+                  <div className="meet-sonia-eyes" />
+                  <div className={`meet-sonia-mouth ${aiSpeaking ? 'speaking' : 'idle'}`} />
+                </div>
+              </div>
+            )}
           </div>
           <div className="meet-nameplate">Sonia</div>
           {(status === 'connecting' || status === 'idle') && (
             <div className="meet-stage-status">Connecting…</div>
           )}
+          {hasJoined && (
+            <div className={`meet-self-view ${selfViewHidden ? 'collapsed' : ''}`}>
+              <div className="meet-self-header">
+                <div className="meet-self-meta">
+                  <span>You</span>
+                  <span className={`meet-self-chip ${(micMuted || cameraOff) ? 'warn' : 'ok'}`}>
+                    {micMuted ? 'Mic Off' : 'Mic On'} · {cameraOff ? 'Cam Off' : 'Cam On'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="meet-self-toggle"
+                  onClick={() => setSelfViewHidden((prev) => !prev)}
+                  aria-label={selfViewHidden ? 'Expand self view' : 'Collapse self view'}
+                >
+                  {selfViewHidden ? 'Show' : 'Hide'}
+                </button>
+              </div>
+              <video
+                ref={localVideoRef}
+                className={`meet-self-video ${cameraOff ? 'off' : ''} ${selfViewHidden ? 'preview-hidden' : ''}`}
+                autoPlay
+                muted
+                playsInline
+              />
+              {!selfViewHidden && cameraOff && (
+                <div className="meet-self-video-overlay">Camera Off</div>
+              )}
+            </div>
+          )}
+          <canvas ref={gazeCanvasRef} className="meet-hidden-canvas" />
         </div>
       </div>
 
@@ -1321,7 +2197,7 @@ export default function InterviewSessionRoom() {
                 setHasJoined(true);
                 handleConnect();
               }}
-              disabled={hasJoined || status === 'connecting' || status === 'connected' || status === 'ready'}
+              disabled={hasJoined || !networkOnline || status === 'connecting' || status === 'connected' || status === 'ready'}
               sx={{ minWidth: { xs: '170px', md: '200px' }, borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: { xs: '14px', md: '15px' }, fontWeight: 600, padding: { xs: '10px 22px', md: '10px 30px' }, textTransform: 'none' }}
             >
               Join Interview
@@ -1351,6 +2227,16 @@ export default function InterviewSessionRoom() {
                 {cameraOff ? <VideocamOff /> : <Videocam />}
               </button>
             </div>
+            {(status === 'error' || status === 'disconnected' || status === 'failed') && (
+              <Button
+                variant="outlined"
+                onClick={handleConnect}
+                disabled={!networkOnline || status === 'connecting' || endInProgressRef.current}
+                sx={{ borderRadius: '999px', textTransform: 'none', minWidth: '120px' }}
+              >
+                Reconnect
+              </Button>
+            )}
             <button
               type="button"
               className="meet-control-btn end"
@@ -1386,10 +2272,10 @@ export default function InterviewSessionRoom() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Microphone Permission Required</DialogTitle>
+        <DialogTitle>Camera and Microphone Access Required</DialogTitle>
         <DialogContent>
           <Typography>
-            To conduct the interview, we need access to your microphone.
+            This interview requires camera and microphone access. Please allow both permissions to continue.
             {permissionError && (
               <Box sx={{ mt: 2, p: 2, background: '#fef2f2', borderRadius: 1 }}>
                 <Typography variant="caption" sx={{ color: '#991b1b' }}>

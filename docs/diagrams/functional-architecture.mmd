@@ -1,0 +1,45 @@
+flowchart TB
+  subgraph Frontend["Frontend"]
+    CandidateUI["Candidate App\n(Login, Pre-Interview, Interview Room, Report)"]
+    AdminUI["Admin App\n(Admin Login, Dashboard)"]
+  end
+
+  subgraph Backend["FastAPI Backend"]
+    Auth["Auth + Admin Guard\n(Clerk JWT, allowlist)"]
+    Trial["Trial & Entitlement Service"]
+    RTC["Realtime Session API\n(/api/realtime/webrtc)"]
+    Ingest["Transcript Ingestion\n(/api/interview/{session_id}/transcript)"]
+    Eval["Deterministic Rubric Evaluator"]
+    Contract["Evaluation Contract Validator"]
+    Report["Report Generator + PDF"]
+    AdminAPI["Admin APIs\n(summary, candidates, trial-codes, quality)"]
+  end
+
+  subgraph Data["Data/Infra"]
+    Clerk["Clerk"]
+    Realtime["Azure OpenAI Realtime"]
+    PG["Azure PostgreSQL\nusers, profiles, sessions, reports,\ntrial_codes, user_entitlements, gaze_events"]
+    Redis["Redis (optional cache/events)"]
+  end
+
+  CandidateUI --> Auth
+  AdminUI --> Auth
+  Auth --> Clerk
+
+  CandidateUI --> Trial
+  Trial --> PG
+
+  CandidateUI --> RTC
+  RTC --> Realtime
+  RTC --> PG
+  RTC --> Redis
+
+  Realtime --> Ingest
+  Ingest --> Eval
+  Eval --> Contract
+  Contract --> Report
+  Report --> PG
+
+  AdminUI --> AdminAPI
+  AdminAPI --> PG
+  AdminAPI --> Report

@@ -1,0 +1,51 @@
+2026-02-09T01:33:10.8413954Z,Updating submodules.,1b5e7c95-d2b6-452d-8c29-b1e28131d6a0,0
+2026-02-09T01:33:12.0104073Z,Preparing deployment for commit id 'c7208551-f'.,9cf8d400-e4fe-4d0f-93ae-ed129d76411b,0
+2026-02-09T01:33:12.4746470Z,PreDeployment: context.CleanOutputPath False,21ae198a-f2f8-4da1-bcf9-70a3284d0d5e,0
+2026-02-09T01:33:12.6702739Z,PreDeployment: context.OutputPath /home/site/wwwroot,86c05df5-2f84-4d10-a736-be14f8ab516d,0
+2026-02-09T01:33:12.9881545Z,Repository path is /tmp/zipdeploy/extracted,652f72e0-3ca7-4462-adcc-e791ac6747dd,0
+2026-02-09T01:33:13.2048902Z,Running oryx build...,33af9634-7a31-47d9-a288-57c0b40169f9,0
+	2026-02-09T01:33:13.2534006Z,Command: oryx build /tmp/zipdeploy/extracted -o /home/site/wwwroot --platform python --platform-version 3.11 -p virtualenv_name=antenv --log-file /tmp/build-debug.log  -i /tmp/8de677b3050ae65 --compress-destination-dir | tee /tmp/oryx-build.log,,0
+	2026-02-09T01:33:18.4130896Z,Operation performed by Microsoft Oryx&comma; https://github.com/Microsoft/Oryx,,0
+	2026-02-09T01:33:18.4815723Z,You can report issues at https://github.com/Microsoft/Oryx/issues,,0
+	2026-02-09T01:33:18.5342457Z,,,0
+	2026-02-09T01:33:18.5824224Z,Oryx Version: 0.2.20251022.1+bef98bc7139feefaa74be16de9d835e2c85385d4&comma; Commit: bef98bc7139feefaa74be16de9d835e2c85385d4&comma; ReleaseTagName: 20251022.1,,0
+	2026-02-09T01:33:18.6234501Z,,,0
+	2026-02-09T01:33:18.6935827Z,Build Operation ID: a157c939f5ed5fc0,,0
+	2026-02-09T01:33:18.7151042Z,Repository Commit : c7208551-fb9c-475a-822f-17a99a660c7a,,0
+	2026-02-09T01:33:18.7630196Z,OS Type           : bullseye,,0
+	2026-02-09T01:33:18.8233190Z,Image Type        : githubactions,,0
+	2026-02-09T01:33:18.8748833Z,,,0
+	2026-02-09T01:33:18.9252736Z,Primary SDK Storage URL: https://oryx-cdn.microsoft.io,,0
+	2026-02-09T01:33:18.9647302Z,Backup SDK Storage URL: ,,0
+	2026-02-09T01:33:19.0150611Z,Detecting platforms...,,0
+	2026-02-09T01:33:22.1864935Z,Detected following platforms:,,0
+	2026-02-09T01:33:22.2452499Z,  python: 3.11.14,,0
+	2026-02-09T01:33:22.3069015Z,Version '3.11.14' of platform 'python' is not installed. Generating script to install it...,,0
+	2026-02-09T01:33:23.0368179Z,,,0
+	2026-02-09T01:33:23.2595455Z,Using intermediate directory '/tmp/8de677b3050ae65'.,,0
+	2026-02-09T01:33:23.3363424Z,,,0
+	2026-02-09T01:33:23.3601016Z,Copying files to the intermediate directory...,,0
+	2026-02-09T01:33:33.8560748Z,Done in 10 sec(s).,,0
+	2026-02-09T01:33:33.9459490Z,,,0
+	2026-02-09T01:33:33.9870385Z,Source directory     : /tmp/8de677b3050ae65,,0
+	2026-02-09T01:33:34.0267571Z,Destination directory: /home/site/wwwroot,,0
+	2026-02-09T01:33:34.1076721Z,,,0
+	2026-02-09T01:33:34.1855460Z,,,0
+	2026-02-09T01:33:34.2732438Z,Downloading and extracting 'python' version '3.11.14' to '/tmp/oryx/platforms/python/3.11.14'...,,0
+	2026-02-09T01:33:34.3361405Z,Detected image debian flavor: bullseye.,,0
+	2026-02-09T01:33:41.5825085Z,Downloaded in 7 sec(s).,,0
+	2026-02-09T01:33:41.7213142Z,Verifying checksum...,,0
+	2026-02-09T01:33:41.8522378Z,Extracting contents...,,0
+	2026-02-09T01:34:24.9113623Z,performing sha512 checksum for: python...,,0
+	2026-02-09T01:34:28.4066547Z,Done in 55 sec(s).,,0
+	2026-02-09T01:34:28.4872053Z,,,0
+	2026-02-09T01:34:28.5653707Z,image detector file exists&comma; platform is python..,,0
+	2026-02-09T01:34:28.5974468Z,OS detector file exists&comma; OS is bullseye..,,0
+	2026-02-09T01:34:29.6038063Z,Python Version: /tmp/oryx/platforms/python/3.11.14/bin/python3.11,,0
+	2026-02-09T01:34:29.6831009Z,Creating directory for command manifest file if it does not exist,,0
+	2026-02-09T01:34:29.7523759Z,Removing existing manifest file,,0
+	2026-02-09T01:34:29.8328061Z,Python Virtual Environment: antenv,,0
+	2026-02-09T01:34:29.8751798Z,Creating virtual environment...,,0
+	2026-02-09T01:34:30.0431292Z,Executing: /tmp/oryx/platforms/python/3.11.14/bin/python3.11 -m venv antenv --copies --system-site-packages,,0
+	2026-02-09T01:35:07.3059094Z,Activating virtual environment...,,0
+	2026-02-09T01:35:07.4296916Z,Running pip install...,,0

@@ -5,7 +5,7 @@ import json
 import asyncio
 import uuid
 from typing import Optional, Dict, Any, AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel, Field, ConfigDict
 import redis
@@ -178,7 +178,7 @@ async def websocket_interview_endpoint(
         welcome = WelcomeMessage(
             type="WELCOME",
             session_id=session_id,
-            now=datetime.utcnow().isoformat(),
+            now=datetime.now(timezone.utc).isoformat(),
             connection_id=connection_id
         )
         await websocket.send_json(welcome.model_dump())
@@ -210,18 +210,29 @@ async def websocket_interview_endpoint(
         
         chunk_size = 100
         total_chunks = (len(replay_events) + chunk_size - 1) // chunk_size
-        
-        for chunk_idx in range(total_chunks):
-            chunk_events = replay_events[chunk_idx * chunk_size : (chunk_idx + 1) * chunk_size]
+
+        if total_chunks == 0:
             replay = ReplayMessage(
                 type="REPLAY",
-                events=chunk_events,
+                events=[],
                 resumed_from_id=last_event_id,
-                chunk_index=chunk_idx,
-                total_chunks=total_chunks
+                chunk_index=0,
+                total_chunks=1,
             )
             await websocket.send_json(replay.model_dump())
-            logger.debug(f"[{connection_id}] Sent REPLAY chunk {chunk_idx + 1}/{total_chunks} ({len(chunk_events)} events)")
+            logger.debug(f"[{connection_id}] Sent REPLAY chunk 1/1 (0 events)")
+        else:
+            for chunk_idx in range(total_chunks):
+                chunk_events = replay_events[chunk_idx * chunk_size : (chunk_idx + 1) * chunk_size]
+                replay = ReplayMessage(
+                    type="REPLAY",
+                    events=chunk_events,
+                    resumed_from_id=last_event_id,
+                    chunk_index=chunk_idx,
+                    total_chunks=total_chunks
+                )
+                await websocket.send_json(replay.model_dump())
+                logger.debug(f"[{connection_id}] Sent REPLAY chunk {chunk_idx + 1}/{total_chunks} ({len(chunk_events)} events)")
         
         logger.info(f"[{connection_id}] Replay complete: {len(replay_events)} events in {total_chunks} chunks")
         
@@ -328,8 +339,8 @@ async def websocket_interview_endpoint(
         if subscription_task:
             subscription_task.cancel()
             try:
-                await subscription_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(subscription_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         
         logger.info(f"[{connection_id}] Connection closed for session {session_id}")

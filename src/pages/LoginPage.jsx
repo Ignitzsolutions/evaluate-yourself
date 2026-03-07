@@ -141,7 +141,16 @@ export default function LoginPage() {
         </div>
 
         <div className="clerk-form-wrap">
+          <p style={{ marginTop: 0, color: "#475569", fontSize: 13 }}>
+            Sign in with email or SSO (Google/enterprise, if enabled in Clerk).
+          </p>
           <SignIn
+            path="/login"
+            routing="path"
+            oauthFlow="popup"
+            forceRedirectUrl="/onboarding"
+            fallbackRedirectUrl="/onboarding"
+            signUpUrl="/register"
             appearance={{
               variables: {
                 colorPrimary: "#2563eb",

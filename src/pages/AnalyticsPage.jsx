@@ -118,6 +118,14 @@ export default function AnalyticsPage() {
     }, [skills]);
 
     const userStats = summary || { total_sessions: 0, avg_score: 0, improvement_pct: 0, practice_hours: 0 };
+  if (loading) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <LinearProgress />
+      </Container>
+    );
+  }
+
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>

@@ -57,15 +57,15 @@ class CandidateFeedback(BaseModel):
     
     strengths: List[str] = Field(
         ...,
-        min_items=3,
-        max_items=6,
+        min_length=3,
+        max_length=6,
         description="3-6 specific strengths demonstrated in the interview"
     )
     
     areas_for_improvement: List[str] = Field(
         ...,
-        min_items=3,
-        max_items=6,
+        min_length=3,
+        max_length=6,
         description="3-6 constructive areas where candidate can improve"
     )
     
@@ -168,8 +168,8 @@ class TranscriptSummary(BaseModel):
     
     interview_tips: List[str] = Field(
         ...,
-        min_items=3,
-        max_items=5,
+        min_length=3,
+        max_length=5,
         description="3-5 actionable tips for improvement"
     )
     

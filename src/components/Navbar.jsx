@@ -26,9 +26,9 @@ import {
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useClerk } from "@clerk/clerk-react";   // ✅ Clerk
+import { useClerk } from "@clerk/clerk-react";
 
-const navItems = [
+const baseNavItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
   { label: 'Analytics', path: '/analytics', icon: <AnalyticsIcon /> },
   { label: 'Interviews', path: '/interviews', icon: <InterviewsIcon /> },
@@ -65,6 +65,7 @@ export default function Navbar() {
 
   // Clerk: signOut used for logout
   const { signOut } = useClerk();
+  const navItems = baseNavItems;
 
   const handleNavigation = (path) => {
     navigate(path);

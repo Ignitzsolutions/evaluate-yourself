@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Outlet, Navigate } from "react-router-dom
 import { ThemeProvider, CssBaseline, Box } from "@mui/material";
 
 import PrivateRoute from "./components/PrivateRoute";
+import AdminRoute from "./components/AdminRoute";
 import ErrorBoundaryWrapper from "./components/ErrorBoundary";
 import OnboardingGuard from "./components/OnboardingGuard";
 import Navbar from "./components/Navbar";
@@ -15,6 +16,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Dashboard from "./pages/Dashboard";
+import AdminLoginPage from "./pages/AdminLoginPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import PreInterviewForm from "./pages/PreInterviewForm";
 import InterviewSessionRoom from "./pages/InterviewSessionRoom";
@@ -22,6 +24,15 @@ import ReportPage from "./pages/ReportPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import InterviewsPage from "./pages/InterviewsPage";
 import RealtimeTestPage from "./pages/RealtimeTestPage";
+import AdminLayout from "./pages/admin/AdminLayout";
+import AdminOverviewPage from "./pages/admin/AdminOverviewPage";
+import AdminCandidatesPage from "./pages/admin/AdminCandidatesPage";
+import AdminCandidateDetailPage from "./pages/admin/AdminCandidateDetailPage";
+import AdminInterviewsPage from "./pages/admin/AdminInterviewsPage";
+import AdminTrialsPage from "./pages/admin/AdminTrialsPage";
+import AdminExportsPage from "./pages/admin/AdminExportsPage";
+import AdminConfigPage from "./pages/admin/AdminConfigPage";
+import AdminQuestionBankPage from "./pages/admin/AdminQuestionBankPage";
 
 // Layout wrapper for authenticated pages with navbar
 function MainLayout() {
@@ -98,9 +109,11 @@ export default function App() {
           {/* Public routes without navbar */}
           <Route element={<PublicLayout />}>
             <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/login/*" element={<LoginPage />} />
+            <Route path="/register/*" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+            <Route path="/admin/login/*" element={<AdminLoginPage />} />
             <Route path="/test-realtime" element={<RealtimeTestPage />} />
             <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
           </Route>
@@ -114,6 +127,27 @@ export default function App() {
             }
           >
             <Route path="/onboarding" element={<OnboardingPage />} />
+          </Route>
+
+          <Route
+            path="/admin/dashboard"
+            element={
+              <PrivateRoute signInUrl="/admin/login">
+                <AdminRoute>
+                  <AdminLayout />
+                </AdminRoute>
+              </PrivateRoute>
+            }
+          >
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<AdminOverviewPage />} />
+            <Route path="candidates" element={<AdminCandidatesPage />} />
+            <Route path="candidates/:clerkUserId" element={<AdminCandidateDetailPage />} />
+            <Route path="interviews" element={<AdminInterviewsPage />} />
+            <Route path="question-bank" element={<AdminQuestionBankPage />} />
+            <Route path="trials" element={<AdminTrialsPage />} />
+            <Route path="exports" element={<AdminExportsPage />} />
+            <Route path="config" element={<AdminConfigPage />} />
           </Route>
 
           {/* Auth-protected routes with navbar + onboarding completed */}

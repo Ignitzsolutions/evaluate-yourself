@@ -18,7 +18,7 @@ import { History as HistoryIcon, Visibility, Delete } from '@mui/icons-material'
 const mockHistory = [
   { id: 1, date: '2025-09-18', type: 'Technical', duration: '25 min', score: 78, status: 'completed' },
   { id: 2, date: '2025-09-16', type: 'Behavioral', duration: '18 min', score: 81, status: 'completed' },
-  { id: 3, date: '2025-09-14', type: 'Mixed', duration: '22 min', score: 68, status: 'completed' },
+  { id: 3, date: '2025-09-14', type: '360 Interview', duration: '22 min', score: 68, status: 'completed' },
   { id: 4, date: '2025-09-12', type: 'Technical', duration: '30 min', score: 72, status: 'completed' },
   { id: 5, date: '2025-09-10', type: 'Behavioral', duration: '20 min', score: 65, status: 'completed' },
 ];

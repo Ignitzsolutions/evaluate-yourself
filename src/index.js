@@ -4,8 +4,12 @@ import { ClerkProvider } from "@clerk/clerk-react";
 import "./index.css";
 import App from "./App";
 
-// CRA: REACT_APP_CLERK_PUBLISHABLE_KEY in .env at project root. Restart dev server after changing .env.
-const clerkPubKey = (process.env.REACT_APP_CLERK_PUBLISHABLE_KEY || "").trim();
+// CRA build uses REACT_APP_* vars. We also accept NEXT_PUBLIC_* as a fallback to reduce config mistakes.
+const clerkPubKey = (
+  process.env.REACT_APP_CLERK_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  ""
+).trim();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 
@@ -24,8 +28,10 @@ if (!clerkPubKey || clerkPubKey.trim() === "") {
     >
       <h2 style={{ margin: "0 0 12px 0", color: "#92400e" }}>Clerk key not configured</h2>
       <p style={{ margin: 0, color: "#78350f", lineHeight: 1.5 }}>
-        Add <code style={{ background: "#fff", padding: "2px 6px", borderRadius: 4 }}>REACT_APP_CLERK_PUBLISHABLE_KEY</code> to
-        your <strong>.env</strong> in the project root, then restart the dev server (<code>npm start</code>).
+        Add <code style={{ background: "#fff", padding: "2px 6px", borderRadius: 4 }}>REACT_APP_CLERK_PUBLISHABLE_KEY</code>
+        {" "}to your <strong>.env</strong> in the project root (or use{" "}
+        <code style={{ background: "#fff", padding: "2px 6px", borderRadius: 4 }}>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code>
+        {" "}as a compatibility fallback), then restart the dev server (<code>npm start</code>).
       </p>
       <p style={{ margin: "12px 0 0 0", fontSize: 14, color: "#78350f" }}>
         Get your key at{" "}
