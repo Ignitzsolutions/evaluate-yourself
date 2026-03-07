@@ -44,3 +44,16 @@ __pycache__/
 venv/
 backend/venv/
 *.db
+# Local logs and deployment artifacts
+appservice-logs*/
+appservice-logs*.zip
+deploy_staging.*/
+deploy.zip
+.deploy_tmp/
+backend.log
+backend.restart.log
+frontend.log
+frontend.restart.log
+azure-master-doc.pdf
+.python-version
+.env.development
