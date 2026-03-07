@@ -914,3 +914,27 @@ def _generate_recommendations(
         )
     
     return recommendations[:5]  # Limit to top 5 recommendations
+
+
+def _generate_minimal_report(interview_type: str, duration_minutes: int) -> InterviewReport:
+    """Return an empty/zero report when session state is unavailable."""
+    return InterviewReport(
+        id=str(uuid.uuid4()),
+        user_id="",
+        title=f"{interview_type.capitalize()} Interview",
+        date=datetime.now(),
+        type=interview_type.capitalize(),
+        mode="Voice-Only Realtime",
+        duration=f"{duration_minutes} minutes",
+        overall_score=0,
+        scores=ScoreBreakdown(
+            communication=0,
+            clarity=0,
+            structure=0,
+            relevance=0,
+            technical_depth=0,
+        ),
+        transcript=[],
+        metrics={"capture_status": "MISSING_SESSION_STATE"},
+        recommendations=["Session data was not available. Please retry the interview."],
+    )
