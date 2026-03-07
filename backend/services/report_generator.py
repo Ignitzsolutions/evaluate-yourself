@@ -292,7 +292,6 @@ def _build_deterministic_feedback(scores: Dict[str, int], evaluations: List[Dict
     overall = int(scores.get("overall_score", 50) or 50)
     communication = int(scores.get("communication", overall) or overall)
     clarity = int(scores.get("clarity", overall) or overall)
-    structure_score = int(scores.get("structure", overall) or overall)
     relevance = int(scores.get("relevance", overall) or overall)
 
     evals = evaluations or []

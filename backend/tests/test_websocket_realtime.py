@@ -1,10 +1,8 @@
 """Comprehensive WebSocket realtime tests for PHASE 3."""
 
 import pytest
-import pytest_asyncio
 import json
 import asyncio
-import os
 from queue import Empty
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -17,7 +15,6 @@ from backend.services.auth.token_service import TokenService
 from backend.services.session.session_store import SessionStore
 from backend.services.session.session_manager import SessionManager
 from backend.services.session.session_events import SessionEventLog
-from backend.services.session.session_models import SessionData, SessionMeta, SessionCandidate, SessionState, SessionRefs
 from backend.services.interview.transcript_service import TranscriptService
 from backend.services.interview.scoring_service import ScoringService
 from backend.services.interview.orchestrator import InterviewOrchestrator
@@ -425,7 +422,7 @@ class TestWebSocketPipeline:
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = _recv_json(websocket)
+            _recv_json(websocket)
             
             # Send START_PIPELINE
             websocket.send_json({
@@ -454,9 +451,9 @@ class TestWebSocketPipeline:
         
         # First request - should run pipeline
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
-            welcome = _recv_json(websocket)
+            _recv_json(websocket)
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
-            replay = _recv_json(websocket)
+            _recv_json(websocket)
             
             websocket.send_json({
                 "type": "START_PIPELINE",
@@ -470,13 +467,13 @@ class TestWebSocketPipeline:
         
         # Check if idempotency cache was set
         cache_key = f"idempotency:{test_session.meta.session_id}:scoring:{idempotency_key}"
-        cached = redis_client.get(cache_key)
+        redis_client.get(cache_key)  # cache check (side-effect)
         
         # Second request with same key - should return cached
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
-            welcome = _recv_json(websocket)
+            _recv_json(websocket)
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
-            replay = _recv_json(websocket)
+            _recv_json(websocket)
             
             websocket.send_json({
                 "type": "START_PIPELINE",
@@ -498,7 +495,7 @@ class TestWebSocketPipeline:
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = _recv_json(websocket)
+            _recv_json(websocket)
             
             # Send invalid message
             websocket.send_json({"type": "INVALID_TYPE", "data": "test"})
@@ -531,7 +528,7 @@ class TestWebSocketBackpressure:
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = _recv_json(websocket)
+            _recv_json(websocket)
             
             # Emit 100 rapid events
             for i in range(100):

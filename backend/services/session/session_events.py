@@ -7,7 +7,6 @@ import uuid
 from typing import List, Optional, Dict, Any, AsyncIterator
 from datetime import datetime, timezone
 import redis
-from redis.exceptions import ResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class SessionEventLog:
             
             # New: append to Stream (XADD with auto ID)
             stream_key = f"{self.stream_key_prefix}{session_id}"
-            stream_id = self.redis.xadd(stream_key, {"event": event_json})
+            stream_id = self.redis.xadd(stream_key, {"event": event_json})  # noqa: F841
             self.redis.expire(stream_key, 7776000)  # 90 days
             
             logger.debug(f"Appended event {event_id} to session {session_id}")

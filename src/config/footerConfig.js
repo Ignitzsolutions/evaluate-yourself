@@ -34,4 +34,4 @@ export const footerLinks = [
     label: "Status",
     href: getEnvVar("STATUS_URL"),
   },
-].filter((link) => Boolean(link.href));
+].filter((link) => link.href);

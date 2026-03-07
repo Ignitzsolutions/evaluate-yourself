@@ -16,8 +16,8 @@ def test_imports():
     """Test that all required modules can be imported."""
     print("🔍 Testing imports...")
     try:
-        from db.database import test_db_connection, DATABASE_URL
-        from db.redis_client import test_redis_connection, get_redis_client
+        from db.database import test_db_connection, DATABASE_URL  # noqa: F401
+        from db.redis_client import test_redis_connection, get_redis_client  # noqa: F401
         print("✅ All imports successful")
         return True
     except ImportError as e:
@@ -52,7 +52,7 @@ def test_redis_connection():
     """Test Redis connectivity."""
     print("\n🔍 Testing Redis connection...")
     try:
-        from db.redis_client import test_redis_connection, get_redis_client
+        from db.redis_client import test_redis_connection, get_redis_client  # noqa: F401
         
         redis_url = os.getenv("REDIS_URL")
         if redis_url:
@@ -139,7 +139,6 @@ def test_environment_variables():
         "Azure OpenAI": "AZURE_OPENAI_API_KEY",
     }
     
-    all_ok = True
     for service, var_names in critical_vars.items():
         if isinstance(var_names, str):
             var_names = [var_names]

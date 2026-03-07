@@ -17,7 +17,7 @@ except ImportError:
     print("⚠️ LangChain not available - falling back to direct OpenAI API calls")
 
 try:
-    from ..schemas.feedback_output import CandidateFeedback, CategoryScore
+    from ..schemas.feedback_output import CandidateFeedback
     SCHEMAS_AVAILABLE = True
 except ImportError:
     SCHEMAS_AVAILABLE = False

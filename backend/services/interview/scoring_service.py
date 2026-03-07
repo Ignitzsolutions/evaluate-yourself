@@ -1,7 +1,6 @@
 """Interview scoring service with idempotency."""
 
 import logging
-import json
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)

@@ -23,7 +23,7 @@ def main():
         return
     print(f"Found {len(rows)} user(s) in DB:")
     for row in rows:
-        uid, cid, em, name, created = row[0], row[1] or "", row[2] or "", row[3] or "", row[4]
+        uid, cid, em, _name, _created = row[0], row[1] or "", row[2] or "", row[3] or "", row[4]  # noqa: F841
         print(f"  id={str(uid)[:8]}... clerk_user_id={str(cid)[:24]}... email={em}")
 
 if __name__ == "__main__":

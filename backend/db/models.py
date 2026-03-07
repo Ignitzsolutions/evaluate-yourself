@@ -1,7 +1,6 @@
 # backend/db/models.py
 import uuid
 from sqlalchemy import Column, String, DateTime, Integer, Boolean, Text
-from sqlalchemy.dialects.sqlite import BLOB
 from sqlalchemy.sql import func
 from .database import Base
 
