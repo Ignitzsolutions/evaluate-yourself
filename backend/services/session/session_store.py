@@ -3,7 +3,6 @@
 import json
 import logging
 from typing import Optional, Any, Dict, Callable
-from datetime import datetime, timedelta
 import redis
 from redis.exceptions import WatchError
 

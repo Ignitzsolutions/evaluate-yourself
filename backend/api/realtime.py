@@ -1,14 +1,12 @@
 """WebSocket realtime endpoint for interview event streaming."""
 
 import logging
-import json
 import asyncio
 import uuid
-from typing import Optional, Dict, Any, AsyncIterator
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel, Field, ConfigDict
-import redis
 
 from services.auth.token_service import TokenService
 from services.session.session_manager import SessionManager
@@ -149,7 +147,6 @@ async def websocket_interview_endpoint(
         
         token_session_id = claims.get("session_id")
         tenant_id = claims.get("tenant_id")
-        candidate_id = claims.get("candidate_id")
         
         # Cross-check session_id
         if token_session_id != session_id:

@@ -1,6 +1,6 @@
 """Interview state machine for managing interview sessions."""
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from datetime import datetime
 from enum import Enum
 
@@ -142,7 +142,6 @@ class InterviewState:
         clarity = evaluation.get("clarity_score", 3)
         depth = evaluation.get("depth_score", 3)
         relevance = evaluation.get("relevance_score", 3)
-        confidence = evaluation.get("confidence_signal", "med")
         
         # If answer is off-topic
         if relevance < 2:

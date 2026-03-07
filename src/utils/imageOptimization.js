@@ -133,7 +133,7 @@ export const LazyComponent = ({ component: Component, fallback, ...props }) => {
  * @returns {React.LazyExoticComponent} Lazy loaded component
  */
 export const createLazyComponent = (importFunc) => {
-  return React.lazy(() => importFunc());
+  return React.lazy(importFunc);
 };
 
 /**

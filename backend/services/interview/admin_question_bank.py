@@ -14,13 +14,11 @@ except Exception:  # pragma: no cover
 
 try:
     from data.interview_questions import (
-        ALL_QUESTIONS,
         QUESTIONS_BY_ID,
         get_questions_by_type_and_difficulty,
     )
 except Exception:  # pragma: no cover
     from backend.data.interview_questions import (  # type: ignore
-        ALL_QUESTIONS,
         QUESTIONS_BY_ID,
         get_questions_by_type_and_difficulty,
     )

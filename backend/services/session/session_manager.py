@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from .session_models import (
     SessionData, SessionMeta, SessionCandidate, SessionState, SessionRefs,

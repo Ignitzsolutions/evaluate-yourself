@@ -1,9 +1,8 @@
 """Transcript storage and retrieval service."""
 
 import logging
-import json
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
