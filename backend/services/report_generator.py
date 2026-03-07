@@ -1,9 +1,12 @@
 """Report generation service for interview sessions."""
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import uuid
-from models.interview import InterviewReport, TranscriptMessage, ScoreBreakdown
+from models.interview import (
+    InterviewReport, TranscriptMessage, ScoreBreakdown,
+    TurnAnalysis, StarBreakdown, ImprovementItem, HiringRecommendation,
+)
 
 
 def generate_report(
@@ -230,10 +233,64 @@ def generate_report(
         if not isinstance(ai_feedback, dict) or not ai_feedback:
             ai_feedback = _build_deterministic_feedback(scores_for_ai, evaluations=evaluations, interview_type=interview_type)
 
+    # ─── v2: Per-question turn analyses ───────────────────────────────────────
+    turn_analyses: List[TurnAnalysis] = []
+    competency_scores: Dict[str, int] = {}
+    improvement_roadmap: List[ImprovementItem] = []
+    hiring_recommendation = None
+    score_context = None
+
+    if not capture_incomplete and transcript_history:
+        turn_analyses = _build_turn_analyses(
+            transcript_history=transcript_history,
+            evaluations=evaluations,
+            interview_type=interview_type,
+        )
+
+        # Competency scores
+        try:
+            from services.interview.competency_map import aggregate_competency_scores, COMPETENCY_KEYS
+            competency_scores = aggregate_competency_scores(
+                [{"competency": t.competency, "score_0_100": t.score_0_100} for t in turn_analyses]
+            )
+            # Build score_context string
+            if competency_scores:
+                best_comp = max(competency_scores, key=lambda k: competency_scores[k])
+                worst_comp = min(competency_scores, key=lambda k: competency_scores[k])
+                score_context = (
+                    f"Your {best_comp.replace('_', ' ')} ({competency_scores[best_comp]}/100) "
+                    f"was your strongest dimension; "
+                    f"{worst_comp.replace('_', ' ')} ({competency_scores[worst_comp]}/100) "
+                    f"has the most room to grow."
+                )
+        except Exception as e:
+            print(f"⚠️ Competency aggregation failed: {e}")
+
+        # Hiring recommendation
+        try:
+            from services.interview.hiring_signal import compute_hiring_signal
+            hiring_raw = compute_hiring_signal(
+                overall_score=overall_score,
+                turn_analyses=[t.model_dump() for t in turn_analyses],
+                competency_scores=competency_scores,
+                interview_type=interview_type,
+            )
+            hiring_recommendation = HiringRecommendation(**hiring_raw)
+        except Exception as e:
+            print(f"⚠️ Hiring signal computation failed: {e}")
+
+        # Improvement roadmap
+        improvement_roadmap = _build_improvement_roadmap(
+            turn_analyses=turn_analyses,
+            competency_scores=competency_scores,
+            ai_feedback=ai_feedback,
+            interview_type=interview_type,
+        )
+
     # Create report
     report = InterviewReport(
-        id=str(uuid.uuid4()),  # Generate new ID for report (different from session_id)
-        user_id="",  # Will be set by caller
+        id=str(uuid.uuid4()),
+        user_id="",
         title=f"{interview_type.capitalize()} Interview - {datetime.now().strftime('%B %d, %Y')}",
         date=datetime.now(),
         type=interview_type.capitalize(),
@@ -246,13 +303,265 @@ def generate_report(
         questions=question_index,
         is_sample=False,
         metrics=metrics,
-        ai_feedback=ai_feedback
+        ai_feedback=ai_feedback,
+        competency_scores=competency_scores or None,
+        score_context=score_context,
+        turn_analyses=turn_analyses or None,
+        improvement_roadmap=improvement_roadmap or None,
+        hiring_recommendation=hiring_recommendation,
     )
 
     return report
 
 
-def _generate_minimal_report(interview_type: str, duration_minutes: int) -> InterviewReport:
+def _build_turn_analyses(
+    transcript_history: List[Dict[str, Any]],
+    evaluations: List[Dict[str, Any]],
+    interview_type: str,
+) -> List[TurnAnalysis]:
+    """Build per-question TurnAnalysis objects with competency, STAR, evidence."""
+    try:
+        from services.interview.competency_map import get_competency_for_question
+        from services.interview.star_extractor import extract_star, star_score_0_100
+        from services.interview.deterministic_rubric_evaluator import (
+            evaluate_turn as det_evaluate_turn,
+            extract_depth_signals,
+        )
+    except Exception:
+        try:
+            from backend.services.interview.competency_map import get_competency_for_question
+            from backend.services.interview.star_extractor import extract_star, star_score_0_100
+            from backend.services.interview.deterministic_rubric_evaluator import (
+                evaluate_turn as det_evaluate_turn,
+                extract_depth_signals,
+            )
+        except Exception:
+            return []
+
+    analyses: List[TurnAnalysis] = []
+    evals_by_turn: Dict[int, Dict] = {
+        e.get("turn_id", i + 1): e for i, e in enumerate(evaluations or [])
+    }
+
+    for idx, qa in enumerate(transcript_history):
+        if not isinstance(qa, dict):
+            continue
+        question = (qa.get("question") or "").strip()
+        answer = (qa.get("answer") or "").strip()
+        if not answer:
+            continue
+
+        turn_id = idx + 1
+        eval_data = evals_by_turn.get(turn_id, {})
+
+        # Competency
+        topic_tags = qa.get("topic_tags") or []
+        competency = get_competency_for_question(
+            question_id=qa.get("question_id"),
+            topic_tags=topic_tags,
+            domain=qa.get("domain"),
+            interview_type=interview_type,
+        )
+
+        # Rubric scores (use existing eval_data or re-evaluate)
+        clarity = float(eval_data.get("clarity") or det_evaluate_turn(
+            question_text=question,
+            candidate_answer_text=answer,
+            interview_type=interview_type,
+        ).get("clarity", 3))
+        depth = float(eval_data.get("depth") or 3)
+        relevance = float(eval_data.get("relevance") or 3)
+        communication = float(eval_data.get("communication") or 3)
+
+        # Convert 1-5 rubric to 0-100
+        raw = (clarity * 0.25 + communication * 0.20 + depth * 0.30 + relevance * 0.25) * 20
+        score_0_100 = max(0, min(100, int(round(raw))))
+
+        # STAR extraction
+        star_raw = extract_star(answer)
+        star_breakdown = StarBreakdown(
+            situation=star_raw.get("situation", {}).get("detected", False),
+            task=star_raw.get("task", {}).get("detected", False),
+            action=star_raw.get("action", {}).get("detected", False),
+            result=star_raw.get("result", {}).get("detected", False),
+            situation_snippet=star_raw.get("situation", {}).get("snippet"),
+            task_snippet=star_raw.get("task", {}).get("snippet"),
+            action_snippet=star_raw.get("action", {}).get("snippet"),
+            result_snippet=star_raw.get("result", {}).get("snippet"),
+            source=star_raw.get("source", "keyword_fallback"),
+        )
+
+        # Depth signals
+        depth_sigs = eval_data.get("depth_signals") or extract_depth_signals(answer, interview_type)
+
+        # Evidence quote: pick best sentence (longest sentence with ≥1 metric or ownership signal)
+        evidence_quote = _extract_evidence_quote(answer, depth_sigs)
+
+        # One-line feedback
+        one_line = _one_line_feedback(
+            score_0_100=score_0_100,
+            competency=competency,
+            star_breakdown=star_breakdown,
+            depth_signals=depth_sigs,
+            interview_type=interview_type,
+        )
+
+        analyses.append(TurnAnalysis(
+            turn_id=turn_id,
+            question_text=question[:300],
+            competency=competency,
+            score_0_100=score_0_100,
+            star_breakdown=star_breakdown,
+            evidence_quote=evidence_quote,
+            one_line_feedback=one_line,
+            depth_signals=depth_sigs,
+        ))
+
+    return analyses
+
+
+def _extract_evidence_quote(answer: str, depth_signals: Dict) -> Optional[str]:
+    """Pick the most evidential sentence from an answer."""
+    import re
+    sentences = [s.strip() for s in re.split(r"[.!?]+", answer) if len(s.strip()) > 20]
+    if not sentences:
+        return answer[:200] if answer else None
+
+    metrics = depth_signals.get("metrics_mentioned", []) if depth_signals else []
+    ownership_signals = depth_signals.get("ownership_signals", 0) if depth_signals else 0
+    impact_signals = depth_signals.get("impact_signals", 0) if depth_signals else 0
+
+    def _sentence_score(s: str) -> int:
+        sl = s.lower()
+        score = 0
+        for m in metrics:
+            if m in sl:
+                score += 3
+        ownership_verbs = ["i led", "i built", "i designed", "i implemented", "i developed", "i created"]
+        impact_verbs = ["reduced", "improved", "increased", "delivered", "shipped", "achieved"]
+        score += sum(2 for v in ownership_verbs if v in sl)
+        score += sum(2 for v in impact_verbs if v in sl)
+        score += min(3, len(s.split()) // 10)
+        return score
+
+    best = max(sentences, key=_sentence_score)
+    return best[:250] if len(best) > 250 else best
+
+
+def _one_line_feedback(
+    score_0_100: int,
+    competency: str,
+    star_breakdown: StarBreakdown,
+    depth_signals: Dict,
+    interview_type: str,
+) -> str:
+    """Generate a one-sentence, evidence-based feedback for a single turn."""
+    comp_label = competency.replace("_", " ")
+    metrics = (depth_signals or {}).get("metrics_mentioned", [])
+    ownership = (depth_signals or {}).get("ownership_signals", 0)
+
+    if score_0_100 >= 80:
+        if metrics:
+            return f"Strong {comp_label} response — used quantified evidence ({metrics[0]}) to demonstrate impact."
+        if ownership >= 2:
+            return f"Clear ownership language and specific actions make this a strong {comp_label} answer."
+        return f"Well-structured {comp_label} answer with good specificity and delivery."
+
+    if score_0_100 >= 60:
+        missing = [c for c in ("situation", "task", "action", "result") if not getattr(star_breakdown, c, False)]
+        if missing:
+            return f"Good start on {comp_label} — add the missing '{missing[0]}' component to complete the STAR structure."
+        if not metrics:
+            return f"Solid {comp_label} answer; quantifying the outcome with a number or % would strengthen it further."
+        return f"Competent {comp_label} answer — adding more specific context would boost the score."
+
+    missing_all = [c for c in ("situation", "task", "action", "result") if not getattr(star_breakdown, c, False)]
+    if len(missing_all) >= 3:
+        return f"This {comp_label} answer needs more structure — aim to cover Situation, Action, and Result clearly."
+    if not metrics and not ownership:
+        return f"Add specifics: mention what you personally did and what the measurable result was."
+    return f"Short or off-topic response — expand with concrete details about your role and the outcome."
+
+
+def _build_improvement_roadmap(
+    turn_analyses: List[TurnAnalysis],
+    competency_scores: Dict[str, int],
+    ai_feedback: Optional[Dict],
+    interview_type: str,
+) -> List[ImprovementItem]:
+    """Build a structured improvement roadmap from turn analyses and scores."""
+    items: List[ImprovementItem] = []
+    seen_competencies: set = set()
+
+    if not turn_analyses:
+        return items
+
+    # 1. Find weakest competency with actual turns
+    sorted_comps = sorted(
+        [(comp, score) for comp, score in (competency_scores or {}).items() if score > 0],
+        key=lambda x: x[1]
+    )
+    for comp, score in sorted_comps[:3]:
+        if comp in seen_competencies:
+            continue
+        seen_competencies.add(comp)
+        comp_turns = [t for t in turn_analyses if t.competency == comp]
+        if not comp_turns:
+            continue
+        worst_turn = min(comp_turns, key=lambda t: t.score_0_100)
+
+        # Generate specific finding
+        finding = f"Scored {score}/100 on {comp.replace('_', ' ')} — "
+        depth_sigs = worst_turn.depth_signals or {}
+        if not worst_turn.star_breakdown or not worst_turn.star_breakdown.result:
+            finding += "answers lacked quantified results."
+        elif not depth_sigs.get("ownership_signals", 0):
+            finding += "personal contributions were not clearly stated."
+        else:
+            finding += "responses lacked specificity and concrete examples."
+
+        # Suggested action
+        action_map = {
+            "communication": "Practice speaking in complete declarative sentences. Record mock answers and listen for filler/hedge words.",
+            "problem_solving": "Walk through your reasoning step-by-step: state the problem, your approach, trade-offs considered, and your decision.",
+            "technical_depth": "Go beyond naming technologies — explain why you chose them, how you configured them, and what the outcome was.",
+            "ownership": "Use 'I' statements: 'I led', 'I decided', 'I delivered'. Show your direct contribution, not just the team's work.",
+            "collaboration": "Describe how you involved others, handled disagreement, or influenced people who didn't report to you.",
+            "adaptability": "Frame change as an opportunity: what you learned, how you adjusted your approach, and how it made you better.",
+        }
+        suggested_action = action_map.get(comp, "Add concrete, specific examples with measurable outcomes.")
+
+        # Example reframe from worst turn
+        example_reframe = None
+        if worst_turn.evidence_quote:
+            eq = worst_turn.evidence_quote[:120]
+            if comp == "ownership" and "we" in eq.lower():
+                example_reframe = f'Instead of "We did X", try "I designed X, and coordinated with the team to implement it"'
+            elif not worst_turn.star_breakdown or not worst_turn.star_breakdown.result:
+                example_reframe = f'Close your answer with a result: "As a result, we reduced [metric] by [X]%"'
+
+        items.append(ImprovementItem(
+            competency=comp,
+            finding=finding,
+            suggested_action=suggested_action,
+            example_reframe=example_reframe,
+        ))
+
+    # 2. STAR structure gap (cross-cutting)
+    if interview_type in ("behavioral", "mixed"):
+        zero_result_turns = [
+            t for t in turn_analyses
+            if t.star_breakdown and not t.star_breakdown.result
+        ]
+        if len(zero_result_turns) >= max(1, len(turn_analyses) // 2) and "problem_solving" not in seen_competencies:
+            items.append(ImprovementItem(
+                competency="problem_solving",
+                finding=f"Result component missing in {len(zero_result_turns)}/{len(turn_analyses)} answers — outcomes are the most memorable part of any answer.",
+                suggested_action="Always close your answer with a concrete result. Use: 'As a result, [metric] improved by [X]' or 'The team delivered [outcome] on time'.",
+                example_reframe='Try: "As a result, we reduced onboarding time from 2 weeks to 3 days and improved retention by 20%"',
+            ))
+
+    return items[:5]
     """Generate a minimal report when session_state is not available."""
     metrics = {
         'total_duration': duration_minutes,
