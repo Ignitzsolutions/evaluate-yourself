@@ -36,8 +36,8 @@ const resolveSoniaAvatarSrc = () => {
 };
 const INTERVIEW_SERVER_CONTROL_ENABLED = String(process.env.REACT_APP_INTERVIEW_SERVER_CONTROL_ENABLED || 'true').toLowerCase() === 'true';
 const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
-const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'false').toLowerCase() === 'true';
-const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe';
+const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'true').toLowerCase() === 'true';
+const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'whisper').trim() || 'whisper';
 const DEDUPE_TTL_MS = 8000;
 
 const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = null) => {

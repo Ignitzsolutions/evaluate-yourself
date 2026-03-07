@@ -350,6 +350,7 @@ AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")  # e.g., https://{resource}.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
+AZURE_OPENAI_WHISPER_DEPLOYMENT = os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "whisper")
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
@@ -406,7 +407,7 @@ OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-prev
 import json as json_module
 
 try:
-    with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+    with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
         f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:72","message":"Environment variables loaded","data":{"AZURE_OPENAI_API_VERSION":AZURE_OPENAI_API_VERSION,"AZURE_OPENAI_DEPLOYMENT":AZURE_OPENAI_DEPLOYMENT,"AZURE_OPENAI_ENDPOINT":AZURE_OPENAI_ENDPOINT[:50] if AZURE_OPENAI_ENDPOINT else None,"has_api_key":bool(AZURE_OPENAI_API_KEY)},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
 except Exception:  # noqa: BLE001
     pass  # intentional: non-critical path
@@ -1292,7 +1293,7 @@ async def webrtc_proxy(
     # #region agent log
     try:
         log_entry = json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:414","message":"WebRTC proxy called","data":{"deployment":AZURE_OPENAI_DEPLOYMENT,"api_version":AZURE_OPENAI_API_VERSION,"endpoint":AZURE_OPENAI_ENDPOINT[:100] if AZURE_OPENAI_ENDPOINT else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n"
-        with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+        with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
             f.write(log_entry)
             f.flush()
         print(f"DEBUG: WebRTC proxy called - logged to file")
@@ -1323,7 +1324,7 @@ async def webrtc_proxy(
             resource_name, domain, region = extract_azure_endpoint_info(AZURE_OPENAI_ENDPOINT)
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:396","message":"Endpoint parsed","data":{"resource_name":resource_name,"domain":domain,"region":region,"original_endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -1331,7 +1332,7 @@ async def webrtc_proxy(
         except ValueError as e:
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:398","message":"Endpoint parsing failed","data":{"error":str(e),"endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
             except Exception:
                 pass
@@ -1435,7 +1436,7 @@ async def webrtc_proxy(
                             "interrupt_response": True
                         },
                         "transcription": {
-                            "model": "gpt-4o-mini-transcribe",
+                            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
                             "language": "en"
                         },
                     },
@@ -1444,6 +1445,12 @@ async def webrtc_proxy(
                     }
                 },
             }
+        }
+        
+        # Add legacy flat key for compatibility with older Azure Realtime API versions
+        client_secrets_request["session"]["input_audio_transcription"] = {
+            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
+            "language": "en"
         }
         
         # Add instructions if provided (can be disabled to reduce token creation latency)
@@ -1463,7 +1470,7 @@ async def webrtc_proxy(
         
         # #region agent log
         try:
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:427","message":"Request body constructed","data":{"has_instructions":bool(system_prompt),"model":AZURE_OPENAI_DEPLOYMENT,"session_type":"realtime","request_keys":list(client_secrets_request.keys())},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
         except Exception:  # noqa: BLE001
             pass  # intentional: non-critical path
@@ -1487,7 +1494,7 @@ async def webrtc_proxy(
         # #region agent log
         try:
             log_entry = json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:492","message":"Token request preparation","data":{"base_endpoint":base_endpoint,"resource_name":resource_name,"api_version":api_version,"token_url":token_url,"deployment":AZURE_OPENAI_DEPLOYMENT,"original_endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n"
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(log_entry)
                 f.flush()
             print(f"DEBUG: Token request prep - base_endpoint={base_endpoint}, api_version={api_version}")
@@ -1499,7 +1506,7 @@ async def webrtc_proxy(
         
         # #region agent log
         try:
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 request_body_safe = {k: (v[:100] + "..." if isinstance(v, str) and len(v) > 100 else v) for k, v in client_secrets_request.items()}
                 f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:502","message":"Token request sent","data":{"url":token_url,"headers":{"api-key":"***","content-type":"application/json"},"request_body":request_body_safe,"deployment":AZURE_OPENAI_DEPLOYMENT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
                 f.flush()
@@ -1667,7 +1674,7 @@ async def webrtc_proxy(
             
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     full_response_body = token_resp.text if token_resp.text else ""
                     f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:515","message":"Token response received","data":{"status_code":token_resp.status_code,"response_body":full_response_body,"response_headers":dict(token_resp.headers)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
                     f.flush()
@@ -1681,7 +1688,7 @@ async def webrtc_proxy(
         except requests.Timeout:
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:541","message":"Request timeout","data":{"token_url":token_url,"timeout":20.0},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -1691,7 +1698,7 @@ async def webrtc_proxy(
             error_body = e.response.text[:500] if e.response.text else ""
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:545","message":"HTTPError exception","data":{"status_code":e.response.status_code if e.response else None,"error_body":error_body,"token_url":token_url},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -1701,7 +1708,7 @@ async def webrtc_proxy(
             # #region agent log
             try:
 
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:550","message":"Unexpected exception in token creation","data":{"exception_type":type(ex).__name__,"exception_message":str(ex),"token_url":token_url,"base_endpoint":base_endpoint,"api_version":api_version,"traceback":traceback.format_exc()},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -1789,7 +1796,7 @@ async def webrtc_proxy(
     except HTTPException as http_ex:
         # #region agent log
         try:
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:636","message":"HTTPException raised","data":{"status_code":http_ex.status_code,"detail":str(http_ex.detail)[:500]},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n")
         except Exception:  # noqa: BLE001
             pass  # intentional: non-critical path
@@ -1799,7 +1806,7 @@ async def webrtc_proxy(
         # #region agent log
         try:
 
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:642","message":"Unexpected exception in WebRTC proxy","data":{"exception_type":type(e).__name__,"exception_message":str(e),"traceback":traceback.format_exc()},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n")
         except Exception:  # noqa: BLE001
             pass  # intentional: non-critical path
@@ -2014,14 +2021,14 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         import json as json_module
 
         try:
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:494","message":"Before websockets.connect","data":{"ws_url":ws_url,"headers_keys":list(headers.keys()) if headers else None,"headers_type":str(type(headers))},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
         except Exception:  # noqa: BLE001
             pass  # intentional: non-critical path
         # #endregion
         # #region agent log
         try:
-            with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                 f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:502","message":"Calling websockets.connect","data":{"ws_url":ws_url[:150],"headers_keys":list(headers.keys()) if headers else None,"subprotocols":["realtime"],"using_additional_headers":True},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
         except Exception:  # noqa: BLE001
             pass  # intentional: non-critical path
@@ -2112,7 +2119,7 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
             async with azure_ws:
                 # #region agent log
                 try:
-                    with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                    with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                         f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:503","message":"WebSocket connection successful","data":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
                 except Exception:  # noqa: BLE001
                     pass  # intentional: non-critical path
@@ -2170,6 +2177,10 @@ Interview behavior:
                     "type": "session.update",
                     "session": {
                         "type": "realtime",  # ✅ REQUIRED: Azure requires session.type
+                        "input_audio_transcription": {
+                            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
+                            "language": "en"
+                        },
                         "audio": {
                             "input": {
                                 "format": {"type": "audio/pcm", "rate": 24000},
@@ -2181,7 +2192,7 @@ Interview behavior:
                                     "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED
                                 },
                                 "transcription": {
-                                    "model": "gpt-4o-mini-transcribe",
+                                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
                                     "language": "en"
                                 },
                             },
@@ -2415,7 +2426,7 @@ Interview behavior:
             import json as json_module
 
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:695","message":"InvalidURI exception","data":{"error":str(e),"error_type":"InvalidURI"},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -2424,7 +2435,7 @@ Interview behavior:
         except websockets.exceptions.InvalidHandshake as e:
             # #region agent log
             try:
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:697","message":"InvalidHandshake exception","data":{"error":str(e),"error_type":"InvalidHandshake"},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
             except Exception:  # noqa: BLE001
                 pass  # intentional: non-critical path
@@ -2438,7 +2449,7 @@ Interview behavior:
                 error_trace = traceback.format_exc()
                 error_str = str(e)
                 # Log full error details
-                with open('/Users/srujanreddy/Projects/.cursor/debug.log', 'a') as f:
+                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
                     f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:699","message":"General exception in WebSocket connection","data":{"error":error_str,"error_type":type(e).__name__,"traceback":error_trace,"ws_url":ws_url[:100] if 'ws_url' in locals() else None,"headers":str(headers) if 'headers' in locals() else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
                 # Also print to console for immediate visibility
                 print(f"ERROR in interview_realtime_websocket: {error_str}")
