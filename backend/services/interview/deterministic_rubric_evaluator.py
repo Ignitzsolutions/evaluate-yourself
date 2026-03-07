@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 _STOPWORDS = {
@@ -330,6 +330,77 @@ def _communication_score(answer_text: str) -> tuple[int, str]:
     return _clip_score(score), reason
 
 
+def extract_depth_signals(answer_text: str, interview_type: str = "mixed") -> Dict[str, Any]:
+    """Extract structured depth signals from a candidate answer.
+
+    Returns a dict with:
+      - word_count: int
+      - metrics_mentioned: list of metric strings found (numbers, %, etc.)
+      - tech_named: list of technology/domain terms found
+      - ownership_signals: count of I-led/I-built/I-designed type phrases
+      - impact_signals: count of reduced/improved/delivered+metric phrases
+      - hedge_hits: count of hedging phrases
+    """
+    text = (answer_text or "").strip()
+    lowered = text.lower()
+    tokens = re.findall(r"[a-z0-9][a-z0-9\-\+#\.]*", lowered)
+    word_count = len(tokens)
+
+    # Metrics: numbers with optional % or x (multipliers), time units, money
+    metrics_mentioned = re.findall(
+        r"\b\d+(?:\.\d+)?(?:\s*(?:%|x|×|times|ms|sec|seconds?|minutes?|hours?|days?|weeks?|months?|years?|k|m|b|gb|tb|\$|usd))?\b",
+        lowered,
+    )
+    # Deduplicate while preserving order
+    seen: set = set()
+    metrics_dedup = []
+    for m in metrics_mentioned:
+        if m not in seen:
+            seen.add(m)
+            metrics_dedup.append(m)
+
+    # Technology terms (a broad but practical list)
+    _TECH_TERMS = {
+        "python", "java", "javascript", "typescript", "golang", "rust", "c++",
+        "react", "angular", "vue", "nodejs", "django", "fastapi", "flask", "spring",
+        "kubernetes", "docker", "aws", "azure", "gcp", "terraform", "ansible",
+        "postgres", "mysql", "mongodb", "redis", "kafka", "rabbitmq", "elasticsearch",
+        "api", "rest", "graphql", "grpc", "microservices", "monolith", "lambda",
+        "ci/cd", "github", "jenkins", "github actions", "ml", "llm", "pytorch",
+        "tensorflow", "sklearn", "sql", "nosql", "spark", "airflow", "dbt",
+        "cdn", "load balancer", "cache", "sharding", "replication", "index",
+    }
+    tech_named = [t for t in _TECH_TERMS if t in lowered]
+
+    # Ownership phrases: first-person initiative
+    _OWNERSHIP_PHRASES = [
+        "i led", "i built", "i designed", "i developed", "i implemented",
+        "i created", "i architected", "i owned", "i drove", "i introduced",
+        "i proposed", "i initiated", "i launched", "i spearheaded",
+    ]
+    ownership_signals = sum(1 for p in _OWNERSHIP_PHRASES if p in lowered)
+
+    # Impact phrases: outcome language with or without metrics
+    _IMPACT_PHRASES = [
+        "reduced", "improved", "increased", "decreased", "saved", "delivered",
+        "shipped", "achieved", "optimized", "accelerated", "enabled",
+        "as a result", "this resulted in", "led to", "outcome was",
+    ]
+    impact_signals = sum(1 for p in _IMPACT_PHRASES if p in lowered)
+
+    # Hedge count (reuse from _HEDGE_PHRASES)
+    hedge_hits = _count_phrase_hits(text, _HEDGE_PHRASES)
+
+    return {
+        "word_count": word_count,
+        "metrics_mentioned": metrics_dedup[:10],
+        "tech_named": tech_named[:10],
+        "ownership_signals": ownership_signals,
+        "impact_signals": impact_signals,
+        "hedge_hits": hedge_hits,
+    }
+
+
 def _star_completeness(answer_text: str) -> Dict[str, bool]:
     """Detect presence of Situation, Task, Action, Result in an answer."""
     lowered = (answer_text or "").lower()
@@ -358,6 +429,7 @@ def evaluate_turn(
     depth, depth_reason = _depth_score(answer, interview_type)
     relevance, relevance_reason = _relevance_score(question, answer)
     star = _star_completeness(answer)
+    depth_signals = extract_depth_signals(answer, interview_type)
 
     context_hint = []
     if role_context:
@@ -378,7 +450,8 @@ def evaluate_turn(
         "depth": depth,
         "relevance": relevance,
         "star_completeness": star,
-        "reason_code": "deterministic_rubric_v1",
+        "depth_signals": depth_signals,
+        "reason_code": "deterministic_rubric_v2",
         "rationale": rationale,
         "evidence_excerpt": _excerpt(answer),
     }

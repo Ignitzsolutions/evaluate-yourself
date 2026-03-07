@@ -25,33 +25,43 @@ except ImportError:
 
 _missing_chat_deployment_warned = False
 
-CANDIDATE_FEEDBACK_PROMPT = """You are an expert interview coach and HR professional. Analyze the following interview transcript and provide detailed, constructive feedback for the candidate.
+CANDIDATE_FEEDBACK_PROMPT = """You are an expert interview coach. Analyze the interview transcript and provide evidence-based feedback.
 
 Interview Type: {interview_type}
 Duration: {duration} minutes
-
-TRANSCRIPT:
-{transcript}
 
 PERFORMANCE SCORES (out of 100):
 - Communication: {communication_score}
 - Clarity: {clarity_score}
 - Structure: {structure_score}
 - Relevance: {relevance_score}
-- Overall Score: {overall_score}
+- Overall: {overall_score}
 
-Based on this interview, provide feedback in the following JSON format:
+TRANSCRIPT:
+{transcript}
+
+Rules for feedback:
+- Every strength MUST cite a direct quote from the transcript that demonstrates it
+- Every area for improvement MUST cite what the candidate said that revealed the gap
+- Be specific and evidence-based — no generic advice
+
+Return ONLY this JSON:
 {{
-    "overall_summary": "A 2-3 sentence summary of the candidate's overall performance",
-    "strengths": ["List 3-4 specific strengths demonstrated in the interview"],
-    "areas_for_improvement": ["List 3-4 specific areas that need improvement"],
-    "communication_feedback": "Detailed feedback on communication style, tone, and clarity",
-    "content_feedback": "Feedback on the substance and quality of answers",
-    "tips_for_next_interview": ["3-4 actionable tips for the candidate's next interview"]
+    "overall_summary": "2-3 sentences summarizing performance, citing one specific example",
+    "strengths": [
+        {{"strength": "What they did well", "evidence_quote": "exact quote or paraphrase from their answer", "why": "why this demonstrates the strength"}},
+        {{"strength": "...", "evidence_quote": "...", "why": "..."}}
+    ],
+    "areas_for_improvement": [
+        {{"area": "What needs work", "transcript_quote": "what they said that showed the gap", "better_approach": "how they should have answered"}},
+        {{"area": "...", "transcript_quote": "...", "better_approach": "..."}}
+    ],
+    "communication_feedback": "Specific feedback on delivery, citing examples of filler words, hedging, or strong moments",
+    "content_feedback": "Feedback on substance and depth, citing specific answer content",
+    "tips_for_next_interview": ["Actionable tip 1 based on this transcript", "Actionable tip 2", "Actionable tip 3"]
 }}
 
-Be specific, constructive, and encouraging. Reference actual examples from the transcript when possible.
-Output ONLY the JSON object, no additional text."""
+Output ONLY the JSON object."""
 
 
 STRUCTURED_FEEDBACK_PROMPT = """You are an expert interview coach and HR professional. Analyze the following interview transcript and provide detailed, constructive feedback for the candidate.
@@ -357,45 +367,60 @@ def _extract_candidate_evidence(transcript_str: str, limit: int = 3) -> List[str
 
 
 def _normalize_feedback_contract(feedback: Dict[str, Any], scores: Dict[str, int], transcript_str: str) -> Dict[str, Any]:
-    """Enforce stable actionable feedback structure for report consumers."""
+    """Normalize AI feedback to a stable structure that supports both legacy and evidence-based formats."""
     if not isinstance(feedback, dict):
         return _generate_fallback_feedback(scores, transcript_str)
 
-    evidence = _extract_candidate_evidence(transcript_str, limit=3)
     summary = str(feedback.get("overall_summary") or "").strip()
     if not summary:
         summary = _generate_fallback_feedback(scores, transcript_str).get("overall_summary", "")
 
-    strengths = feedback.get("strengths")
-    if not isinstance(strengths, list):
-        strengths = []
-    strengths = [str(item).strip() for item in strengths if str(item).strip()]
+    # Handle evidence-based strength format: [{strength, evidence_quote, why}] or [str]
+    raw_strengths = feedback.get("strengths") or []
+    strengths = []
+    for item in raw_strengths:
+        if isinstance(item, dict):
+            text = str(item.get("strength") or "").strip()
+            quote = str(item.get("evidence_quote") or "").strip()
+            why = str(item.get("why") or "").strip()
+            if text:
+                if quote:
+                    strengths.append(f'{text} — "{quote[:100]}"' if quote else text)
+                else:
+                    strengths.append(text)
+        elif isinstance(item, str) and item.strip():
+            strengths.append(item.strip())
 
-    improvements = feedback.get("areas_for_improvement")
-    if not isinstance(improvements, list):
-        improvements = []
-    improvements = [str(item).strip() for item in improvements if str(item).strip()]
+    # Handle evidence-based improvement format: [{area, transcript_quote, better_approach}] or [str]
+    raw_improvements = feedback.get("areas_for_improvement") or []
+    improvements = []
+    for item in raw_improvements:
+        if isinstance(item, dict):
+            area = str(item.get("area") or "").strip()
+            quote = str(item.get("transcript_quote") or "").strip()
+            better = str(item.get("better_approach") or "").strip()
+            if area:
+                text = area
+                if quote:
+                    text += f' (You said: "{quote[:80]}")'
+                if better:
+                    text += f" → {better[:100]}"
+                improvements.append(text)
+        elif isinstance(item, str) and item.strip():
+            improvements.append(item.strip())
 
     tips = feedback.get("tips_for_next_interview")
     if not isinstance(tips, list):
         tips = []
-    tips = [str(item).strip() for item in tips if str(item).strip()]
+    tips = [str(t).strip() for t in tips if str(t).strip()]
 
     base = _generate_fallback_feedback(scores, transcript_str)
-    while len(strengths) < 3:
+    while len(strengths) < 2:
         strengths.append(base["strengths"][len(strengths) % len(base["strengths"])])
-    while len(improvements) < 3:
+    while len(improvements) < 2:
         improvements.append(base["areas_for_improvement"][len(improvements) % len(base["areas_for_improvement"])])
     while len(tips) < 3:
         tips.append(base["tips_for_next_interview"][len(tips) % len(base["tips_for_next_interview"])])
-
-    if evidence:
-        # Ground top signals in transcript evidence.
-        strengths[0] = f"{strengths[0]} (Evidence: \"{evidence[0]}\")"
-        if len(evidence) > 1:
-            improvements[0] = f"{improvements[0]} (Evidence: \"{evidence[1]}\")"
-        if len(evidence) > 2:
-            tips[0] = f"{tips[0]} (Based on: \"{evidence[2]}\")"
 
     return {
         "overall_summary": summary,

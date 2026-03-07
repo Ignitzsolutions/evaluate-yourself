@@ -3,6 +3,9 @@ import { useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -26,6 +29,7 @@ import {
   Assessment,
   Chat,
   Download,
+  ExpandMore,
   PlayArrow,
   QuestionAnswer,
   Speed,
@@ -37,6 +41,10 @@ import {
   Legend,
   Line,
   LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -484,6 +492,49 @@ export default function ReportPage() {
         </Alert>
       )}
 
+      {/* ── Hiring Recommendation Badge ─────────────────────────────────── */}
+      {report?.hiring_recommendation && !isIncompleteCapture && (() => {
+        const hr = report.hiring_recommendation;
+        const colorMap = { strong_hire: "success", hire: "success", borderline: "warning", no_hire: "error" };
+        const bgMap = { strong_hire: "#e8f5e9", hire: "#f1f8e9", borderline: "#fff8e1", no_hire: "#ffebee" };
+        const color = colorMap[hr.signal] || "default";
+        const bg = bgMap[hr.signal] || "#f5f5f5";
+        return (
+          <Card sx={{ mb: 3, border: "2px solid", borderColor: `${color}.main`, backgroundColor: bg }}>
+            <CardContent>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1.5, flexWrap: "wrap" }}>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>Hiring Recommendation</Typography>
+                <Chip
+                  label={hr.label}
+                  color={color}
+                  size="medium"
+                  sx={{ fontWeight: 700, fontSize: "1rem", px: 1 }}
+                />
+              </Box>
+              <Box sx={{ display: "grid", gap: 0.75 }}>
+                {(hr.rationale_bullets || []).map((b, i) => (
+                  <Typography key={i} variant="body2" color="text.secondary">• {b}</Typography>
+                ))}
+              </Box>
+              {(hr.green_flags || []).length > 0 && (
+                <Box sx={{ mt: 1.5, display: "flex", gap: 1, flexWrap: "wrap" }}>
+                  {hr.green_flags.map((f, i) => (
+                    <Chip key={i} size="small" label={`✓ ${f.slice(0, 60)}`} color="success" variant="outlined" />
+                  ))}
+                </Box>
+              )}
+              {(hr.red_flags || []).length > 0 && (
+                <Box sx={{ mt: 1, display: "flex", gap: 1, flexWrap: "wrap" }}>
+                  {hr.red_flags.map((f, i) => (
+                    <Chip key={i} size="small" label={`⚠ ${f.slice(0, 60)}`} color="error" variant="outlined" />
+                  ))}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {sessionFeedback && (
         <Alert severity="success" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -753,6 +804,63 @@ export default function ReportPage() {
         </Card>
       )}
 
+      {/* ── Competency Radar Chart ──────────────────────────────────────── */}
+      {report?.competency_scores && !isIncompleteCapture && (() => {
+        const COMP_LABELS = {
+          communication: "Communication",
+          problem_solving: "Problem Solving",
+          technical_depth: "Technical Depth",
+          ownership: "Ownership",
+          collaboration: "Collaboration",
+          adaptability: "Adaptability",
+        };
+        const radarData = Object.entries(report.competency_scores)
+          .filter(([, v]) => v > 0)
+          .map(([key, value]) => ({ subject: COMP_LABELS[key] || key, score: value, fullMark: 100 }));
+        if (radarData.length < 3) return null;
+        return (
+          <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+            <CardContent>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Competency Analysis</Typography>
+              {report.score_context && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{report.score_context}</Typography>
+              )}
+              <Grid container spacing={3} alignItems="center">
+                <Grid item xs={12} md={6}>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <RadarChart data={radarData}>
+                      <PolarGrid />
+                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 12 }} />
+                      <Radar name="Score" dataKey="score" stroke="#1976d2" fill="#1976d2" fillOpacity={0.25} />
+                      <Tooltip formatter={(v) => [`${v}/100`, "Score"]} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Box sx={{ display: "grid", gap: 1.5 }}>
+                    {radarData.map(({ subject, score }) => (
+                      <Box key={subject}>
+                        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{subject}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: score >= 80 ? "success.main" : score >= 60 ? "warning.main" : "error.main" }}>
+                            {score}/100
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={score}
+                          sx={{ height: 6, borderRadius: 3, backgroundColor: "action.hover", "& .MuiLinearProgress-bar": { backgroundColor: score >= 80 ? "#388e3c" : score >= 60 ? "#f57c00" : "#d32f2f", borderRadius: 3 } }}
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
@@ -888,6 +996,131 @@ export default function ReportPage() {
                 })}
               </Box>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Per-Question Analysis ───────────────────────────────────────── */}
+      {report?.turn_analyses?.length > 0 && !isIncompleteCapture && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Per-Question Analysis</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Each answer evaluated for competency, STAR structure, and evidence of impact.
+            </Typography>
+            {report.turn_analyses.map((turn, idx) => {
+              const star = turn.star_breakdown || {};
+              const starKeys = ["situation", "task", "action", "result"];
+              const starDetected = starKeys.filter(k => star[k]);
+              const scoreColor = turn.score_0_100 >= 80 ? "success.main" : turn.score_0_100 >= 60 ? "warning.main" : "error.main";
+              return (
+                <Accordion key={idx} disableGutters sx={{ mb: 1, border: "1px solid", borderColor: "divider", borderRadius: "8px !important", "&:before": { display: "none" } }}>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap", width: "100%" }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>Q{turn.turn_id}</Typography>
+                      <Chip size="small" label={turn.competency?.replace(/_/g, " ")} variant="outlined" color="primary" />
+                      <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1, display: { xs: "none", sm: "block" } }}>
+                        {(turn.question_text || "").slice(0, 60)}{turn.question_text?.length > 60 ? "…" : ""}
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: scoreColor, ml: "auto" }}>
+                        {turn.score_0_100}/100
+                      </Typography>
+                    </Box>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>{turn.question_text}</Typography>
+
+                    {/* STAR breakdown */}
+                    <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+                      {starKeys.map((k) => {
+                        const detected = star[k];
+                        const snippet = star[`${k}_snippet`];
+                        return (
+                          <Chip
+                            key={k}
+                            size="small"
+                            label={k.charAt(0).toUpperCase() + k.slice(1)}
+                            color={detected ? "success" : "default"}
+                            variant={detected ? "filled" : "outlined"}
+                            title={snippet || ""}
+                            sx={{ fontSize: "0.7rem" }}
+                          />
+                        );
+                      })}
+                      {star.source === "llm" && <Chip size="small" label="AI-extracted" variant="outlined" sx={{ fontSize: "0.65rem", color: "text.secondary" }} />}
+                    </Box>
+
+                    {/* Evidence quote */}
+                    {turn.evidence_quote && (
+                      <Alert severity="info" icon={false} sx={{ mb: 1.5, py: 0.75 }}>
+                        <Typography variant="body2" sx={{ fontStyle: "italic" }}>
+                          "{turn.evidence_quote}"
+                        </Typography>
+                      </Alert>
+                    )}
+
+                    {/* One-line feedback */}
+                    {turn.one_line_feedback && (
+                      <Typography variant="body2" color="text.secondary">
+                        💡 {turn.one_line_feedback}
+                      </Typography>
+                    )}
+
+                    {/* Depth signals */}
+                    {turn.depth_signals && (
+                      <Box sx={{ mt: 1, display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                        {turn.depth_signals.metrics_mentioned?.length > 0 && (
+                          <Chip size="small" label={`📊 ${turn.depth_signals.metrics_mentioned.length} metric(s)`} variant="outlined" color="success" />
+                        )}
+                        {turn.depth_signals.ownership_signals > 0 && (
+                          <Chip size="small" label={`✋ ${turn.depth_signals.ownership_signals} ownership signal(s)`} variant="outlined" color="primary" />
+                        )}
+                        {turn.depth_signals.tech_named?.length > 0 && (
+                          <Chip size="small" label={`⚙ ${turn.depth_signals.tech_named.slice(0, 3).join(", ")}`} variant="outlined" />
+                        )}
+                      </Box>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Improvement Roadmap ─────────────────────────────────────────── */}
+      {report?.improvement_roadmap?.length > 0 && !isIncompleteCapture && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Improvement Roadmap</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Evidence-based, prioritized actions for your next interview.
+            </Typography>
+            <Box sx={{ display: "grid", gap: 2 }}>
+              {report.improvement_roadmap.map((item, idx) => (
+                <Card key={idx} variant="outlined" sx={{ borderLeft: "4px solid", borderLeftColor: "warning.main" }}>
+                  <CardContent sx={{ py: 1.5 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                      <Chip size="small" label={item.competency?.replace(/_/g, " ")} color="warning" variant="outlined" />
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>#{idx + 1} Priority</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
+                      <strong>Finding:</strong> {item.finding}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
+                      <strong>Action:</strong> {item.suggested_action}
+                    </Typography>
+                    {item.example_reframe && (
+                      <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
+                        <Typography variant="body2" sx={{ fontStyle: "italic", fontSize: "0.8rem" }}>
+                          {item.example_reframe}
+                        </Typography>
+                      </Alert>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </Box>
           </CardContent>
         </Card>
       )}
