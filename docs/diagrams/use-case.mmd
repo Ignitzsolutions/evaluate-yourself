@@ -1,0 +1,27 @@
+flowchart LR
+  C["Candidate"]
+  A["Admin"]
+  CL["Clerk Auth"]
+  RT["Azure OpenAI Realtime"]
+  DB["Azure PostgreSQL"]
+  BE["FastAPI Backend"]
+  CA["Candidate App"]
+  AD["Admin Dashboard"]
+
+  C -->|Email/Phone OTP Login| CA
+  CA -->|Authenticate| CL
+  C -->|Fill Pre-Interview Form| CA
+  C -->|Redeem Trial Code| CA
+  C -->|Start Interview| CA
+  C -->|View + Download Report| CA
+
+  A -->|Admin Login| AD
+  A -->|Manage Candidates| AD
+  A -->|Create/Revoke Trial Codes| AD
+  A -->|View Evaluation Quality| AD
+
+  CA --> BE
+  AD --> BE
+  BE -->|JWT Verify| CL
+  BE -->|Session/Transcript| RT
+  BE -->|Users/Sessions/Reports/Trials| DB

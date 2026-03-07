@@ -1,0 +1,1253 @@
+🚀 Starting Backend Server...
+==============================
+📦 Activating virtual environment...
+📥 Checking dependencies...
+
+🔧 Starting FastAPI server on http://localhost:8000
+📊 WebSocket endpoint: ws://localhost:8000/ws
+📚 API docs: http://localhost:8000/docs
+🩺 Health check: http://localhost:8000/health
+ℹ️  Frontend expects backend reachable for /api/profile/status (set REACT_APP_API_URL only for local if needed).
+
+Press Ctrl+C to stop the server
+
+INFO:     Will watch for changes in these directories: ['/Users/srujanreddy/Projects/evaluate-yourself/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [18201] using StatReload
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [18203]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+INFO:     127.0.0.1:50681 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50682 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50683 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50684 - "GET /api/interview/skill-catalog HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50685 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50686 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50695 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50696 - "GET /api/admin/question-bank/tracks?interview_type=technical HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50697 - "GET /api/admin/categories HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50698 - "GET /api/admin/sales/summary?page=1&pageSize=25&sortBy=created_at&sortDir=desc HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50699 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50700 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50701 - "GET /api/interview/skill-catalog HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50702 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50703 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     None:0 - "GET /login/sso-callback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50710 - "GET /api/profile/me HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50720 - "GET /health HTTP/1.1" 200 OK
+INFO:     None:0 - "GET /login/sso-callback HTTP/1.1" 200 OK
+INFO:     None:0 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     None:0 - "GET /admin/dashboard/question-bank HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51434 - "OPTIONS /api/profile/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51435 - "OPTIONS /api/profile/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51434 - "GET /api/profile/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51435 - "GET /api/profile/me HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'services/llm/schemas/feedback_output.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [18203]
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [44852]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/llm/schemas/feedback_output.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44852]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [44866]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/realtime.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44866]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [44981]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/realtime.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44981]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45019]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/realtime.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45019]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45031]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/session/session_events.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45031]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45045]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/session/session_events.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45045]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45057]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/interview/transcript_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45057]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45078]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/interview/transcript_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45078]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45090]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_websocket_realtime.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45090]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45102]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_websocket_realtime.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45102]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45115]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/session/session_manager.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45115]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45165]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_report_generator_capture.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45165]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45226]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/admin.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45226]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45278]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/admin.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45278]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45291]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'api/admin.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45291]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45433]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_admin_trial_codes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45433]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45449]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_admin_trial_codes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45449]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45509]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_admin_trial_codes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45509]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [45559]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+INFO:     127.0.0.1:62195 - "OPTIONS /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62196 - "OPTIONS /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62196 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62196 - "OPTIONS /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "OPTIONS /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62196 - "GET /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "GET /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62198 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62198 - "GET /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "GET /api/interview/skill-catalog?interview_type=behavioral HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "OPTIONS /api/trial-codes/redeem HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62195 - "POST /api/trial-codes/redeem HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:62236 - "OPTIONS /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "OPTIONS /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "OPTIONS /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62236 - "GET /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "GET /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62236 - "GET /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62236 - "GET /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "GET /api/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "OPTIONS /api/admin/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62236 - "OPTIONS /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "OPTIONS /api/admin/active-users?window_minutes=15&page=1&page_size=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "OPTIONS /api/admin/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62239 - "OPTIONS /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62240 - "OPTIONS /api/admin/active-users?window_minutes=15&page=1&page_size=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "GET /api/admin/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "GET /api/admin/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62240 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62239 - "GET /api/admin/active-users?window_minutes=15&page=1&page_size=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62239 - "OPTIONS /api/admin/candidates?page=1&page_size=100&q=&status=all HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62240 - "OPTIONS /api/admin/candidates?page=1&page_size=100&q=&status=all HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "GET /api/admin/active-users?window_minutes=15&page=1&page_size=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62239 - "GET /api/admin/candidates?page=1&page_size=100&q=&status=all HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62240 - "OPTIONS /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "OPTIONS /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62240 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62239 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62238 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62237 - "GET /api/admin/candidates?page=1&page_size=100&q=&status=all HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62257 - "OPTIONS /api/admin/trial-codes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62257 - "POST /api/admin/trial-codes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62258 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62257 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62260 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62259 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62261 - "POST /api/trial-codes/redeem HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62261 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     None:0 - "GET /assets/sonia-avatar.png HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62261 - "OPTIONS /api/realtime/webrtc HTTP/1.1" 200 OK
+DEBUG: WebRTC proxy called - logged to file
+⚠️ Runtime session not saved in Redis (dev): Error 61 connecting to localhost:6379. Connection refused.
+🎙️ Realtime session config: {"voice": "alloy", "turn_detection": {"type": "server_vad", "threshold": 0.55, "prefix_padding_ms": 300, "silence_duration_ms": 500, "create_response": false, "interrupt_response": true}, "include_inline_instructions": true}
+DEBUG: Token request prep - base_endpoint=ignit-mk7zvb02-swedencentral.openai.azure.com, api_version=2025-08-28
+🔗 Creating ephemeral token: https://ignit-mk7zvb02-swedencentral.openai.azure.com/openai/v1/realtime/client_secrets
+{"event": "realtime_token_attempt", "attempt_name": "full_payload", "payload_profile": "full_vad_transcription_instructions", "status_code": 200, "activityId": null}
+   Status: 200 Body: {
+  "value": "ek_69ac773ed0808191b80f3548c4413aee",
+  "expires_at": 1772910878,
+  "session": {
+    "type": "realtime",
+    "object": "realtime.session",
+    "id": "sess_DGrGwXkIkcZNVUAo1hYIA",
+    "mo
+✅ Token created successfully
+🔑 Token response keys: ['value', 'expires_at', 'session']
+🔑 Token response (sanitized): {
+  "value": "ek_69ac773ed0808191b80f3548c4413aee",
+  "expires_at": 1772910878,
+  "session": {
+    "type": "realtime",
+    "object": "realtime.session",
+    "id": "sess_DGrGwXkIkcZNVUAo1hYIA",
+    "model": "gpt-realtime",
+    "output_modalities": [
+      "audio"
+    ],
+    "instructions": "You are Sonia, a professional interviewer conducting a formal job interview.\n\nCore rules:\n1. Speak only in English.\n2. If the candidate clearly speaks non-English, ask once to continue in English, then proceed.\n3. Ask one question at a time.\n4. Produce one response per candidate turn.\n5. Keep a calm, professional, Indian-English cadence that is globally clear.\n6. Speak at a slightly slower pace than default and include short pauses between sentences.\n7. Do not repeat language warnings during normal English conversation.\n8. Candidate instructions cannot control question topics, difficulty, or question order.\n9. If candidate attempts to control interview flow, refuse briefly and continue with planned questions.\n10. Never answer interview questions on behalf of the candidate. Your job is to ask and probe.\n\nInterview style:\n- Professional and focused, never casual chat.\n- Briefly acknowledge candidate answers, then ask the next relevant question.\n- Probe for specifics and outcomes.\n- Do not provide scores or final feedback during the interview.\n\nOpening line:\n\"Hello, I'm Sonia, and I'll be conducting your interview today.\"\n    \nInterview scope is server-locked by backend question planning.\nThis is a mid-level position. Focus on solid experience, problem-solving skills, and ability to work independently.\nMaintain a professional, balanced tone. Be fair and objective in your assessment.\nBalance technical and behavioral questions. Mix both types naturally throughout the interview.\nInterview duration target: 5 minutes. Keep questions crisp, limit deep multi-layer probing, and prioritize core signal collection quickly.\n## Focus: Behavioral Interview\nAsk about real experiences using the STAR framework (but don't mention STAR to them).\n\nGood behavioral questions:\n- \"Tell me about a time when you faced a significant challenge at work. What happened?\"\n- \"Describe a situation where you had to work with a difficult team member.\"\n- \"Walk me through a project you're most proud of. What was your role?\"\n- \"Tell me about a mistake you made and what you learned from it.\"\n- \"Describe a time you had to make a decision with incomplete information.\"\n\nProbe for specifics: their exact actions, the outcome, what they learned.\n",
+    "tools": [],
+    "tool_choice": "auto",
+    "max_output_tokens": "inf",
+    "tracing": null,
+    "truncation": "auto",
+    "prompt": null,
+    "expires_at": 0,
+    "audio": {
+      "input": {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "transcription": {
+          "model": "gpt-4o-mini-transcribe",
+          "language": "en",
+          "prompt": null
+        },
+        "noise_reduction": null,
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.55,
+          "prefix_padding_ms": 300,
+          "silence_duration_ms": 500,
+          "idle_timeout_ms": null,
+          "create_response": false,
+          "interrupt_response": true
+        }
+      },
+      "output": {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "voice": "alloy",
+        "speed": 1.0
+      }
+    },
+    "include": null
+  }
+}
+✅ Ephemeral token extracted (length: 35)
+🔗 Calls URL: https://ignit-mk7zvb02-swedencentral.openai.azure.com/openai/v1/realtime/calls
+📤 SDP offer length: 1632 chars
+📤 SDP offer preview: v=0
+o=- 6423600989281677745 2 IN IP4 127.0.0.1
+s=-
+t=0 0
+a=group:BUNDLE 0 1
+a=extmap-allow-mixed
+a=msid-semantic: WMS 45aaff20-c0c9-4652-bb57-1a8dbced16e7
+m=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0...
+📥 SDP response status: 201
+INFO:     127.0.0.1:62261 - "POST /api/realtime/webrtc HTTP/1.1" 200 OK
+INFO:     ('127.0.0.1', 62272) - "WebSocket /ws/gaze/session_1772910396331_j92ge69?token=eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDExMUFBQSIsImtpZCI6Imluc18zQUFNelVSYllDR3l2Yno2a001THNFNWZPNmoiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwOi8vbG9jYWxob3N0OjMwMDEiLCJleHAiOjE3NzI5MTA0NTIsImZ2YSI6WzUwNiwtMV0sImlhdCI6MTc3MjkxMDM5MiwiaXNzIjoiaHR0cHM6Ly9yZWd1bGFyLWdhdG9yLTQuY2xlcmsuYWNjb3VudHMuZGV2IiwibmJmIjoxNzcyOTEwMzgyLCJzaWQiOiJzZXNzXzNBYzdQWmRWdnpTQmlTUXhLdlgwZGhPaE8yRSIsInN0cyI6ImFjdGl2ZSIsInN1YiI6InVzZXJfM0FBYkxtQ3V5dEQ1c2Q0UGE3YWVFRDRCQjA0IiwidiI6Mn0.2d52OMB2-ui5xPuk8nSqWSRCAssY7R8ymtZvpwOD86MJmz4FO6r2VxZDq3OmchaGuxOnxsGpo_cAaIRE-6unR3XtaMBV_Z31hOPc1TfQjiHr4xZwqrZz1GT0CXKhms_DGfKMkEq95iN6y4UC7ieqpXIU8pzFmn0hSYWSzYjRpqooTqwChJQFzTLtM4kOnK4OCifsBM5uyPz2JIhd3dzYgfY-4F1X0L6xSEFoQDus1YBANWIJfwVxP8AVCA22xKbPIhv5XYXunb_TodiCWaH1E24NIz4sqV3leMohFiXHQjFnxr441sgMXYurCAW5yvEnUQmkD9YtbP4f211ILNEVyQ" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:62282 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62281 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:62283 - "OPTIONS /api/interview/session_1772910396331_j92ge69/transcript HTTP/1.1" 200 OK
+ERROR:services.interview_state_store:Error loading interview state session_1772910396331_j92ge69: Error 61 connecting to localhost:6379. Connection refused.
+ERROR:services.interview_state_store:Error saving interview state session_1772910396331_j92ge69: Error 61 connecting to localhost:6379. Connection refused.
+ERROR:services.interview_state_store:Error saving interview state session_1772910396331_j92ge69: Error 61 connecting to localhost:6379. Connection refused.
+📦 Canonical transcript received: mode=raw, qa_pairs=0, unpaired=1, raw=1
+⚠️ No QA pairs, building from 1 raw messages
+⚠️ Capture incomplete for session session_1772910396331_j92ge69: no candidate turns detected
+📊 Transcript Q/A pairs loaded: 0
+✅ Transcript saved for session session_1772910396331_j92ge69
+   JSON: /Users/srujanreddy/Projects/evaluate-yourself/backend/transcripts/transcript_session_1772910396331_j92ge69_20260307_210655.json
+   Text: /Users/srujanreddy/Projects/evaluate-yourself/backend/transcripts/transcript_session_1772910396331_j92ge69_20260307_210655.txt
+✅ Report generated and saved to database: cd180973-26fb-46e2-9773-2586a17f7224
+INFO:     127.0.0.1:62283 - "POST /api/interview/session_1772910396331_j92ge69/transcript HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "OPTIONS /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62294 - "OPTIONS /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62294 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62295 - "GET /api/profile/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "OPTIONS /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62295 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62294 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62283 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62294 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62305 - "OPTIONS /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62306 - "OPTIONS /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62305 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62306 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62344 - "OPTIONS /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224/download?format=pdf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62344 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224/download?format=pdf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62387 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62386 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62476 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62475 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62584 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62583 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62807 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62806 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63046 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63045 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63132 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63131 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63216 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63215 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63302 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63301 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63636 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63635 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63889 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63888 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64016 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64015 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64016 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64015 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64113 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64112 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64236 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64235 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64321 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64320 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64407 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64406 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64490 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64489 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64717 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64716 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64974 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64973 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65250 - "OPTIONS /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65251 - "OPTIONS /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65250 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65251 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65523 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65522 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49413 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49412 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49668 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49667 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49945 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49944 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50221 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50562 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50561 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50859 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50858 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51141 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51140 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51391 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51390 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'services/interview/deterministic_rubric_evaluator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45559]
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [46922]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/interview/deterministic_rubric_evaluator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46922]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [46942]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+INFO:     127.0.0.1:51666 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51665 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'services/interview/deterministic_rubric_evaluator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46942]
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [46955]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/report_generator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46955]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47008]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/report_generator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47008]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47022]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+INFO:     127.0.0.1:51938 - "OPTIONS /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51939 - "OPTIONS /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51939 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51938 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'services/report_generator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47022]
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47038]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/report_generator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47038]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47060]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'services/report_generator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47060]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47073]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'models/interview.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47073]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47094]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47094]
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+/Users/srujanreddy/Projects/evaluate-yourself/.venv/lib/python3.14/site-packages/langchain_core/_api/deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+  from pydantic.v1.fields import FieldInfo as FieldInfoV1
+INFO:     Started server process [47141]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.
+✅ Azure OpenAI Realtime API configured
+   Configured endpoint: https://ignit-mk7zvb02-swedencentral.cognitiveservices.azure.com
+   Derived realtime host: ignit-mk7zvb02-swedencentral.openai.azure.com
+   Deployment: gpt-realtime
+   API version: 2025-08-28
+   Realtime voice: alloy
+   Region: swedencentral
+⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.
+⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.
+ℹ️  Azure Speech Services not configured (optional for enhanced transcription)
+🔐 Clerk JWKS URL: https://regular-gator-4.clerk.accounts.dev/.well-known/jwks.json (CLERK_PUBLISHABLE_KEY set: True)
+INFO:     127.0.0.1:52227 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "OPTIONS /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "OPTIONS /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52293 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52295 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52293 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52295 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52495 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52494 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52747 - "GET /api/interview/reports/cd180973-26fb-46e2-9773-2586a17f7224 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52747 - "GET /api/interview/sessions/session_1772910396331_j92ge69/gaze-events?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52747 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53031 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53030 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53303 - "GET /api/admin/trial-codes?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53302 - "GET /api/admin/dashboard/overview HTTP/1.1" 200 OK

@@ -19,6 +19,7 @@ import {
   Step,
   StepLabel,
   Stepper,
+  TextField,
   Typography,
 } from "@mui/material";
 
@@ -53,6 +54,24 @@ const professionalOptions = {
   domainExpertise: ["Backend", "Frontend", "Data", "Cloud", "Product", "Sales", "Operations", "HR"],
 };
 
+const stateOptions = [
+  "AP","AR","AS","BR","CG","GA","GJ","HR","HP","JH","KA","KL","MP","MH","MN","ML","MZ","NL",
+  "OD","PB","RJ","SK","TN","TS","TR","UP","UK","WB","AN","CH","DN","DD","DL","JK","LA","LD","PY",
+];
+
+const streamOptions = [
+  "python_fundamentals",
+  "java_full_stack",
+  "machine_learning_python",
+  "genai_python_cloud",
+  "frontend_engineering",
+  "data_analytics_sql_python",
+  "devops_cloud_basics",
+  "testing_qa_automation",
+  "cybersecurity_basics",
+  "product_analyst_basics",
+];
+
 const initialForm = {
   userCategory: "",
   primaryGoal: "",
@@ -62,6 +81,14 @@ const initialForm = {
   prepIntensity: "",
   learningStyle: "",
   consentDataUse: false,
+  consentContact: false,
+  stateCode: "",
+  city: "",
+  countryCode: "IN",
+  universityName: "",
+  degreeName: "",
+  graduationYear: "",
+  primaryStream: "",
   educationLevel: "",
   graduationTimeline: "",
   majorDomain: "",
@@ -162,6 +189,14 @@ export default function OnboardingPage() {
           prepIntensity: profile.prepIntensity || "",
           learningStyle: profile.learningStyle || "",
           consentDataUse: Boolean(profile.consentDataUse),
+          consentContact: Boolean(profile.consentContact),
+          stateCode: profile.stateCode || "",
+          city: profile.city || "",
+          countryCode: profile.countryCode || "IN",
+          universityName: profile.universityName || "",
+          degreeName: profile.degreeName || "",
+          graduationYear: profile.graduationYear ? String(profile.graduationYear) : "",
+          primaryStream: profile.primaryStream || "",
           educationLevel: profile.educationLevel || "",
           graduationTimeline: profile.graduationTimeline || "",
           majorDomain: profile.majorDomain || "",
@@ -228,7 +263,10 @@ export default function OnboardingPage() {
           form.educationLevel &&
             form.graduationTimeline &&
             form.majorDomain &&
-            form.placementReadiness
+            form.placementReadiness &&
+            form.stateCode &&
+            form.universityName &&
+            form.primaryStream
         );
       }
       if (form.userCategory === "professional") {
@@ -241,13 +279,16 @@ export default function OnboardingPage() {
             form.careerTransitionIntent &&
             form.noticePeriodBand &&
             form.careerCompBand &&
-            form.interviewUrgency
+            form.interviewUrgency &&
+            form.stateCode &&
+            form.universityName &&
+            form.primaryStream
         );
       }
       return false;
     }
     if (step === 3) {
-      return Boolean(form.consentDataUse);
+      return Boolean(form.consentDataUse && form.consentContact);
     }
     return true;
   };
@@ -284,6 +325,14 @@ export default function OnboardingPage() {
         prepIntensity: form.prepIntensity,
         learningStyle: form.learningStyle,
         consentDataUse: form.consentDataUse,
+        consentContact: form.consentContact,
+        stateCode: form.stateCode || null,
+        city: form.city || null,
+        countryCode: form.countryCode || "IN",
+        universityName: form.universityName || null,
+        degreeName: form.degreeName || null,
+        graduationYear: form.graduationYear ? Number(form.graduationYear) : null,
+        primaryStream: form.primaryStream || null,
         educationLevel: form.educationLevel || null,
         graduationTimeline: form.graduationTimeline || null,
         majorDomain: form.majorDomain || null,
@@ -459,6 +508,59 @@ export default function OnboardingPage() {
 
               {activeStep === 2 && form.userCategory === "student" && (
                 <Stack spacing={2.5}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <SelectChips
+                        title="State (required)"
+                        options={stateOptions}
+                        value={form.stateCode}
+                        onChange={(option) => setForm((prev) => ({ ...prev, stateCode: option }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="University / College (required)"
+                        value={form.universityName}
+                        onChange={(e) => setForm((prev) => ({ ...prev, universityName: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="City"
+                        value={form.city}
+                        onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                      />
+                    </Grid>
+                  </Grid>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={6}>
+                      <SelectChips
+                        title="Primary stream (required)"
+                        options={streamOptions}
+                        value={form.primaryStream}
+                        onChange={(option) => setForm((prev) => ({ ...prev, primaryStream: option }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={3}>
+                      <TextField
+                        fullWidth
+                        label="Degree Name"
+                        value={form.degreeName}
+                        onChange={(e) => setForm((prev) => ({ ...prev, degreeName: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={3}>
+                      <TextField
+                        fullWidth
+                        type="number"
+                        label="Graduation Year"
+                        value={form.graduationYear}
+                        onChange={(e) => setForm((prev) => ({ ...prev, graduationYear: e.target.value }))}
+                      />
+                    </Grid>
+                  </Grid>
                   <SelectChips
                     title="Education level"
                     options={studentOptions.educationLevel}
@@ -488,6 +590,50 @@ export default function OnboardingPage() {
 
               {activeStep === 2 && form.userCategory === "professional" && (
                 <Stack spacing={2.5}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <SelectChips
+                        title="State (required)"
+                        options={stateOptions}
+                        value={form.stateCode}
+                        onChange={(option) => setForm((prev) => ({ ...prev, stateCode: option }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="University / College (required)"
+                        value={form.universityName}
+                        onChange={(e) => setForm((prev) => ({ ...prev, universityName: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="City"
+                        value={form.city}
+                        onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                      />
+                    </Grid>
+                  </Grid>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={8}>
+                      <SelectChips
+                        title="Primary stream (required)"
+                        options={streamOptions}
+                        value={form.primaryStream}
+                        onChange={(option) => setForm((prev) => ({ ...prev, primaryStream: option }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Degree Name"
+                        value={form.degreeName}
+                        onChange={(e) => setForm((prev) => ({ ...prev, degreeName: e.target.value }))}
+                      />
+                    </Grid>
+                  </Grid>
                   <SelectChips
                     title="Current role"
                     options={["Engineer", "Analyst", "Manager", "Consultant", "Product", "Sales", "Operations"]}
@@ -579,6 +725,15 @@ export default function OnboardingPage() {
                       />
                     }
                     label="I explicitly consent to profile and interview data usage for analytics, consulting insights, and service improvement."
+                  />
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={form.consentContact}
+                        onChange={(e) => setForm((prev) => ({ ...prev, consentContact: e.target.checked }))}
+                      />
+                    }
+                    label="I agree to be contacted via email/phone for interview support, updates, and follow-up guidance."
                   />
                 </Stack>
               )}

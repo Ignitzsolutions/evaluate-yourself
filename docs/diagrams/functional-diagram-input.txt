@@ -1,0 +1,30 @@
+Functional architecture for Evaluate Yourself application.
+
+Frontend modules:
+- Candidate app (React): login/register, pre-interview form, interview room, report page.
+- Admin app (React): separate admin login route and admin dashboard.
+
+Backend modules (FastAPI):
+- Auth middleware with Clerk JWT verification and admin allowlist guard.
+- Trial and entitlement service.
+- Realtime session service (WebRTC token/session orchestration).
+- Transcript ingestion and normalization.
+- Deterministic rubric evaluator and evaluation contract validator.
+- Report generation and PDF export.
+- Admin APIs for candidates, trial codes, and quality metrics.
+
+Data and infrastructure:
+- Azure PostgreSQL: users, user_profiles, interview_sessions, interview_reports, trial_codes, user_entitlements, interview_gaze_events.
+- Optional Redis for session events/caching.
+- Azure OpenAI Realtime for interviewer conversation.
+
+Main flow:
+1. User authenticates with Clerk.
+2. Candidate redeems trial code or has valid entitlement.
+3. Candidate starts realtime interview session.
+4. Transcript events captured and normalized.
+5. Server evaluates candidate turns with deterministic rubric.
+6. Contract checks verify evidence and provenance.
+7. Report persisted with metrics and validation flags.
+8. Report displayed in UI and downloadable as PDF.
+9. Admin dashboard reads aggregate candidate/session/report data from backend APIs.

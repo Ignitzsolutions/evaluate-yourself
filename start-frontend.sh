@@ -22,9 +22,10 @@ export PORT=${PORT:-3001}
 
 # Check if port is in use
 if lsof -Pi :${PORT} -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    echo "⚠️  Port ${PORT} is already in use."
-    echo "   Trying to use port $((PORT + 1)) instead..."
-    export PORT=$((PORT + 1))
+    echo "❌ Port ${PORT} is already in use."
+    echo "   Stop the existing process or choose a port explicitly:"
+    echo "   PORT=3002 ./start-frontend.sh"
+    exit 1
 fi
 
 echo ""

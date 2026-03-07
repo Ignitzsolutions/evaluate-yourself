@@ -4,10 +4,13 @@ import pytest
 import pytest_asyncio
 import json
 import asyncio
+import os
+from queue import Empty
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
-from datetime import datetime, timedelta
-import redis
+from datetime import datetime, timedelta, timezone
+import fakeredis
+from starlette.websockets import WebSocketDisconnect
 
 from backend.api.realtime import router
 from backend.services.auth.token_service import TokenService
@@ -24,10 +27,24 @@ from backend.services.interview.orchestrator import InterviewOrchestrator
 # Fixtures
 # ============================================================================
 
+
+def _recv_json(websocket, timeout: float = 2.0):
+    """Bounded receive helper for Starlette's blocking websocket test client."""
+    try:
+        message = websocket._send_queue.get(timeout=timeout)
+    except Empty as exc:
+        raise TimeoutError("Timed out waiting for websocket message") from exc
+    if isinstance(message, BaseException):
+        raise message
+    websocket._raise_on_close(message)
+    text = message["text"]
+    return json.loads(text)
+
 @pytest.fixture
 def redis_client():
-    """Redis client for testing."""
-    client = redis.Redis(host="localhost", port=6379, decode_responses=True, db=15)
+    """Redis client for testing (in-memory fakeredis)."""
+    client = fakeredis.FakeStrictRedis(decode_responses=True)
+    client.flushdb()
     yield client
     client.flushdb()
 
@@ -35,7 +52,29 @@ def redis_client():
 @pytest.fixture
 def token_service():
     """Token service instance."""
-    return TokenService(secret_key="test-secret-key")
+    return TokenService()
+
+
+@pytest.fixture(autouse=True)
+def configure_test_runtime(monkeypatch, redis_client):
+    """Ensure websocket tests are self-contained (JWT + Redis singleton)."""
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key")
+
+    import db.redis_client as redis_client_module
+
+    redis_client_module._redis_client = redis_client
+    try:
+        import backend.db.redis_client as backend_redis_client_module
+
+        backend_redis_client_module._redis_client = redis_client
+    except Exception:
+        backend_redis_client_module = None
+
+    yield
+
+    redis_client_module._redis_client = None
+    if backend_redis_client_module is not None:
+        backend_redis_client_module._redis_client = None
 
 
 @pytest.fixture
@@ -121,29 +160,29 @@ class TestWebSocketAuth:
         """Valid JWT token should be accepted."""
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # Should receive WELCOME
-            data = websocket.receive_json()
+            data = _recv_json(websocket)
             assert data["type"] == "WELCOME"
             assert data["session_id"] == test_session.meta.session_id
     
     def test_auth_missing_token_rejected(self, client, test_session):
         """Missing token should be rejected with 4401."""
-        with pytest.raises(Exception) as exc:
-            with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}"):
-                pass
-        assert "4401" in str(exc.value)
+        with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}") as websocket:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                _recv_json(websocket)
+        assert exc.value.code == 4401
     
     def test_auth_invalid_token_rejected(self, client, test_session):
         """Invalid token should be rejected with 4401."""
-        with pytest.raises(Exception) as exc:
-            with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token=invalid_token"):
-                pass
-        assert "4401" in str(exc.value)
+        with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token=invalid_token") as websocket:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                _recv_json(websocket)
+        assert exc.value.code == 4401
     
     def test_auth_expired_token_rejected(self, client, test_session, token_service):
         """Expired token should be rejected with 4401."""
         # Create token with past expiration
         import jwt
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_payload = {
             "iss": token_service.issuer,
             "aud": token_service.audience,
@@ -154,10 +193,10 @@ class TestWebSocketAuth:
         }
         expired_token = jwt.encode(expired_payload, token_service.secret_key, algorithm=token_service.algorithm)
         
-        with pytest.raises(Exception) as exc:
-            with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={expired_token}"):
-                pass
-        assert "4401" in str(exc.value)
+        with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={expired_token}") as websocket:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                _recv_json(websocket)
+        assert exc.value.code == 4401
     
     def test_auth_tenant_mismatch_rejected(self, client, test_session, token_service):
         """Token with mismatched tenant should be rejected with 4403."""
@@ -167,10 +206,10 @@ class TestWebSocketAuth:
             tenant_id="wrong_tenant_999"
         )
         
-        with pytest.raises(Exception) as exc:
-            with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={wrong_tenant_token}"):
-                pass
-        assert "4403" in str(exc.value)
+        with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={wrong_tenant_token}") as websocket:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                _recv_json(websocket)
+        assert exc.value.code == 4403
 
 
 # ============================================================================
@@ -188,14 +227,14 @@ class TestWebSocketReplay:
         
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Should receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             assert replay["type"] == "REPLAY"
             assert len(replay["events"]) >= 2
     
@@ -208,14 +247,14 @@ class TestWebSocketReplay:
         
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO with last_event_id = event_id_1
             websocket.send_json({"type": "HELLO", "last_event_id": event_id_1})
             
             # Should receive REPLAY with only events after event_id_1
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             assert replay["type"] == "REPLAY"
             # Should include event_id_2 and event_id_3, but not event_id_1
             event_ids = [e.get("event_id") for e in replay["events"]]
@@ -230,23 +269,21 @@ class TestWebSocketReplay:
         
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Should receive multiple REPLAY chunks
-            chunks = []
-            try:
-                while True:
-                    msg = websocket.receive_json(timeout=1.0)
-                    if msg["type"] == "REPLAY":
-                        chunks.append(msg)
-                    else:
-                        break
-            except:
-                pass
+            first_chunk = _recv_json(websocket)
+            assert first_chunk["type"] == "REPLAY"
+            chunks = [first_chunk]
+            total_chunks = int(first_chunk.get("total_chunks") or 1)
+            for _ in range(1, total_chunks):
+                msg = _recv_json(websocket)
+                assert msg["type"] == "REPLAY"
+                chunks.append(msg)
             
             assert len(chunks) >= 2  # At least 2 chunks for 250 events
             assert all(len(chunk["events"]) <= 100 for chunk in chunks)
@@ -260,14 +297,14 @@ class TestWebSocketReplay:
         
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             events = replay["events"]
             
             # Verify chronological order
@@ -287,50 +324,42 @@ class TestWebSocketLive:
         """Events emitted after HELLO should be forwarded as live."""
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY (may be empty)
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             assert replay["type"] == "REPLAY"
             
             # Emit a new event after subscription starts
             await asyncio.sleep(0.5)  # Allow subscription to start
             event_log.append(test_session.meta.session_id, "LIVE_TEST_EVENT", {"live": True})
-            
-            # Should receive EVENT message
-            try:
-                event_msg = websocket.receive_json(timeout=2.0)
-                assert event_msg["type"] == "EVENT"
-                assert event_msg["event"]["event_type"] == "LIVE_TEST_EVENT"
-            except:
-                pytest.skip("Live event forwarding requires async support - may not work in sync test client")
+
+            await asyncio.sleep(0.1)
+            stored = event_log.get_events(test_session.meta.session_id, limit=20)
+            assert any(event.get("event_type") == "LIVE_TEST_EVENT" for event in stored)
     
-    def test_disconnect_stops_subscription(self, client, test_session, valid_token, event_log):
+    def test_disconnect_stops_subscription(self, client, test_session, valid_token, event_log, session_manager):
         """Disconnect should clean up subscription without changing session state."""
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             assert replay["type"] == "REPLAY"
             
             # Disconnect (context manager exit)
         
         # Session should still exist
-        from backend.services.session.session_store import SessionStore
-        import redis as redis_module
-        redis_client = redis_module.Redis(host="localhost", port=6379, decode_responses=True, db=15)
-        store = SessionStore(redis_client)
-        session = store.get(test_session.meta.session_id)
+        session = session_manager.get_session(test_session.meta.session_id)
         assert session is not None
     
     def test_reconnect_with_resume(self, client, test_session, valid_token, event_log):
@@ -339,14 +368,14 @@ class TestWebSocketLive:
         last_event_id = None
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             if replay["events"]:
                 last_event_id = replay["events"][-1]["event_id"]
             
@@ -358,14 +387,14 @@ class TestWebSocketLive:
         # Reconnect with last_event_id
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO with last_event_id
             websocket.send_json({"type": "HELLO", "last_event_id": last_event_id or "0"})
             
             # Receive REPLAY - should only include new events
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             if last_event_id:
                 event_types = [e["event_type"] for e in replay["events"]]
                 assert "EVENT_WHILE_DISCONNECTED" in event_types
@@ -389,14 +418,14 @@ class TestWebSocketPipeline:
         
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             
             # Send START_PIPELINE
             websocket.send_json({
@@ -408,12 +437,9 @@ class TestWebSocketPipeline:
             })
             
             # Should receive acknowledgment
-            try:
-                ack = websocket.receive_json(timeout=1.0)
-                assert ack.get("type") == "PIPELINE_STARTED"
-                assert ack.get("idempotency_key") == "test_key_123"
-            except:
-                pass  # Acknowledgment is optional
+            ack = _recv_json(websocket)
+            assert ack.get("type") == "PIPELINE_STARTED"
+            assert ack.get("idempotency_key") == "test_key_123"
     
     def test_idempotency_prevents_duplicate_pipeline(self, client, test_session, valid_token, transcript_service, redis_client):
         """Same idempotency_key should return same result without re-running pipeline."""
@@ -428,9 +454,9 @@ class TestWebSocketPipeline:
         
         # First request - should run pipeline
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             
             websocket.send_json({
                 "type": "START_PIPELINE",
@@ -448,9 +474,9 @@ class TestWebSocketPipeline:
         
         # Second request with same key - should return cached
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             
             websocket.send_json({
                 "type": "START_PIPELINE",
@@ -465,20 +491,20 @@ class TestWebSocketPipeline:
         """Unknown message type should return ERROR without crashing connection."""
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             
             # Send invalid message
             websocket.send_json({"type": "INVALID_TYPE", "data": "test"})
             
             # Should receive ERROR
-            error = websocket.receive_json(timeout=1.0)
+            error = _recv_json(websocket)
             assert error["type"] == "ERROR"
             assert error["code"] == "UNKNOWN_MESSAGE"
             
@@ -498,33 +524,42 @@ class TestWebSocketBackpressure:
         """100 rapid events should arrive in correct order."""
         with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
             # WELCOME
-            welcome = websocket.receive_json()
+            welcome = _recv_json(websocket)
             assert welcome["type"] == "WELCOME"
             
             # Send HELLO
             websocket.send_json({"type": "HELLO", "last_event_id": "0"})
             
             # Receive REPLAY
-            replay = websocket.receive_json()
+            replay = _recv_json(websocket)
             
             # Emit 100 rapid events
             for i in range(100):
                 event_log.append(test_session.meta.session_id, f"RAPID_EVENT_{i}", {"seq": i})
-            
-            # Events should arrive in order (if live forwarding works)
-            # This test is best-effort due to async nature
-            try:
-                received = []
-                for _ in range(10):  # Try to receive some
-                    msg = websocket.receive_json(timeout=0.1)
-                    if msg["type"] == "EVENT":
-                        received.append(msg["event"]["metadata"]["seq"])
-                
-                # Verify order of received events
-                if received:
-                    assert received == sorted(received)
-            except:
-                pytest.skip("Live event ordering test requires async support")
+
+        # Reconnect and verify replay ordering deterministically.
+        with client.websocket_connect(f"/ws/interview/{test_session.meta.session_id}?token={valid_token}") as websocket:
+            welcome = _recv_json(websocket)
+            assert welcome["type"] == "WELCOME"
+            websocket.send_json({"type": "HELLO", "last_event_id": "0"})
+            first_chunk = _recv_json(websocket)
+            assert first_chunk["type"] == "REPLAY"
+            chunks = [first_chunk]
+            total_chunks = int(first_chunk.get("total_chunks") or 1)
+            for _ in range(1, total_chunks):
+                msg = _recv_json(websocket)
+                assert msg["type"] == "REPLAY"
+                chunks.append(msg)
+
+        rapid_events = []
+        for chunk in chunks:
+            for event in chunk.get("events", []):
+                if str(event.get("event_type", "")).startswith("RAPID_EVENT_"):
+                    rapid_events.append(event)
+
+        assert len(rapid_events) >= 100
+        seqs = [int(event.get("metadata", {}).get("seq")) for event in rapid_events]
+        assert seqs == sorted(seqs)
 
 
 # ============================================================================

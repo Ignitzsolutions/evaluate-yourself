@@ -1,0 +1,33 @@
+System: Evaluate Yourself AI interview platform.
+
+Actors:
+- Candidate (primary)
+- Admin
+- Clerk Auth Service
+- Azure OpenAI Realtime API
+- Azure PostgreSQL
+
+Candidate use cases:
+1. Register/Login via email or phone OTP (through Clerk).
+2. Fill pre-interview form with personal details and interview preferences.
+3. Redeem trial code to get entitlement.
+4. Start interview session (entitlement gate enforced).
+5. Answer realtime interview questions over WebRTC.
+6. Receive evaluation report with score provenance and contract status.
+7. Download report PDF.
+
+Admin use cases:
+1. Login to separate admin dashboard.
+2. View candidate list with search/filter.
+3. View candidate profile, session counts, report counts, latest score.
+4. Create one-time trial codes with duration and expiry.
+5. Revoke/delete trial codes and active entitlements.
+6. Deactivate or soft-delete candidates.
+7. Monitor evaluation quality summary and contract failures.
+
+System interactions:
+- Clerk verifies identity and issues JWT.
+- Backend validates JWT and syncs user profile data.
+- Backend stores users, profiles, sessions, reports, trial codes, entitlements in PostgreSQL.
+- Evaluation engine computes deterministic rubric scores from transcript evidence.
+- Contract validator enforces evidence-first scoring and can force zero score when invalid.

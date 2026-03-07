@@ -1,7 +1,7 @@
 """Session lifecycle management and state transitions."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from .session_models import (
@@ -31,7 +31,7 @@ class SessionManager:
         locale: str = "en-US"
     ) -> SessionData:
         """Create a new session."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         session = SessionData(
             meta=SessionMeta(
                 created_at=now,
@@ -87,7 +87,7 @@ class SessionManager:
             return None
 
         session.state.stage = new_stage
-        session.meta.last_seen_at = datetime.utcnow()
+        session.meta.last_seen_at = datetime.now(timezone.utc)
         self.store.set(session_id, session, self.default_ttl_seconds)
         logger.info(f"Updated session {session_id} stage: {current_stage} -> {new_stage}")
         return session
@@ -110,4 +110,4 @@ class SessionManager:
         """Check if session is expired."""
         if not session.meta.expires_at:
             return False
-        return datetime.utcnow() > session.meta.expires_at
+        return datetime.now(timezone.utc) > session.meta.expires_at

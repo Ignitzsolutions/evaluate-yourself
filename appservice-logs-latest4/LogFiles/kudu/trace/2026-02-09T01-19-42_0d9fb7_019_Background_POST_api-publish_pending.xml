@@ -1,0 +1,18 @@
+<step title="BackgroundTrace" date="2026-02-09T01:19:42.690" instance="0d9fb7" url="/api/publish" method="POST" >
+  <step title="Cleanup Xml Logs" date="2026-02-09T01:19:42.729" /><!-- duration: 22ms -->
+  <step title="Creating temporary deployment - FetchDeploymentManager" date="2026-02-09T01:19:42.975" /><!-- duration: 19ms -->
+  <step title="Creating temporary deployment" date="2026-02-09T01:19:43.022" /><!-- duration: 294ms -->
+  <step title="Performing fetch based deployment" date="2026-02-09T01:19:43.556" >
+    <step title="Deployment timer started" date="2026-02-09T01:19:48.057" >
+      <step title="DeploymentManager.Deploy(id:a7da80c3-1912-4204-b119-936eb0a272c1)" date="2026-02-09T01:19:48.116" >
+        <step title="Collecting changeset information" date="2026-02-09T01:19:48.226" /><!-- duration: 157ms -->
+        <step title="Updating submodules" date="2026-02-09T01:19:48.389" /><!-- duration: 1492ms -->
+        <step title="Determining deployment builder" date="2026-02-09T01:19:50.427" >
+          <step title="Builder is RunFromZipSiteBuilder" date="2026-02-09T01:19:50.525" /><!-- duration: 12ms -->
+        </step><!-- duration: 121ms -->
+        <step title="PreDeployment: context.CleanOutputPath False" date="2026-02-09T01:19:50.877" >
+          <step title="PreDeployment: context.OutputPath /home/site/wwwroot" date="2026-02-09T01:19:51.759" >
+            <step title="Building" date="2026-02-09T01:19:52.288" >
+              <step title="Error occurred" date="2026-02-09T01:19:54.692" type="error" text="Deployment has been stopped due to SCM container restart. The restart can happen due to a management operation on site. Do not perform a management operation and a deployment operation in quick succession. Adding a small delay can help avoid any conflicts." /><!-- duration: 86ms -->
+              <step title="Modified file to trigger a restart of the app container." date="2026-02-09T01:19:54.953" /><!-- duration: 58ms -->
+              <step title="Skip function trigger and logicapp sync because function is not enabled." date="2026-02-09T01:19:55.064" /><!-- duration: 37ms -->

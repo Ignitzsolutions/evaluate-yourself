@@ -1,4 +1,5 @@
 from services.llm.chains.candidate_feedback import generate_candidate_feedback
+from services.llm.chains.candidate_feedback import _generate_fallback_feedback
 
 
 def test_feedback_falls_back_when_azure_chat_deployment_missing(monkeypatch):
@@ -19,3 +20,15 @@ def test_feedback_falls_back_when_azure_chat_deployment_missing(monkeypatch):
     assert isinstance(feedback, dict)
     assert feedback.get("overall_summary")
     assert isinstance(feedback.get("strengths"), list)
+
+
+def test_feedback_fallback_contract_has_minimum_actionable_items():
+    feedback = _generate_fallback_feedback(
+        {"overall_score": 55},
+        transcript_str="CANDIDATE: I improved API latency by 20%.\nCANDIDATE: I need better STAR structure.",
+    )
+    assert isinstance(feedback, dict)
+    assert len(feedback.get("strengths", [])) >= 3
+    assert len(feedback.get("areas_for_improvement", [])) >= 3
+    assert len(feedback.get("tips_for_next_interview", [])) >= 3
+    assert "Evidence:" in feedback["strengths"][0]

@@ -24,6 +24,8 @@
     "start:frontend": "./start-frontend.sh",
     "start:backend": "./start-backend.sh",
     "start:all": "./start-all.sh",
+    "test:backend": "./backend/scripts/run_backend_tests.sh",
+    "smoke:backend": "./backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

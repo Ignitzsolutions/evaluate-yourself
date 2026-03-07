@@ -333,16 +333,84 @@ def _generate_legacy_feedback(
     
     try:
         feedback = json.loads(raw)
+        feedback = _normalize_feedback_contract(feedback, active_scores, transcript_str)
         print("✅ AI candidate feedback generated successfully (legacy)")
         return feedback
     except json.JSONDecodeError as e:
         print(f"⚠️ Failed to parse AI feedback JSON: {e}")
-        return _generate_fallback_feedback(active_scores)
+        return _generate_fallback_feedback(active_scores, transcript_str)
 
 
-def _generate_fallback_feedback(scores: Dict[str, int]) -> Dict[str, Any]:
+def _extract_candidate_evidence(transcript_str: str, limit: int = 3) -> List[str]:
+    snippets: List[str] = []
+    for line in (transcript_str or "").splitlines():
+        line = line.strip()
+        if not line or not line.startswith("CANDIDATE:"):
+            continue
+        text = line.replace("CANDIDATE:", "", 1).strip()
+        if not text:
+            continue
+        snippets.append(text[:120])
+        if len(snippets) >= limit:
+            break
+    return snippets
+
+
+def _normalize_feedback_contract(feedback: Dict[str, Any], scores: Dict[str, int], transcript_str: str) -> Dict[str, Any]:
+    """Enforce stable actionable feedback structure for report consumers."""
+    if not isinstance(feedback, dict):
+        return _generate_fallback_feedback(scores, transcript_str)
+
+    evidence = _extract_candidate_evidence(transcript_str, limit=3)
+    summary = str(feedback.get("overall_summary") or "").strip()
+    if not summary:
+        summary = _generate_fallback_feedback(scores, transcript_str).get("overall_summary", "")
+
+    strengths = feedback.get("strengths")
+    if not isinstance(strengths, list):
+        strengths = []
+    strengths = [str(item).strip() for item in strengths if str(item).strip()]
+
+    improvements = feedback.get("areas_for_improvement")
+    if not isinstance(improvements, list):
+        improvements = []
+    improvements = [str(item).strip() for item in improvements if str(item).strip()]
+
+    tips = feedback.get("tips_for_next_interview")
+    if not isinstance(tips, list):
+        tips = []
+    tips = [str(item).strip() for item in tips if str(item).strip()]
+
+    base = _generate_fallback_feedback(scores, transcript_str)
+    while len(strengths) < 3:
+        strengths.append(base["strengths"][len(strengths) % len(base["strengths"])])
+    while len(improvements) < 3:
+        improvements.append(base["areas_for_improvement"][len(improvements) % len(base["areas_for_improvement"])])
+    while len(tips) < 3:
+        tips.append(base["tips_for_next_interview"][len(tips) % len(base["tips_for_next_interview"])])
+
+    if evidence:
+        # Ground top signals in transcript evidence.
+        strengths[0] = f"{strengths[0]} (Evidence: \"{evidence[0]}\")"
+        if len(evidence) > 1:
+            improvements[0] = f"{improvements[0]} (Evidence: \"{evidence[1]}\")"
+        if len(evidence) > 2:
+            tips[0] = f"{tips[0]} (Based on: \"{evidence[2]}\")"
+
+    return {
+        "overall_summary": summary,
+        "strengths": strengths[:6],
+        "areas_for_improvement": improvements[:6],
+        "communication_feedback": str(feedback.get("communication_feedback") or base["communication_feedback"]),
+        "content_feedback": str(feedback.get("content_feedback") or base["content_feedback"]),
+        "tips_for_next_interview": tips[:6],
+    }
+
+
+def _generate_fallback_feedback(scores: Dict[str, int], transcript_str: str = "") -> Dict[str, Any]:
     """Generate basic fallback feedback when AI is unavailable."""
     overall = scores.get("overall_score", 50)
+    evidence = _extract_candidate_evidence(transcript_str, limit=3)
     
     if overall >= 80:
         summary = "Strong interview performance with clear communication and relevant answers."
@@ -353,6 +421,12 @@ def _generate_fallback_feedback(scores: Dict[str, int]) -> Dict[str, Any]:
     else:
         summary = "Interview performance needs improvement. Focus on structure and clarity in your responses."
         strengths = ["Willingness to participate", "Attempt to answer questions directly"]
+
+    while len(strengths) < 3:
+        strengths.append("Shows intent to improve with continued structured practice")
+
+    if evidence:
+        strengths[0] = f"{strengths[0]} (Evidence: \"{evidence[0]}\")"
     
     return {
         "overall_summary": summary,

@@ -1,10 +1,11 @@
 """Session event logging with Redis Lists and Streams (dual support for migration)."""
 
+import asyncio
 import json
 import logging
 import uuid
 from typing import List, Optional, Dict, Any, AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 import redis
 from redis.exceptions import ResponseError
 
@@ -23,7 +24,7 @@ class SessionEventLog:
     def append(self, session_id: str, event_type: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Append event using both List (legacy) and Stream (new) for dual compatibility."""
         event_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         event = {
             "event_id": event_id,
@@ -53,13 +54,27 @@ class SessionEventLog:
             return event_id
 
     def get_events(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get events from List (legacy, in reverse order)."""
+        """Get events from List (legacy), normalized to chronological order."""
         try:
             events_json = self.redis.lrange(f"{self.list_key_prefix}{session_id}", 0, limit - 1)
-            return [json.loads(e) for e in events_json]
+            parsed = [json.loads(e) for e in events_json]
+            return list(reversed(parsed))
         except Exception as e:
             logger.error(f"Error getting events for session {session_id}: {e}")
             return []
+
+    @staticmethod
+    def _extract_event_json(event_data: Dict[Any, Any]) -> str:
+        if not isinstance(event_data, dict):
+            return "{}"
+        raw = event_data.get("event")
+        if raw is None:
+            raw = event_data.get(b"event")
+        if raw is None:
+            return "{}"
+        if isinstance(raw, bytes):
+            return raw.decode()
+        return str(raw)
 
     def get_events_after(self, session_id: str, after_event_id: str, limit: int = 200) -> List[Dict[str, Any]]:
         """Get events after given ID (using Stream for deterministic ordering)."""
@@ -75,7 +90,7 @@ class SessionEventLog:
                 found_idx = -1
                 
                 for idx, (stream_id, event_data) in enumerate(all_events):
-                    event_json = event_data.get(b"event", b"{}").decode()
+                    event_json = self._extract_event_json(event_data)
                     event = json.loads(event_json)
                     if event.get("event_id") == after_event_id:
                         found_idx = idx
@@ -90,7 +105,7 @@ class SessionEventLog:
             
             events = []
             for stream_id, event_data in results:
-                event_json = event_data.get(b"event", b"{}").decode()
+                event_json = self._extract_event_json(event_data)
                 events.append(json.loads(event_json))
             
             return events
@@ -126,12 +141,17 @@ class SessionEventLog:
         try:
             while True:
                 # XREAD with BLOCK (1000ms timeout)
-                result = self.redis.xread({stream_key: last_id}, block=1000, count=10)
+                result = await asyncio.to_thread(
+                    self.redis.xread,
+                    {stream_key: last_id},
+                    block=1000,
+                    count=10,
+                )
                 
                 if result:
                     for stream, messages in result:
                         for stream_id, event_data in messages:
-                            event_json = event_data.get(b"event", b"{}").decode()
+                            event_json = self._extract_event_json(event_data)
                             event = json.loads(event_json)
                             last_id = stream_id
                             yield event
@@ -146,8 +166,7 @@ class SessionEventLog:
         """Reconstruct session state from event log."""
         events = self.get_events(session_id, limit=10000)
         
-        # Reverse to get chronological order (since LPUSH stores newest first)
-        events_chrono = list(reversed(events))
+        events_chrono = events
         
         state = {
             "stage": "CREATED",

@@ -1,0 +1,23 @@
+# summary.candidate_speech.v1
+# Keyed by summary variant; domain passed as input when needed.
+# Used by TranscriptSummaryChain for accent, grammar, interview_tips.
+
+description: "Analyze candidate speech for accent, grammar, and corporate interview improvement tips."
+version: "1"
+
+template: |
+  You are an expert speech and interview coach. Analyze the CANDIDATE's spoken responses in this interview transcript.
+
+  Output a JSON object with exactly these keys:
+  - "accent": 2-4 sentences on accent clarity, comprehensibility, and any tips (e.g. pacing, enunciation).
+  - "grammar": 2-4 sentences on grammar, word choice, tone (formal/casual), and recurring errors if any.
+  - "interview_tips": 3-5 concrete, actionable tips for better performance in corporate interviews (e.g. STAR method, concision, confidence, preparation). Number the tips.
+
+  Be constructive and specific. Reference the candidate's actual words where useful.
+
+  Transcript:
+  ---
+  {transcript}
+  ---
+
+  Respond with only valid JSON, no markdown or extra text.

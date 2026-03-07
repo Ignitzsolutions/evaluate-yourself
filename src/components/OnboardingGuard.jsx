@@ -4,12 +4,14 @@ import { useAuth } from "@clerk/clerk-react";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import { authFetch } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 
 const API_BASE_URL = getApiBaseUrl();
 
 export default function OnboardingGuard({ children }) {
   const location = useLocation();
   const { getToken, isLoaded } = useAuth();
+  const devBypass = isDevAuthBypassEnabled();
   const [checking, setChecking] = useState(true);
   const [status, setStatus] = useState({ completed: false, user_category: null });
   const [error, setError] = useState("");
@@ -17,11 +19,14 @@ export default function OnboardingGuard({ children }) {
   useEffect(() => {
     let mounted = true;
     async function checkStatus() {
-      if (!isLoaded) return;
+      if (!isLoaded && !devBypass) return;
       try {
         setChecking(true);
         setError("");
-        const token = await getToken();
+        const token = await getToken().catch(() => null);
+        if (!token && !devBypass) {
+          throw new Error("Authentication required.");
+        }
         const resp = await authFetch(`${API_BASE_URL}/api/profile/status`, token, { method: "GET" });
         if (!resp.ok) {
           const text = await resp.text();
@@ -44,7 +49,7 @@ export default function OnboardingGuard({ children }) {
     return () => {
       mounted = false;
     };
-  }, [getToken, isLoaded, location.pathname]);
+  }, [devBypass, getToken, isLoaded, location.pathname]);
 
   if (checking) {
     return (

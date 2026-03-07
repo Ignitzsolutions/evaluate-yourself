@@ -41,7 +41,7 @@ const interviewTypes = [
   },
   {
     id: "mixed",
-    title: "Mixed Interview",
+    title: "360 Interview",
     description: "Combination of technical + behavioral questions in one session.",
     icon: <Shuffle sx={{ fontSize: 48 }} />,
     color: "primary",
