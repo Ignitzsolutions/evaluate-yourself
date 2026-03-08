@@ -43,15 +43,20 @@ const DEDUPE_TTL_MS = 8000;
 const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = null) => {
   const question = String(questionText || '').trim();
   const refusal = String(refusalMessage || '').trim();
-  const script = [refusal, question].filter(Boolean).join(' ');
+  const parts = [];
+  if (refusal) parts.push(refusal);
+  parts.push(question);
+  const script = parts.join(' ');
   return [
-    'Role: You are Sonia, the interviewer.',
-    'Task: Speak the SCRIPT exactly as provided.',
+    'Role: You are Sonia, a warm but professional interviewer.',
+    'Task: Ask the QUESTION below in a natural, conversational tone.',
     'Rules:',
-    '- Output only the script text, exactly once.',
-    '- Do not add prefixes like "Sure", "Here is the question", or any meta commentary.',
-    '- Do not explain, paraphrase, or answer the question.',
-    `SCRIPT: ${script}`,
+    '- Begin with a brief natural acknowledgment (e.g. "Got it.", "I see.", "That\'s helpful.") only if this follows a candidate answer — skip it for the opening question.',
+    '- Then ask the QUESTION below. You may rephrase it slightly for a natural flow, but preserve the full intent.',
+    '- Do NOT provide feedback, scores, or evaluate the answer.',
+    '- Do NOT ask multiple questions at once.',
+    '- Keep your total response concise — under 50 words.',
+    `QUESTION: ${script}`,
   ].join('\n');
 };
 
@@ -199,6 +204,8 @@ export default function InterviewSessionRoom() {
   // Collect all AI and user messages for saving
   const aiMessagesRef = useRef([]);
   const userMessagesRef = useRef([]);
+  // Track last AI spoken text for echo detection
+  const lastAiSpokenTextRef = useRef('');
   // Track last AI output item id to associate following conversation items as user replies
   const lastAIItemRef = useRef(null);
   // Track last committed input item id (optional)
@@ -266,6 +273,31 @@ export default function InterviewSessionRoom() {
       });
     }
 
+    return false;
+  }, []);
+
+  /**
+   * Echo detection: returns true if userText appears to be the mic picking up the AI's own
+   * speech output (hardware loopback / AEC failure). Compares word-level overlap against the
+   * last few AI messages. If ≥60% of the unique words in userText also appear in a recent AI
+   * utterance we treat it as an echo and discard it.
+   */
+  const isEchoOfAI = useCallback((userText) => {
+    if (!userText) return false;
+    const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w) => w.length > 2);
+    const userWords = new Set(normalize(userText));
+    if (userWords.size < 4) return false; // too short to be a meaningful echo
+    const recentAI = aiMessagesRef.current.slice(-3);
+    for (const msg of recentAI) {
+      const aiWords = new Set(normalize(msg.text || ''));
+      if (aiWords.size === 0) continue;
+      let overlap = 0;
+      for (const w of userWords) { if (aiWords.has(w)) overlap++; }
+      if (overlap / userWords.size >= 0.60) {
+        console.warn('[echo_detection] Discarding user transcript as AI echo:', userText);
+        return true;
+      }
+    }
     return false;
   }, []);
 
@@ -1122,45 +1154,31 @@ export default function InterviewSessionRoom() {
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
-      const sendSessionUpdate = (forceDualKeys = DUAL_TRANSCRIPTION_KEYS) => {
+      const sendSessionUpdate = () => {
         if (dc.readyState !== 'open') return false;
         const sessionPayload = {
           type: 'session.update',
           session: {
-            type: 'realtime',
-            audio: {
-              input: {
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.55,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 500,
-                  create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
-                  interrupt_response: true,
-                },
-                transcription: {
-                  model: TRANSCRIPTION_MODEL,
-                  language: 'en',
-                },
-              },
-              output: {
-                voice: REALTIME_VOICE,
-              },
+            voice: REALTIME_VOICE,
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.55,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+              create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
+              interrupt_response: true,
+            },
+            input_audio_transcription: {
+              model: TRANSCRIPTION_MODEL,
+              language: 'en',
             },
           },
         };
 
-        if (forceDualKeys) {
-          sessionPayload.session.input_audio_transcription = {
-            model: TRANSCRIPTION_MODEL,
-            language: 'en',
-          };
-        }
-
         dc.send(JSON.stringify(sessionPayload));
         addTranscript(
           'system',
-          `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${forceDualKeys ? 'on' : 'off'})`,
+          `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL})`,
         );
         return true;
       };
@@ -1187,7 +1205,7 @@ export default function InterviewSessionRoom() {
         // Send session.update with turn detection
         if (dc.readyState === 'open') {
           try {
-            sendSessionUpdate(DUAL_TRANSCRIPTION_KEYS);
+            sendSessionUpdate();
           } catch (err) {
             console.error('Error sending session.update:', err);
           }
@@ -1231,7 +1249,7 @@ export default function InterviewSessionRoom() {
             if (!hasTranscriptionConfig && !transcriptionReapplyAttemptedRef.current) {
               transcriptionReapplyAttemptedRef.current = true;
               try {
-                const resent = sendSessionUpdate(true);
+                const resent = sendSessionUpdate();
                 if (resent) {
                   addTranscript('system', 'Re-applied transcription config for compatibility');
                 }
@@ -1254,7 +1272,7 @@ export default function InterviewSessionRoom() {
               console.warn('Realtime schema fallback: retrying session.update without legacy keys');
               incrementDroppedEvent('legacy_turn_detection_param_rejected');
               try {
-                const resent = sendSessionUpdate(false);
+                const resent = sendSessionUpdate();
                 if (resent) {
                   addTranscript('system', 'Applied compatibility fallback for realtime session schema');
                 }
@@ -1309,6 +1327,7 @@ export default function InterviewSessionRoom() {
             const key = `${responseId}:${finalText}`;
             if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
               addTranscript('ai', finalText);
+              lastAiSpokenTextRef.current = finalText.trim();
             }
             // Count question if we haven't seen response.completed for this response_id
             const countId = msg.response_id;
@@ -1327,6 +1346,7 @@ export default function InterviewSessionRoom() {
             const key = `${responseId}:${finalText}`;
             if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
               addTranscript('ai', finalText);
+              lastAiSpokenTextRef.current = finalText.trim();
             }
             if (responseId && !countedResponseIdsRef.current.has(responseId)) {
               countedResponseIdsRef.current.add(responseId);
@@ -1388,8 +1408,12 @@ export default function InterviewSessionRoom() {
             const key = `${itemId}:${text}`;
             console.log('[input_audio_transcription.*] text:', text);
             if (text && text.trim().length > 0 && !rememberByTtl(capturedUserRef, key)) {
-              addTranscript('user', text);
-              setMicActive(false);
+              if (isEchoOfAI(text)) {
+                incrementDroppedEvent('echo_of_ai_discarded');
+              } else {
+                addTranscript('user', text);
+                setMicActive(false);
+              }
             } else if (!text) {
               incrementDroppedEvent('empty_user_transcription');
               console.warn('[input_audio_transcription.*] No user text found in message:', msg);
@@ -1416,7 +1440,11 @@ export default function InterviewSessionRoom() {
               if (parsed.isUserReply && parsed.text) {
                 const key = `${parsed.itemId || 'item'}:${parsed.text}`;
                 if (!rememberByTtl(capturedUserRef, key)) {
-                  addTranscript('user', parsed.text);
+                  if (isEchoOfAI(parsed.text)) {
+                    incrementDroppedEvent('echo_of_ai_discarded');
+                  } else {
+                    addTranscript('user', parsed.text);
+                  }
                 } else {
                   incrementDroppedEvent('duplicate_user_conversation_item');
                 }
