@@ -290,6 +290,10 @@ export default function ReportPage() {
   const captureStatus = typeof metrics.capture_status === "string" ? metrics.capture_status : "COMPLETE";
   const isIncompleteCapture = captureStatus === "INCOMPLETE_NO_CANDIDATE_AUDIO";
   const isPartialCapture = captureStatus === "INCOMPLETE_PARTIAL_CAPTURE";
+  const avgWordsPerTurn = report?.turn_analyses?.length > 0
+    ? Math.round((metrics.candidate_word_count || 0) / report.turn_analyses.length)
+    : 0;
+  const isLowCaptureQuality = (metrics.candidate_word_count || 0) < 80 || avgWordsPerTurn < 12;
 
   // Parse score breakdown from report
   const scores = useMemo(() => {
@@ -304,29 +308,16 @@ export default function ReportPage() {
       eye_contact: typeof s.eye_contact === "number" ? s.eye_contact : null,
     };
   }, [report?.scores]);
-  const turnEvaluations = Array.isArray(metrics.turn_evaluations) ? metrics.turn_evaluations : [];
-  const turnEvalSummary = metrics.turn_eval_summary && typeof metrics.turn_eval_summary === "object"
-    ? metrics.turn_eval_summary
-    : null;
   const evaluationExplainability = metrics.evaluation_explainability && typeof metrics.evaluation_explainability === "object"
     ? metrics.evaluation_explainability
     : null;
-  const contractVersion = typeof metrics.evaluation_contract_version === "string"
-    ? metrics.evaluation_contract_version
-    : "v1";
   const contractPassed = typeof metrics.contract_passed === "boolean"
     ? metrics.contract_passed
     : true;
   const validationFlags = Array.isArray(metrics.validation_flags) ? metrics.validation_flags : [];
-  const captureEvidence = metrics.capture_evidence && typeof metrics.capture_evidence === "object"
-    ? metrics.capture_evidence
-    : {};
   const scoreProvenance = metrics.score_provenance && typeof metrics.score_provenance === "object"
     ? metrics.score_provenance
     : {};
-  const rubricVersion = metrics.rubric_version || scoreProvenance.rubric_version || evaluationExplainability?.rubric_version || "unknown";
-  const scorerVersion = metrics.scorer_version || scoreProvenance.scorer_version || evaluationExplainability?.scorer_version || "unknown";
-  const turnEvidence = Array.isArray(metrics.turn_evidence) ? metrics.turn_evidence : [];
   const contractWarningFromState = location.state?.contractWarning;
   const forcedZeroReason = scoreProvenance.forced_zero_reason || evaluationExplainability?.forced_zero_reason || null;
   const shouldShowForcedZero = Number(report?.overall_score || 0) === 0 && (
@@ -590,88 +581,30 @@ export default function ReportPage() {
         </Alert>
       )}
 
-      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
-        <CardContent>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Validation & Provenance
+      {shouldShowForcedZero && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            Score forced to 0 due to missing or invalid evidence.
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Contract checks verify whether captured evidence is sufficient for a valid score.
+        </Alert>
+      )}
+      {!contractPassed && validationFlags.length > 0 && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Validation flags
           </Typography>
-          <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={12} md={3}>
-              <Card variant="outlined"><CardContent>
-                <Typography variant="caption" color="text.secondary">Contract Status</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  {contractPassed ? "Passed" : "Failed"}
-                </Typography>
-              </CardContent></Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card variant="outlined"><CardContent>
-                <Typography variant="caption" color="text.secondary">Source</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  {scoreProvenance.source || evaluationExplainability?.source || "unknown"}
-                </Typography>
-              </CardContent></Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card variant="outlined"><CardContent>
-                <Typography variant="caption" color="text.secondary">Confidence</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  {scoreProvenance.confidence || evaluationExplainability?.confidence || "unknown"}
-                </Typography>
-              </CardContent></Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card variant="outlined"><CardContent>
-                <Typography variant="caption" color="text.secondary">Turns Evaluated</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  {captureEvidence.turns_evaluated ?? evaluationExplainability?.turns_evaluated ?? turnEvaluations.length}
-                </Typography>
-              </CardContent></Card>
-            </Grid>
-          </Grid>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Contract Version: <strong>{contractVersion}</strong> · Candidate Words: <strong>{captureEvidence.candidate_word_count ?? metrics.candidate_word_count ?? 0}</strong> · Candidate Turns: <strong>{captureEvidence.candidate_turn_count ?? metrics.candidate_turn_count ?? 0}</strong>
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Rubric: <strong>{rubricVersion}</strong> · Scorer: <strong>{scorerVersion}</strong>
-          </Typography>
-          {shouldShowForcedZero && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <Typography variant="body2">
-                Score forced to 0 due to missing or invalid evidence.
-              </Typography>
-            </Alert>
-          )}
-          {!contractPassed && validationFlags.length > 0 && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                Validation flags
-              </Typography>
-              {validationFlags.map((flag, idx) => (
-                <Typography key={`${flag}-${idx}`} variant="body2" color="text.secondary">
-                  • {flag}
-                </Typography>
-              ))}
-            </Alert>
-          )}
-          {turnEvidence.length > 0 && (
-            <Typography variant="body2" color="text.secondary">
-              Evidence-backed turns persisted: <strong>{turnEvidence.length}</strong>
+          {validationFlags.map((flag, idx) => (
+            <Typography key={`${flag}-${idx}`} variant="body2" color="text.secondary">
+              • {flag}
             </Typography>
-          )}
-        </CardContent>
-      </Card>
+          ))}
+        </Alert>
+      )}
 
       <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Gaze Flags Timeline
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Timestamped monitoring flags captured during the interview session.
+            Eye Contact & Presence
           </Typography>
 
           <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -706,31 +639,6 @@ export default function ReportPage() {
               <Chip size="small" label="No gaze flags captured" color="success" variant="outlined" />
             )}
           </Box>
-
-          {gazeEvents.length > 0 ? (
-            <Box sx={{ display: "grid", gap: 1 }}>
-              {gazeEvents.slice(0, 25).map((event) => (
-                <Card key={event.id} variant="outlined">
-                  <CardContent sx={{ py: 1.5 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {event.event_type} · {formatDurationMs(event.duration_ms)}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {event.description}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {event.started_at ? new Date(event.started_at).toLocaleTimeString() : "-"}
-                      {" → "}
-                      {event.ended_at ? new Date(event.ended_at).toLocaleTimeString() : "-"}
-                      {event.confidence != null ? ` · confidence ${event.confidence}%` : ""}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
-          ) : (
-            <Alert severity="info">No gaze flag events were persisted for this session.</Alert>
-          )}
         </CardContent>
       </Card>
 
@@ -931,7 +839,20 @@ export default function ReportPage() {
       </Card>
 
       {/* ── Per-Question Analysis ───────────────────────────────────────── */}
-      {report?.turn_analyses?.length > 0 && !isIncompleteCapture && (
+      {report?.turn_analyses?.length > 0 && !isIncompleteCapture && isLowCaptureQuality && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Analysis Quality Limited
+          </Typography>
+          <Typography variant="body2">
+            Not enough candidate speech was captured to generate a reliable per-question analysis 
+            (only {metrics.candidate_word_count || 0} words recorded). This can happen when audio 
+            echo or background noise is captured instead of your voice. Try completing a new session 
+            with headphones for more accurate results.
+          </Typography>
+        </Alert>
+      )}
+      {report?.turn_analyses?.length > 0 && !isIncompleteCapture && !isLowCaptureQuality && (
         <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Per-Question Analysis</Typography>
