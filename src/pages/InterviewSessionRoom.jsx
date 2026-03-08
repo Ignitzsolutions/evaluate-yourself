@@ -206,6 +206,9 @@ export default function InterviewSessionRoom() {
   const userMessagesRef = useRef([]);
   // Track last AI spoken text for echo detection
   const lastAiSpokenTextRef = useRef('');
+  // Track the last question text sent to AI via sendServerQuestion — for immediate echo detection
+  // before audio transcript events arrive (timing race condition mitigation)
+  const lastSentQuestionTextRef = useRef('');
   // Track last AI output item id to associate following conversation items as user replies
   const lastAIItemRef = useRef(null);
   // Track last committed input item id (optional)
@@ -279,17 +282,24 @@ export default function InterviewSessionRoom() {
   /**
    * Echo detection: returns true if userText appears to be the mic picking up the AI's own
    * speech output (hardware loopback / AEC failure). Compares word-level overlap against the
-   * last few AI messages. If ≥60% of the unique words in userText also appear in a recent AI
-   * utterance we treat it as an echo and discard it.
+   * last few AI messages AND the last sent question (to catch echoes that arrive before the
+   * audio transcript event fires — a common timing race condition).
    */
   const isEchoOfAI = useCallback((userText) => {
     if (!userText) return false;
     const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w) => w.length > 2);
     const userWords = new Set(normalize(userText));
-    if (userWords.size < 4) return false; // too short to be a meaningful echo
-    const recentAI = aiMessagesRef.current.slice(-3);
-    for (const msg of recentAI) {
-      const aiWords = new Set(normalize(msg.text || ''));
+    if (userWords.size < 3) return false; // too short to be a meaningful echo check
+
+    // Build corpus of recent AI speech: last 3 AI transcript messages + the last sent question
+    const candidates = [
+      ...aiMessagesRef.current.slice(-3).map((m) => m.text || ''),
+      lastSentQuestionTextRef.current,
+      lastAiSpokenTextRef.current,
+    ].filter(Boolean);
+
+    for (const aiText of candidates) {
+      const aiWords = new Set(normalize(aiText));
       if (aiWords.size === 0) continue;
       let overlap = 0;
       for (const w of userWords) { if (aiWords.has(w)) overlap++; }
@@ -1186,6 +1196,8 @@ export default function InterviewSessionRoom() {
       const sendServerQuestion = (questionText) => {
         const q = String(questionText || '').trim();
         if (!q || !dcRef.current || dcRef.current.readyState !== 'open') return false;
+        // Track immediately for echo detection timing — before audio transcript events arrive
+        lastSentQuestionTextRef.current = q;
         const wrappedInstruction = buildInterviewerUtteranceInstruction(q);
         dcRef.current.send(
           JSON.stringify({

@@ -23,7 +23,7 @@ def test_low_relevance_routes_to_clarify(monkeypatch):
     )
 
     result = decide_next_turn(
-        last_user_turn="random unrelated text",
+        last_user_turn="I was working on a completely different task and not sure what this question is asking about",
         recent_transcript=[],
         interview_type="mixed",
         difficulty="mid",
@@ -55,7 +55,7 @@ def test_high_scores_raise_bar(monkeypatch):
     )
 
     result = decide_next_turn(
-        last_user_turn="I designed a distributed queue with retries and idempotency keys.",
+        last_user_turn="I designed a distributed queue with retries and idempotency keys to handle exactly-once delivery.",
         recent_transcript=[],
         interview_type="technical",
         difficulty="mid",

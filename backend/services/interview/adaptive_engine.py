@@ -483,6 +483,44 @@ def decide_next_turn(
             },
         }
 
+    # Minimum evidence gate: answers < 12 words are too short to evaluate meaningfully.
+    # Skip scoring and move on — don't trigger follow-up probes on noise/echo fragments.
+    meaningful_words = [w for w in last_user_turn.split() if len(w) > 1]
+    if len(meaningful_words) < 12:
+        bank_type = _resolve_question_type(
+            interview_type=interview_type,
+            question_mix=question_mix,
+            asked_count=len(asked_question_ids),
+            selected_skills=normalized_selected_skills,
+        )
+        next_question, question_id, source = _select_next_bank_question(
+            interview_type=bank_type,
+            difficulty=normalized_difficulty,
+            asked_question_ids=asked_question_ids,
+            role=role,
+            selected_skills=normalized_selected_skills,
+            db=db,
+        )
+        if not next_question:
+            next_question = "Take your time — tell me about a project or situation you're proud of."
+            question_id = "fallback_short_answer"
+            source = "fallback"
+        return {
+            "next_question": next_question,
+            "question_id": question_id,
+            "reason": "short_answer_skip",
+            "followup_type": "move_on",
+            "difficulty_next": normalized_difficulty,
+            "turn_scores": {},
+            "selected_skills_applied": normalized_selected_skills,
+            "adaptive_path": {
+                "interview_style": interview_style,
+                "question_mix": question_mix,
+                "duration_minutes": duration_minutes,
+                "source": source,
+            },
+        }
+
     turn_scores = evaluate_turn(
         user_turn=last_user_turn,
         interview_type=interview_type,
