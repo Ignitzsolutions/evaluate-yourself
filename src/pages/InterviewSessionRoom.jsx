@@ -980,7 +980,7 @@ export default function InterviewSessionRoom() {
       setCameraOff(false);
       setSelfViewHidden(false);
     } else {
-      addTranscript('system', 'Reconnecting interview session...');
+      // no-op: reconnect attempt, no UI transcript noise
     }
     stopGazeMonitoring();
     stopBrowserSpeechRecognition();
@@ -999,7 +999,6 @@ export default function InterviewSessionRoom() {
         stream && stream.getTracks().some((track) => track.readyState === 'live'),
       );
       if (!hasLiveStream) {
-        addTranscript('system', 'Requesting camera and microphone permissions...');
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -1039,12 +1038,11 @@ export default function InterviewSessionRoom() {
           }
         }
       } else if (isReconnectAttempt) {
-        addTranscript('system', 'Reusing camera and microphone stream for reconnect.');
+        // reusing existing stream, no UI noise needed
       }
 
       localStreamRef.current = stream;
       setMicActive(true);
-      addTranscript('system', 'Camera and microphone access granted');
       if (localVideoRef.current) {
         try {
           localVideoRef.current.srcObject = stream;
@@ -1053,9 +1051,7 @@ export default function InterviewSessionRoom() {
           console.warn('Local video preview failed:', previewErr);
         }
       }
-      addTranscript('system', 'Running quick gaze pre-check...');
       await runGazePreflight();
-      addTranscript('system', 'Gaze calibration complete.');
       startBrowserSpeechRecognition();
 
       // Step 2: Create RTCPeerConnection
@@ -1065,7 +1061,6 @@ export default function InterviewSessionRoom() {
       // Track connection state
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        addTranscript('system', `Connection state: ${state}`);
 
         if (state === 'connected') {
           setStatus('ready');
@@ -1187,7 +1182,6 @@ export default function InterviewSessionRoom() {
       };
 
       dc.onopen = () => {
-        addTranscript('system', 'DataChannel opened');
         setStatus('connected');
 
         // Send session.update with turn detection
@@ -1460,10 +1454,7 @@ export default function InterviewSessionRoom() {
 
       dc.onclose = () => {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          addTranscript('system', 'DataChannel closed due to network disconnect.');
           setError('Internet disconnected. Interview paused. Reconnect when network is back.');
-        } else {
-          addTranscript('system', 'DataChannel closed');
         }
         setStatus('disconnected');
       };
@@ -1471,10 +1462,8 @@ export default function InterviewSessionRoom() {
       // Step 6: Create SDP offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      addTranscript('system', 'SDP offer created');
 
       // Step 7: Send to backend with Clerk auth
-      addTranscript('system', `Sending SDP offer to backend...`);
       const token = await getToken();
       if (!token) {
         throw new Error('Authentication token unavailable for interview session');
@@ -1572,9 +1561,7 @@ export default function InterviewSessionRoom() {
       }
 
       addTranscript('system', 'SDP answer received from backend');
-      if (typeof data.effectiveDurationMinutes === 'number' && data.effectiveDurationMinutes > 0) {
-        addTranscript('system', `Session limit enforced: ${data.effectiveDurationMinutes} minutes (${data.planTier || 'trial'} plan).`);
-      }
+
 
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
       addTranscript('system', 'Remote description set, connection establishing...');

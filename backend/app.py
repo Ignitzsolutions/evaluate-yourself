@@ -4667,12 +4667,25 @@ async def download_interview_report(
 
     # Reuse report access checks
     report = await get_interview_report(report_id, authorization=authorization, db=db)
+    # get_interview_report returns a dict — use dict access throughout
+    if isinstance(report, dict):
+        report_data = report
+    else:
+        report_data = report.__dict__ if hasattr(report, '__dict__') else {}
 
     # Normalize data
-    scores = report.scores if isinstance(report.scores, dict) else {}
-    metrics = report.metrics if isinstance(report.metrics, dict) else {}
-    recommendations = report.recommendations if isinstance(report.recommendations, list) else []
-    transcript = report.transcript if isinstance(report.transcript, list) else []
+    scores = report_data.get("scores") or {}
+    if not isinstance(scores, dict):
+        scores = {}
+    metrics = report_data.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        metrics = {}
+    recommendations = report_data.get("recommendations") or []
+    if not isinstance(recommendations, list):
+        recommendations = []
+    transcript = report_data.get("transcript") or []
+    if not isinstance(transcript, list):
+        transcript = []
     capture_status = metrics.get("capture_status")
 
     buffer = BytesIO()
@@ -4683,12 +4696,12 @@ async def download_interview_report(
     body_style = styles["BodyText"]
 
     content = []
-    content.append(Paragraph(report.title or "Interview Report", title_style))
+    content.append(Paragraph(report_data.get("title") or "Interview Report", title_style))
     content.append(Paragraph("Evaluate Yourself", ParagraphStyle("Brand", parent=styles["Heading1"], fontSize=16, textColor=colors.HexColor("#1d4ed8"))))
-    content.append(Paragraph(f"<b>Date:</b> {report.date}", body_style))
-    content.append(Paragraph(f"<b>Type:</b> {report.type}", body_style))
-    content.append(Paragraph(f"<b>Mode:</b> {report.mode}", body_style))
-    content.append(Paragraph(f"<b>Duration:</b> {report.duration}", body_style))
+    content.append(Paragraph(f"<b>Date:</b> {report_data.get('date', '')}", body_style))
+    content.append(Paragraph(f"<b>Type:</b> {report_data.get('type', '')}", body_style))
+    content.append(Paragraph(f"<b>Mode:</b> {report_data.get('mode', '')}", body_style))
+    content.append(Paragraph(f"<b>Duration:</b> {report_data.get('duration', '')}", body_style))
     content.append(Spacer(1, 12))
 
     if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
@@ -4701,7 +4714,7 @@ async def download_interview_report(
         content.append(Paragraph("Score reflects partial evidence and has reduced confidence.", body_style))
     else:
         content.append(Paragraph("Summary Scores", h_style))
-        overall = report.overall_score if report.overall_score is not None else 0
+        overall = report_data.get("overall_score") or 0
         content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
         if scores:
             # Simple horizontal bar chart for top skills
