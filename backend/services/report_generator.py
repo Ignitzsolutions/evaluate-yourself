@@ -430,6 +430,18 @@ def _build_turn_analyses(
         if not answer:
             continue
 
+        # Skip answers that are too short to be meaningful (likely echo artifacts or noise)
+        answer_words = [w for w in answer.split() if len(w) > 1]
+        if len(answer_words) < 8:
+            continue
+
+        # Skip answers that look like echoes of the question (≥60% word overlap)
+        if question:
+            q_words = set(w.lower() for w in question.split() if len(w) > 2)
+            a_words = set(w.lower() for w in answer.split() if len(w) > 2)
+            if q_words and len(a_words) > 0 and len(q_words & a_words) / len(a_words) >= 0.60:
+                continue
+
         turn_id = idx + 1
         eval_data = evals_by_turn.get(turn_id, {})
 

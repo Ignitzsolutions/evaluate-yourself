@@ -231,17 +231,52 @@ def _select_next_bank_question(
     return selected.get("text"), selected.get("id"), "question_bank"
 
 
-def _followup_for_low_signal(last_user_turn: str, followup_type: str) -> str:
-    if followup_type == "clarify":
-        return (
-            "Please clarify your previous answer in a clearer structure. "
-            "Start with context, then your action, and then the outcome."
-        )
+_CLARIFY_PROBES = [
+    "Walk me through that from start to finish — what was the situation and what did you personally do?",
+    "Let me zoom in on your specific role. What actions did you take, and what was the outcome?",
+    "Can you ground that in a concrete example — what were you dealing with, what did you do, and what happened as a result?",
+    "Help me understand your contribution. What problem were you solving and how exactly did you approach it?",
+    "I'd like to understand the scope of your involvement. Could you give me a specific example of what you did?",
+    "Tell me about a specific time that happened. What was the context, what was your action, and what changed because of it?",
+]
 
-    return (
-        "Can you go deeper with one concrete example, including your exact decisions, "
-        "trade-offs, and measurable outcome?"
+_PROBE_PROBES = [
+    "What was the actual outcome — any numbers, timelines, or measurable impact you can point to?",
+    "Give me a concrete trade-off you had to make in that situation and why you chose the way you did.",
+    "What was the hardest decision you had to make during that, and what was the consequence?",
+    "How did you know it was successful? What did you use to measure that?",
+    "What would have played out differently if you had taken a different approach?",
+    "Tell me about a specific moment where something didn't go as planned — what did you do?",
+]
+
+
+def _followup_for_low_signal(last_user_turn: str, followup_type: str, turn_index: int = 0) -> str:
+    if followup_type == "clarify":
+        return _CLARIFY_PROBES[turn_index % len(_CLARIFY_PROBES)]
+    return _PROBE_PROBES[turn_index % len(_PROBE_PROBES)]
+
+
+def _is_echo_of_interviewer(user_turn: str, recent_transcript: List[Dict[str, Any]]) -> bool:
+    """Return True if the user turn looks like an echo of the AI's own speech (mic loopback)."""
+    if not user_turn:
+        return False
+    user_words = set(
+        w for w in user_turn.lower().replace(",", " ").split() if len(w) > 2
     )
+    if len(user_words) < 4:
+        return False
+    for msg in reversed(recent_transcript[-4:]):
+        speaker = str(msg.get("speaker", "")).lower()
+        if speaker not in {"ai", "interviewer", "sonia"}:
+            continue
+        ai_text = str(msg.get("text", ""))
+        ai_words = set(w for w in ai_text.lower().replace(",", " ").split() if len(w) > 2)
+        if not ai_words:
+            continue
+        overlap = len(user_words & ai_words) / len(user_words)
+        if overlap >= 0.60:
+            return True
+    return False
 
 
 def _intro_skill_probe_question(last_user_turn: str) -> Optional[Tuple[str, str]]:
@@ -411,6 +446,43 @@ def decide_next_turn(
         label = "INTERVIEWER" if speaker in {"ai", "interviewer", "sonia"} else "CANDIDATE"
         context_lines.append(f"{label}: {text}")
 
+    # Echo detection: if candidate "answer" looks like the AI's own speech being looped back
+    # through the mic, skip evaluation and move on to the next question silently.
+    if _is_echo_of_interviewer(last_user_turn, recent_transcript):
+        bank_type = _resolve_question_type(
+            interview_type=interview_type,
+            question_mix=question_mix,
+            asked_count=len(asked_question_ids),
+            selected_skills=normalized_selected_skills,
+        )
+        next_question, question_id, source = _select_next_bank_question(
+            interview_type=bank_type,
+            difficulty=normalized_difficulty,
+            asked_question_ids=asked_question_ids,
+            role=role,
+            selected_skills=normalized_selected_skills,
+            db=db,
+        )
+        if not next_question:
+            next_question = "Can you tell me about a project you're particularly proud of and your specific contribution?"
+            question_id = "fallback_echo_skip"
+            source = "fallback"
+        return {
+            "next_question": next_question,
+            "question_id": question_id,
+            "reason": "echo_detected_skip",
+            "followup_type": "move_on",
+            "difficulty_next": normalized_difficulty,
+            "turn_scores": {},
+            "selected_skills_applied": normalized_selected_skills,
+            "adaptive_path": {
+                "interview_style": interview_style,
+                "question_mix": question_mix,
+                "duration_minutes": duration_minutes,
+                "source": source,
+            },
+        }
+
     turn_scores = evaluate_turn(
         user_turn=last_user_turn,
         interview_type=interview_type,
@@ -444,7 +516,7 @@ def decide_next_turn(
             reason = "reduce_bar"
 
     if followup_type in {"clarify", "probe"}:
-        next_question = _followup_for_low_signal(last_user_turn, followup_type)
+        next_question = _followup_for_low_signal(last_user_turn, followup_type, turn_index=len(asked_question_ids))
         question_id = f"followup_{followup_type}"
         source = "adaptive_followup"
     else:
