@@ -727,7 +727,6 @@ def _extract_evidence_quote(answer: str, depth_signals: Dict) -> Optional[str]:
 
     metrics = depth_signals.get("metrics_mentioned", []) if depth_signals else []
     ownership_signals = depth_signals.get("ownership_signals", 0) if depth_signals else 0
-    impact_signals = depth_signals.get("impact_signals", 0) if depth_signals else 0
 
     def _sentence_score(s: str) -> int:
         sl = s.lower()
