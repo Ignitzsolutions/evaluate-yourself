@@ -284,7 +284,7 @@ export default function AdminOverviewPage() {
                     <TableRow key={row.id}>
                       <TableCell>{row.rating}/5</TableCell>
                       <TableCell>{row.plan_tier || (row.trial_mode ? "trial" : "-")}</TableCell>
-                      <TableCell>{compactText(row.comment || "No comment", 48)}</TableCell>
+                      <TableCell>{compactText(row.comment || "No comment")}</TableCell>
                       <TableCell>{formatDateTime(row.submitted_at)}</TableCell>
                     </TableRow>
                   ))}
