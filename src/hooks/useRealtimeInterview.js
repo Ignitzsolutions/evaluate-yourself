@@ -465,25 +465,18 @@ export default function useRealtimeInterview(sessionId, interviewType = null) {
         isConnectedRef.current = true;
         setInterviewState(prev => ({ ...prev, status: 'connected' }));
         
-        // SEND SESSION.UPDATE FIRST with turn_detection (working values: 0.7 threshold, 600ms silence)
-        // Include session.type: 'realtime' as required by Azure Realtime API
+        // Send session.update with correct OpenAI Realtime API format
         try {
           sendEvent({
             type: 'session.update',
             session: {
-              type: 'realtime',
-              audio: {
-                input: {
-                  turn_detection: {
-                    type: 'server_vad',
-                    threshold: 0.7,
-                    silence_duration_ms: 600
-                  },
-                  transcription: {
-                    model: 'gpt-4o-mini-transcribe',
-                    language: 'en'
-                  }
-                }
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.7,
+                silence_duration_ms: 600
+              },
+              input_audio_transcription: {
+                model: 'whisper-1'
               }
             }
           });

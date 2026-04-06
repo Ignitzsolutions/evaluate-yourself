@@ -26,6 +26,11 @@ except Exception:  # pragma: no cover
     from backend.services.interview.policy_guard import detect_interviewer_control_attempt
 
 try:
+    from services.interview.followup_generator import generate_followup
+except Exception:  # pragma: no cover
+    from backend.services.interview.followup_generator import generate_followup
+
+try:
     from services.interview.skill_tracks import (
         filter_questions_for_track_ids,
         is_behavioral_track,
@@ -112,9 +117,9 @@ def _resolve_question_type(
     if mix == "behavioral":
         return "behavioral"
 
-    # Mixed + selected technical skill(s): force behavioral -> technical alternation.
+    # Mixed + selected technical skill(s): keep a technical bias without sounding mechanical.
     if interview == "mixed" and selected_has_technical:
-        return "behavioral" if asked_count % 2 == 0 else "technical"
+        return "behavioral" if asked_count % 3 == 0 else "technical"
 
     # Mixed + balanced fallback.
     return "technical" if asked_count % 2 else "behavioral"
@@ -231,17 +236,100 @@ def _select_next_bank_question(
     return selected.get("text"), selected.get("id"), "question_bank"
 
 
-def _followup_for_low_signal(last_user_turn: str, followup_type: str) -> str:
-    if followup_type == "clarify":
-        return (
-            "Please clarify your previous answer in a clearer structure. "
-            "Start with context, then your action, and then the outcome."
-        )
+_CLARIFY_PROBES = [
+    "Walk me through that from start to finish — what was the situation and what did you personally do?",
+    "Let me zoom in on your specific role. What actions did you take, and what was the outcome?",
+    "Can you ground that in a concrete example — what were you dealing with, what did you do, and what happened as a result?",
+    "Help me understand your contribution. What problem were you solving and how exactly did you approach it?",
+    "I'd like to understand the scope of your involvement. Could you give me a specific example of what you did?",
+    "Tell me about a specific time that happened. What was the context, what was your action, and what changed because of it?",
+]
 
-    return (
-        "Can you go deeper with one concrete example, including your exact decisions, "
-        "trade-offs, and measurable outcome?"
+_PROBE_PROBES = [
+    "What was the actual outcome — any numbers, timelines, or measurable impact you can point to?",
+    "Give me a concrete trade-off you had to make in that situation and why you chose the way you did.",
+    "What was the hardest decision you had to make during that, and what was the consequence?",
+    "How did you know it was successful? What did you use to measure that?",
+    "What would have played out differently if you had taken a different approach?",
+    "Tell me about a specific moment where something didn't go as planned — what did you do?",
+]
+
+
+def _followup_for_low_signal(last_user_turn: str, followup_type: str, turn_index: int = 0) -> str:
+    if followup_type == "clarify":
+        return _CLARIFY_PROBES[turn_index % len(_CLARIFY_PROBES)]
+    return _PROBE_PROBES[turn_index % len(_PROBE_PROBES)]
+
+
+def _latest_interviewer_question(recent_transcript: List[Dict[str, Any]]) -> str:
+    for msg in reversed(recent_transcript or []):
+        if not isinstance(msg, dict):
+            continue
+        speaker = str(msg.get("speaker", "")).lower()
+        if speaker in {"ai", "interviewer", "sonia"}:
+            text = str(msg.get("text", "")).strip()
+            if text:
+                return text
+    return ""
+
+
+def _turn_phase(asked_count: int, duration_minutes: Optional[int]) -> str:
+    if asked_count <= 0:
+        return "opening"
+    if asked_count <= 1:
+        return "opening_thread"
+    if duration_minutes and duration_minutes <= 10 and asked_count <= 2:
+        return "opening_thread"
+    return "main_loop"
+
+
+def _opening_thread_followup(
+    *,
+    interview_type: str,
+    recent_transcript: List[Dict[str, Any]],
+    last_user_turn: str,
+    asked_question_ids: List[str],
+) -> Optional[str]:
+    source_question = _latest_interviewer_question(recent_transcript)
+    probe_reason = "technical" if interview_type == "technical" else "behavioral" if interview_type == "behavioral" else "mixed"
+    planned = generate_followup(
+        question=source_question,
+        answer=last_user_turn,
+        probe_reason=probe_reason,
+        interview_type=interview_type,
+        question_id=asked_question_ids[-1] if asked_question_ids else None,
     )
+    if planned:
+        return planned
+
+    if interview_type == "technical":
+        return "What was the hardest technical tradeoff in that work, and how did you make the call?"
+    if interview_type == "behavioral":
+        return "Where did you personally have to make a difficult call, and what happened because of it?"
+    return "What was the hardest call you personally had to make in that project, and what was the outcome?"
+
+
+def _is_echo_of_interviewer(user_turn: str, recent_transcript: List[Dict[str, Any]]) -> bool:
+    """Return True if the user turn looks like an echo of the AI's own speech (mic loopback)."""
+    if not user_turn:
+        return False
+    user_words = set(
+        w for w in user_turn.lower().replace(",", " ").split() if len(w) > 2
+    )
+    if len(user_words) < 4:
+        return False
+    for msg in reversed(recent_transcript[-4:]):
+        speaker = str(msg.get("speaker", "")).lower()
+        if speaker not in {"ai", "interviewer", "sonia"}:
+            continue
+        ai_text = str(msg.get("text", ""))
+        ai_words = set(w for w in ai_text.lower().replace(",", " ").split() if len(w) > 2)
+        if not ai_words:
+            continue
+        overlap = len(user_words & ai_words) / len(user_words)
+        if overlap >= 0.60:
+            return True
+    return False
 
 
 def _intro_skill_probe_question(last_user_turn: str) -> Optional[Tuple[str, str]]:
@@ -274,6 +362,39 @@ def _intro_skill_probe_question(last_user_turn: str) -> Optional[Tuple[str, str]
             )
             return question, slug
     return None
+
+
+def _looks_generic_opening(question: Optional[str]) -> bool:
+    text = str(question or "").strip().lower()
+    if not text:
+        return True
+    generic_patterns = [
+        "tell me about yourself",
+        "what you're working on currently",
+        "what you’re working on currently",
+        "what excites you about this field",
+        "introduce yourself",
+        "current role and your most significant professional achievement",
+    ]
+    return any(pattern in text for pattern in generic_patterns)
+
+
+def _fallback_opening_question(bank_type: str, role: Optional[str]) -> str:
+    role_label = str(role or "").strip()
+    if bank_type == "behavioral":
+        if role_label:
+            return (
+                f"To get started, walk me through a recent piece of work in your {role_label} role "
+                "where you had clear ownership. What was the situation, and what did you personally drive?"
+            )
+        return (
+            "To get started, tell me about a recent project or challenge where you had clear ownership. "
+            "What was the situation, and what did you personally drive?"
+        )
+    return (
+        "To get started, walk me through a recent technical problem you owned end-to-end. "
+        "How did you approach it, and what tradeoffs shaped your decisions?"
+    )
 
 
 def choose_opening_question(
@@ -322,11 +443,8 @@ def choose_opening_question(
         db=db,
     )
 
-    if not question:
-        if bank_type == "behavioral":
-            question = "Tell me about a recent challenge at work and how you handled it."
-        else:
-            question = "Describe a recent technical problem you solved, including your approach and tradeoffs."
+    if not question or (bank_type in {"behavioral", "technical"} and _looks_generic_opening(question)):
+        question = _fallback_opening_question(bank_type, role)
         question_id = "fallback_opening"
         source = "fallback_opening"
 
@@ -357,6 +475,7 @@ def decide_next_turn(
 
     normalized_difficulty = normalize_difficulty(difficulty)
     normalized_selected_skills = normalize_track_ids(selected_skills)
+    phase = _turn_phase(len(asked_question_ids), duration_minutes)
 
     if detect_interviewer_control_attempt(last_user_turn):
         bank_type = _resolve_question_type(
@@ -398,6 +517,7 @@ def decide_next_turn(
                 "interview_style": interview_style,
                 "question_mix": question_mix,
                 "duration_minutes": duration_minutes,
+                "phase": phase,
                 "source": source,
             },
         }
@@ -410,6 +530,80 @@ def decide_next_turn(
             continue
         label = "INTERVIEWER" if speaker in {"ai", "interviewer", "sonia"} else "CANDIDATE"
         context_lines.append(f"{label}: {text}")
+
+    # Echo detection: if candidate "answer" looks like the AI's own speech being looped back
+    # through the mic, skip evaluation and move on to the next question silently.
+    if _is_echo_of_interviewer(last_user_turn, recent_transcript):
+        bank_type = _resolve_question_type(
+            interview_type=interview_type,
+            question_mix=question_mix,
+            asked_count=len(asked_question_ids),
+            selected_skills=normalized_selected_skills,
+        )
+        next_question, question_id, source = _select_next_bank_question(
+            interview_type=bank_type,
+            difficulty=normalized_difficulty,
+            asked_question_ids=asked_question_ids,
+            role=role,
+            selected_skills=normalized_selected_skills,
+            db=db,
+        )
+        if not next_question:
+            next_question = "Can you tell me about a project you're particularly proud of and your specific contribution?"
+            question_id = "fallback_echo_skip"
+            source = "fallback"
+        return {
+            "next_question": next_question,
+            "question_id": question_id,
+            "reason": "echo_detected_skip",
+            "followup_type": "move_on",
+            "difficulty_next": normalized_difficulty,
+            "turn_scores": {},
+            "selected_skills_applied": normalized_selected_skills,
+            "adaptive_path": {
+                "interview_style": interview_style,
+                "question_mix": question_mix,
+                "duration_minutes": duration_minutes,
+                "phase": phase,
+                "source": source,
+            },
+        }
+
+    # Minimum evidence gate: answers < 12 words are too short to evaluate meaningfully.
+    # Skip scoring and move on — don't trigger follow-up probes on noise/echo fragments.
+    meaningful_words = [w for w in last_user_turn.split() if len(w) > 1]
+    if len(meaningful_words) < 12:
+        source_question = _latest_interviewer_question(recent_transcript)
+        next_question = generate_followup(
+            question=source_question,
+            answer=last_user_turn,
+            probe_reason="depth_low",
+            interview_type=interview_type,
+            question_id=asked_question_ids[-1] if asked_question_ids else None,
+        )
+        if not next_question:
+            next_question = (
+                "Take your time and give me one concrete example. What was the situation, "
+                "what did you personally do, and what happened?"
+            )
+        question_id = "followup_short_answer_retry"
+        source = "short_answer_retry"
+        return {
+            "next_question": next_question,
+            "question_id": question_id,
+            "reason": "short_answer_retry",
+            "followup_type": "clarify",
+            "difficulty_next": normalized_difficulty,
+            "turn_scores": {},
+            "selected_skills_applied": normalized_selected_skills,
+            "adaptive_path": {
+                "interview_style": interview_style,
+                "question_mix": question_mix,
+                "duration_minutes": duration_minutes,
+                "phase": phase,
+                "source": source,
+            },
+        }
 
     turn_scores = evaluate_turn(
         user_turn=last_user_turn,
@@ -444,34 +638,59 @@ def decide_next_turn(
             reason = "reduce_bar"
 
     if followup_type in {"clarify", "probe"}:
-        next_question = _followup_for_low_signal(last_user_turn, followup_type)
+        source_question = _latest_interviewer_question(recent_transcript)
+        probe_reason = "relevance_low" if followup_type == "clarify" else "depth_low"
+        next_question = generate_followup(
+            question=source_question,
+            answer=last_user_turn,
+            probe_reason=probe_reason,
+            interview_type=interview_type,
+            question_id=asked_question_ids[-1] if asked_question_ids else None,
+        )
+        if not next_question:
+            next_question = _followup_for_low_signal(last_user_turn, followup_type, turn_index=len(asked_question_ids))
         question_id = f"followup_{followup_type}"
         source = "adaptive_followup"
     else:
-        intro_probe = None
-        if (interview_type or "").strip().lower() in {"technical", "mixed"} and len(asked_question_ids) <= 2:
-            intro_probe = _intro_skill_probe_question(last_user_turn)
-        if intro_probe:
-            probe_question, probe_slug = intro_probe
-            next_question = probe_question
-            question_id = f"intro_skill_{probe_slug}"
-            source = "intro_skill_probe"
-            reason = "intro_skill_probe"
-        else:
-            bank_type = _resolve_question_type(
-                interview_type,
-                question_mix,
-                len(asked_question_ids),
-                normalized_selected_skills,
-            )
-            next_question, question_id, source = _select_next_bank_question(
-                interview_type=bank_type,
-                difficulty=difficulty_next,
+        early_thread_followup = None
+        if phase == "opening_thread":
+            early_thread_followup = _opening_thread_followup(
+                interview_type=interview_type,
+                recent_transcript=recent_transcript,
+                last_user_turn=last_user_turn,
                 asked_question_ids=asked_question_ids,
-                role=role,
-                selected_skills=normalized_selected_skills,
-                db=db,
             )
+        if early_thread_followup:
+            next_question = early_thread_followup
+            question_id = "followup_opening_thread"
+            source = "opening_thread_probe"
+            reason = "opening_thread_probe"
+            followup_type = "probe"
+        else:
+            intro_probe = None
+            if (interview_type or "").strip().lower() in {"technical", "mixed"} and len(asked_question_ids) <= 2:
+                intro_probe = _intro_skill_probe_question(last_user_turn)
+            if intro_probe:
+                probe_question, probe_slug = intro_probe
+                next_question = probe_question
+                question_id = f"intro_skill_{probe_slug}"
+                source = "intro_skill_probe"
+                reason = "intro_skill_probe"
+            else:
+                bank_type = _resolve_question_type(
+                    interview_type,
+                    question_mix,
+                    len(asked_question_ids),
+                    normalized_selected_skills,
+                )
+                next_question, question_id, source = _select_next_bank_question(
+                    interview_type=bank_type,
+                    difficulty=difficulty_next,
+                    asked_question_ids=asked_question_ids,
+                    role=role,
+                    selected_skills=normalized_selected_skills,
+                    db=db,
+                )
 
     if not next_question:
         next_question = "Can you walk me through a recent project and your specific contribution?"
@@ -492,6 +711,7 @@ def decide_next_turn(
             "interview_style": interview_style,
             "question_mix": question_mix,
             "duration_minutes": duration_minutes,
+            "phase": phase,
             "source": source,
         },
     }

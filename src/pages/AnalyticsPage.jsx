@@ -348,7 +348,7 @@ export default function AnalyticsPage() {
                 </Typography>
                 <Button
                   variant="outlined"
-                  onClick={() => navigate('/report')}
+                  onClick={() => navigate('/interviews')}
                 >
                   View All Reports
                 </Button>
@@ -420,7 +420,7 @@ export default function AnalyticsPage() {
       >
         <MenuItem onClick={() => { 
           if (selectedSession?.id) navigate(`/report/${selectedSession.id}`);
-          else navigate('/report');
+          else navigate('/dashboard');
           handleMenuClose(); 
         }}>
           <ViewIcon sx={{ mr: 1 }} />

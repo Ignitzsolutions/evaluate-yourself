@@ -1,13 +1,19 @@
 import os
+import pathlib
+import sys
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
+# Ensure backend package imports resolve no matter the current working directory.
+BACKEND_DIR = pathlib.Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 # Load .env if present
 try:
     from dotenv import load_dotenv
-    import pathlib
-    backend_dir = pathlib.Path(__file__).resolve().parents[1]
+    backend_dir = BACKEND_DIR
     root_env = backend_dir.parent / '.env'
     backend_env = backend_dir / '.env'
     if root_env.exists():
@@ -32,7 +38,7 @@ target_metadata = Base.metadata
 
 
 def _get_database_url() -> str:
-    default_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.db")
+    default_path = BACKEND_DIR / "app.db"
     return os.getenv("DATABASE_URL", f"sqlite:///{default_path}")
 
 

@@ -1,0 +1,139 @@
+[
+  {
+    "id": "strong_behavioral_complete",
+    "label": "Strong behavioral interview with full evidence",
+    "interview_type": "behavioral",
+    "capture_status": "COMPLETE",
+    "baseline_score": 84,
+    "expected": {
+      "contract_passed": true,
+      "validity_label": "high",
+      "score_behavior": "unchanged",
+      "final_score": 84
+    },
+    "turns": [
+      {
+        "question": "Tell me about a time you handled conflict.",
+        "answer": "In my last team two engineers disagreed on the rollout approach before a release. I owned the milestone, aligned them on a phased plan, documented owners, and we shipped on time without raising incident risk."
+      },
+      {
+        "question": "Describe a difficult stakeholder conversation.",
+        "answer": "A stakeholder wanted a date we could not responsibly meet. I laid out the dependency risk, proposed a reduced scope, and secured agreement on a revised plan with weekly checkpoints."
+      },
+      {
+        "question": "Tell me about a time you missed a target.",
+        "answer": "We missed an onboarding metric after a release. I reviewed the funnel, found a broken event, coordinated a hotfix, and recovered the conversion rate within two days."
+      },
+      {
+        "question": "How do you prioritize under pressure?",
+        "answer": "When deadlines stack up I rank work by customer impact, execution risk, and dependency order, then communicate tradeoffs early so the team can re-plan without surprises."
+      }
+    ]
+  },
+  {
+    "id": "strong_technical_complete",
+    "label": "Strong technical interview with concrete implementation detail",
+    "interview_type": "technical",
+    "capture_status": "COMPLETE",
+    "baseline_score": 86,
+    "expected": {
+      "contract_passed": true,
+      "validity_label": "high",
+      "score_behavior": "unchanged",
+      "final_score": 86
+    },
+    "turns": [
+      {
+        "question": "How would you design a scalable API?",
+        "answer": "I would start with a Python API behind a load balancer, store core records in Postgres, add Redis caching for hot reads, and instrument p95 latency plus error budgets before tuning bottlenecks."
+      },
+      {
+        "question": "Explain a production incident you resolved.",
+        "answer": "A queue backlog grew after a deployment, so I traced consumer lag, rolled back the bad config, and added circuit breakers plus alert thresholds to prevent recurrence."
+      },
+      {
+        "question": "How do you optimize database performance?",
+        "answer": "I inspect query plans, add the right composite indexes, remove N plus one access patterns, and validate the impact with before and after latency measurements."
+      },
+      {
+        "question": "What tradeoffs matter in distributed systems?",
+        "answer": "I weigh consistency versus availability, idempotency for retries, failure isolation, and the operational cost of coordination so the design matches the product risk profile."
+      }
+    ]
+  },
+  {
+    "id": "partial_capture_behavioral",
+    "label": "Partial behavioral session with low evidence coverage",
+    "interview_type": "behavioral",
+    "capture_status": "INCOMPLETE_PARTIAL_CAPTURE",
+    "expected_turn_count": 4,
+    "turns_evaluated": 2,
+    "baseline_score": 88,
+    "expected": {
+      "contract_passed": false,
+      "validity_label": "low",
+      "score_behavior": "capped",
+      "final_score": 50,
+      "flags_include": [
+        "SOFT_GUARD_PARTIAL_CAPTURE",
+        "SOFT_GUARD_LOW_EVALUATED_TURN_COVERAGE"
+      ]
+    },
+    "turns": [
+      {
+        "question": "Tell me about a time you handled conflict.",
+        "answer": "I spoke with both engineers separately, clarified the blocked handoff, and we restored delivery within the sprint."
+      },
+      {
+        "question": "Describe a difficult stakeholder conversation.",
+        "answer": "I reset expectations with the stakeholder, documented tradeoffs, and regained alignment after a missed dependency."
+      },
+      {
+        "question": "",
+        "answer": "I usually try to stay calm, listen first, and move the group toward a practical decision."
+      }
+    ]
+  },
+  {
+    "id": "echo_contaminated_mixed",
+    "label": "Echo contaminated mixed session that should be zeroed",
+    "interview_type": "mixed",
+    "capture_status": "COMPLETE",
+    "baseline_score": 82,
+    "expected": {
+      "contract_passed": false,
+      "validity_label": "low",
+      "score_behavior": "forced_zero",
+      "final_score": 0,
+      "flags_include": [
+        "HARD_GUARD_ECHO_CONTAMINATION"
+      ]
+    },
+    "turns": [
+      {
+        "question": "Tell me about yourself and what you are working on currently.",
+        "answer": "tell me about yourself and what you are working on currently"
+      },
+      {
+        "question": "Please clarify your previous answer in a clearer structure. Start with context then your action and then the outcome.",
+        "answer": "please clarify your previous answer in a clearer structure start with context then your action and then the outcome"
+      },
+      {
+        "question": "Can you go deeper with one concrete example including your exact decisions tradeoffs and measurable outcome?",
+        "answer": "including your exact decisions and measurable outcomes"
+      },
+      {
+        "question": "Please clarify your previous answer in a clearer structure. Start with context then your action and then the outcome.",
+        "answer": "please clarify your previous answer"
+      },
+      {
+        "question": "Please clarify your previous answer in a clearer structure. Start with context then your action and then the outcome.",
+        "answer": "start with context then your action and then the outcome"
+      },
+      {
+        "question": "Please clarify your previous answer in a clearer structure. Start with context then your action and then the outcome.",
+        "answer": "please clarify your previous answer"
+      }
+    ]
+  }
+]

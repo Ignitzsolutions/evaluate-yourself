@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
+  Chip,
   CircularProgress,
   Grid,
   Stack,
@@ -15,10 +17,11 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { renderDistribution, renderTopItems, sessionStatusChip, compactText, formatDateTime, formatAdminInterviewType } from "./adminUtils";
+import { renderDistribution, renderTopItems, sessionStatusChip, compactText, formatDateTime, formatAdminInterviewType, trialStatusChip } from "./adminUtils";
 import { useAdminApi } from "./useAdminApi";
 
 export default function AdminOverviewPage() {
+  const navigate = useNavigate();
   const { requestJson } = useAdminApi();
   const { refreshTick, setLastRefreshedAt } = useOutletContext();
   const [loading, setLoading] = useState(true);
@@ -26,6 +29,7 @@ export default function AdminOverviewPage() {
   const [summary, setSummary] = useState(null);
   const [overview, setOverview] = useState(null);
   const [activeUsers, setActiveUsers] = useState(null);
+  const [recentTrials, setRecentTrials] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -33,15 +37,17 @@ export default function AdminOverviewPage() {
       setLoading(true);
       setError("");
       try {
-        const [summaryData, overviewData, activeData] = await Promise.all([
+        const [summaryData, overviewData, activeData, trialData] = await Promise.all([
           requestJson("/api/admin/summary"),
           requestJson("/api/admin/dashboard/overview"),
           requestJson("/api/admin/active-users?window_minutes=15&page=1&page_size=10"),
+          requestJson("/api/admin/trial-codes?page=1&page_size=5"),
         ]);
         if (!mounted) return;
         setSummary(summaryData);
         setOverview(overviewData);
         setActiveUsers(activeData);
+        setRecentTrials(Array.isArray(trialData?.items) ? trialData.items : []);
         setLastRefreshedAt(new Date().toISOString());
       } catch (e) {
         if (!mounted) return;
@@ -64,9 +70,10 @@ export default function AdminOverviewPage() {
       ["Active Users (15m)", overview?.candidate_funnel?.active_users_last_15m_count ?? 0],
       ["Active Sessions", overview?.table_counts?.interview_sessions_active ?? 0],
       ["Reports", summary.total_reports],
+      ["Waitlist", summary.waitlist_signups ?? 0],
+      ["Feedback", summary.trial_feedback_count ?? 0],
       ["Avg Score", summary.avg_score],
-      ["Active Trials", summary.active_trials],
-      ["Registered 24h", summary.registered_24h],
+      ["Avg Rating", summary.trial_feedback_avg_rating ?? 0],
     ];
   }, [summary, overview]);
 
@@ -97,7 +104,17 @@ export default function AdminOverviewPage() {
 
       <Card>
         <CardContent>
-          <Typography variant="h6" sx={{ mb: 1.5 }}>Action Needed</Typography>
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={1} sx={{ mb: 1.5 }}>
+            <Typography variant="h6">Action Needed</Typography>
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="outlined" onClick={() => navigate("/admin/dashboard/candidates?profile=missing")}>
+                Review Profiles
+              </Button>
+              <Button size="small" variant="outlined" onClick={() => navigate("/admin/dashboard/candidates?recency=stale")}>
+                Review Stale Logins
+              </Button>
+            </Stack>
+          </Stack>
           <Grid container spacing={1.5}>
             <Grid item xs={6} md={3}>
               <Typography variant="caption" color="text.secondary">Missing Profiles</Typography>
@@ -123,6 +140,165 @@ export default function AdminOverviewPage() {
         <Grid item xs={12} md={6}>
           <Card sx={{ height: "100%" }}>
             <CardContent>
+              <Typography variant="h6" sx={{ mb: 1.2 }}>Operations Shortcuts</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                Use the dedicated consoles for bulk support actions. The overview stays focused on queue health and recent activity.
+              </Typography>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} useFlexGap flexWrap="wrap">
+                <Button variant="contained" onClick={() => navigate("/admin/dashboard/candidates")}>
+                  Open Candidate Console
+                </Button>
+                <Button variant="outlined" onClick={() => navigate("/admin/dashboard/trials")}>
+                  Open Trial Console
+                </Button>
+                <Button variant="outlined" onClick={() => navigate("/admin/dashboard/interviews")}>
+                  Open Interview Console
+                </Button>
+                <Button variant="outlined" onClick={() => navigate("/admin/dashboard/exports")}>
+                  Open Exports
+                </Button>
+                <Button variant="outlined" onClick={() => navigate("/admin/dashboard/question-bank")}>
+                  Open Question Bank
+                </Button>
+                <Button variant="text" onClick={() => navigate("/admin/dashboard/config")}>
+                  Open Config
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 1.2 }}>Recent Trial Activity</Typography>
+              <Typography variant="body2" sx={{ mb: 1.2 }}>
+                Active: {overview?.trials?.active ?? 0} | Redeemed: {overview?.trials?.redeemed ?? 0} | Deleted: {overview?.trials?.deleted ?? 0}
+              </Typography>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.2 }}>
+                <Chip
+                  label={`Total issued: ${overview?.trials?.issued ?? 0}`}
+                  size="small"
+                  variant="outlined"
+                />
+                <Chip
+                  label={`Revoked entitlements: ${overview?.trials?.revoked_entitlements ?? 0}`}
+                  size="small"
+                  variant="outlined"
+                />
+                <Button size="small" variant="text" onClick={() => navigate("/admin/dashboard/trials")}>
+                  View all trials
+                </Button>
+              </Stack>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Display Name</TableCell>
+                    <TableCell>Code</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {recentTrials.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            navigate(
+                              `/admin/dashboard/trials?${
+                                row.code_suffix
+                                  ? `suffix=${encodeURIComponent(row.code_suffix)}`
+                                  : `q=${encodeURIComponent(row.display_name || row.code || "")}`
+                              }`,
+                            )
+                          }
+                        >
+                          {row.display_name || "-"}
+                        </Button>
+                      </TableCell>
+                      <TableCell>{row.code}</TableCell>
+                      <TableCell>{trialStatusChip(row.status)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={1.5}>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 1.2 }}>Waitlist Signups</Typography>
+              <Typography variant="body2" sx={{ mb: 1.2 }}>
+                Total: {overview?.waitlist?.total ?? 0} | Joined 24h: {overview?.waitlist?.joined_24h ?? 0}
+              </Typography>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.2 }}>
+                {Object.entries(overview?.waitlist?.source_distribution || {}).map(([key, count]) => (
+                  <Chip key={key} size="small" variant="outlined" label={`${key}: ${count}`} />
+                ))}
+              </Stack>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Email</TableCell>
+                    <TableCell>Source</TableCell>
+                    <TableCell>Joined</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(overview?.recent_activity?.waitlist_signups || []).map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>{compactText(row.email)}</TableCell>
+                      <TableCell>{row.source_page}</TableCell>
+                      <TableCell>{formatDateTime(row.created_at)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 1.2 }}>Trial Feedback</Typography>
+              <Typography variant="body2" sx={{ mb: 1.2 }}>
+                Total: {overview?.feedback?.total ?? 0} | Last 7d: {overview?.feedback?.submitted_7d ?? 0} | Avg rating: {overview?.feedback?.avg_rating ?? 0}
+              </Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Rating</TableCell>
+                    <TableCell>Plan</TableCell>
+                    <TableCell>Comment</TableCell>
+                    <TableCell>Submitted</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(overview?.recent_activity?.trial_feedback || []).map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>{row.rating}/5</TableCell>
+                      <TableCell>{row.plan_tier || (row.trial_mode ? "trial" : "-")}</TableCell>
+                      <TableCell>{compactText(row.comment || "No comment")}</TableCell>
+                      <TableCell>{formatDateTime(row.submitted_at)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={1.5}>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
               <Typography variant="h6" sx={{ mb: 1.2 }}>Active Users (15m)</Typography>
               <Typography variant="body2" sx={{ mb: 1.2 }}>
                 Live now: {activeUsers?.count_now ?? 0} | Last 15m: {activeUsers?.count_window ?? 0}
@@ -138,7 +314,11 @@ export default function AdminOverviewPage() {
                 <TableBody>
                   {(activeUsers?.items || []).map((row) => (
                     <TableRow key={row.clerk_user_id}>
-                      <TableCell>{row.full_name || row.email || row.clerk_user_id}</TableCell>
+                      <TableCell>
+                        <Button size="small" onClick={() => navigate(`/admin/dashboard/candidates/${encodeURIComponent(row.clerk_user_id)}`)}>
+                          {row.full_name || row.email || row.clerk_user_id}
+                        </Button>
+                      </TableCell>
                       <TableCell>{compactText(row.active_reasons)}</TableCell>
                       <TableCell>{formatDateTime(row.last_login_at)}</TableCell>
                     </TableRow>
@@ -162,6 +342,14 @@ export default function AdminOverviewPage() {
               <Typography variant="body2">
                 Sessions: {overview?.table_counts?.interview_sessions_total ?? 0} | Reports: {overview?.table_counts?.interview_reports_total ?? 0}
               </Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                <Button size="small" variant="outlined" onClick={() => navigate("/admin/dashboard/exports")}>
+                  Review exports
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => navigate("/admin/dashboard/config")}>
+                  Review config
+                </Button>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
@@ -184,7 +372,11 @@ export default function AdminOverviewPage() {
                 <TableBody>
                   {(overview?.recent_activity?.sessions || []).map((row) => (
                     <TableRow key={row.session_id}>
-                      <TableCell>{row.name || row.email || row.clerk_user_id}</TableCell>
+                      <TableCell>
+                        <Button size="small" onClick={() => navigate(`/admin/dashboard/candidates/${encodeURIComponent(row.clerk_user_id)}?tab=sessions`)}>
+                          {row.name || row.email || row.clerk_user_id}
+                        </Button>
+                      </TableCell>
                       <TableCell>{formatAdminInterviewType(row.interview_type)}</TableCell>
                       <TableCell>{sessionStatusChip(row.status)}</TableCell>
                       <TableCell>{formatDateTime(row.started_at)}</TableCell>
@@ -211,7 +403,11 @@ export default function AdminOverviewPage() {
                 <TableBody>
                   {(overview?.recent_activity?.reports || []).map((row) => (
                     <TableRow key={row.report_id}>
-                      <TableCell>{row.name || row.email || row.clerk_user_id}</TableCell>
+                      <TableCell>
+                        <Button size="small" onClick={() => navigate(`/admin/dashboard/candidates/${encodeURIComponent(row.clerk_user_id)}?tab=reports`)}>
+                          {row.name || row.email || row.clerk_user_id}
+                        </Button>
+                      </TableCell>
                       <TableCell>{row.overall_score ?? "-"}</TableCell>
                       <TableCell>{row.capture_status || "-"}</TableCell>
                       <TableCell>{row.evaluation_source || "-"}</TableCell>

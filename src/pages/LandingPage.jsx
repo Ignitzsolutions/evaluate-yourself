@@ -6,6 +6,7 @@ import { Box, Container, Typography, Button, Card, Grid } from "@mui/material";
 import { PlayArrow, Assessment, Settings, CheckRounded } from "@mui/icons-material";
 import { Divider, Stack, Paper } from "@mui/material";
 import { pricingPlans } from "../config/pricingConfig";
+import WaitlistSignupForm from "../components/WaitlistSignupForm";
 import "../ui.css";
 
 export default function LandingPage() {
@@ -122,7 +123,7 @@ export default function LandingPage() {
                 <Box sx={{ display: "flex", gap: 2, pt: 1, flexWrap: "wrap" }}>
                   {!isSignedIn ? (
                     <>
-                      <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
+                      <Button variant="contained" size="large" onClick={() => nav("/interview-config")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
                         Start practicing
                       </Button>
                       <Button variant="outlined" size="large" onClick={() => nav("/pricing")} sx={{ px: { xs: 2.5, md: 3 }, fontSize: { xs: 14, md: 16 } }}>
@@ -135,18 +136,65 @@ export default function LandingPage() {
                     </Button>
                   )}
                 </Box>
+
+                {!isSignedIn && (
+                  <WaitlistSignupForm
+                    sourcePage="landing"
+                    intent="free_trial"
+                    title="Want early access without creating an account?"
+                    helperText="Join the launch waitlist for free-trial reminders and release updates."
+                  />
+                )}
               </Stack>
             </Grid>
 
-            {/* RIGHT IMAGE */}
+            {/* RIGHT SUMMARY */}
             <Grid item xs={12} md={6} sx={{ display: "flex", justifyContent: "center" }}>
-              <Paper elevation={2} sx={{ p: 1, borderRadius: 5, width: "100%", maxWidth: 520 }}>
-                <Box
-                  component="img"
-                  src="/assets/skillevaluation.png"
-                  alt="Interview Practice"
-                  sx={{ width: "100%", borderRadius: 5, display: "block" }}
-                />
+              <Paper
+                elevation={2}
+                sx={{
+                  p: { xs: 3, md: 4 },
+                  borderRadius: 5,
+                  width: "100%",
+                  maxWidth: 520,
+                  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                  border: "1px solid rgba(148,163,184,.16)",
+                  boxShadow: "0 18px 44px rgba(15,23,42,.08)",
+                }}
+              >
+                <Stack spacing={2.25}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#2563eb" }}>
+                    Interview Studio
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
+                    Structured practice with a clear before-and-after view.
+                  </Typography>
+                  <Typography sx={{ fontSize: 15, lineHeight: 1.7, opacity: 0.72 }}>
+                    The session is built to feel formal and useful: one interviewer, one question at a time, then a report that shows where your answers were strong and where they broke down.
+                  </Typography>
+                  <Stack spacing={1.4} sx={{ pt: 1 }}>
+                    {[
+                      "Live interview flow instead of a quiz-style prompt list",
+                      "Evidence-backed report after each session",
+                      "Behavioral, technical, and 360 interview tracks in one workspace",
+                    ].map((item) => (
+                      <Paper
+                        key={item}
+                        elevation={0}
+                        sx={{
+                          p: 1.6,
+                          borderRadius: 3,
+                          backgroundColor: "rgba(37,99,235,.05)",
+                          border: "1px solid rgba(37,99,235,.08)",
+                        }}
+                      >
+                        <Typography sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.55, color: "#0f172a" }}>
+                          {item}
+                        </Typography>
+                      </Paper>
+                    ))}
+                  </Stack>
+                </Stack>
               </Paper>
             </Grid>
 
@@ -432,7 +480,7 @@ export default function LandingPage() {
               ))}
             </Stack>
 
-            <Button variant="contained" size="large" onClick={() => nav("/setup")} sx={{ px: 5, fontSize: 17, borderRadius: 2 }}>
+            <Button variant="contained" size="large" onClick={() => nav("/interview-config")} sx={{ px: 5, fontSize: 17, borderRadius: 2 }}>
               Start practicing now
             </Button>
 
