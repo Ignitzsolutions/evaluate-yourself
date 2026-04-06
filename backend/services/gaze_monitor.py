@@ -29,12 +29,19 @@ GAZE_EVENT_LOOKING_UP = "LOOKING_UP"
 GAZE_EVENT_LOOKING_DOWN = "LOOKING_DOWN"
 GAZE_EVENT_FACE_NOT_VISIBLE = "FACE_NOT_VISIBLE"
 
+VERTICAL_UP_THRESHOLD = -0.22
+VERTICAL_DOWN_THRESHOLD = 0.24
+HORIZONTAL_LEFT_THRESHOLD = -0.28
+HORIZONTAL_RIGHT_THRESHOLD = 0.28
+
 EVENT_DESCRIPTIONS = {
     GAZE_EVENT_OFF_SCREEN: "Candidate looked away from screen",
     GAZE_EVENT_LOOKING_UP: "Candidate looked up away from primary screen focus",
     GAZE_EVENT_LOOKING_DOWN: "Candidate looked down away from primary screen focus",
     GAZE_EVENT_FACE_NOT_VISIBLE: "Candidate face not visible in camera view",
 }
+
+DEFAULT_GAZE_SOURCE = "opencv_haar_v1"
 
 FLAG_SUSTAIN_MS = 1200
 FLAG_MERGE_GAP_MS = 400
@@ -61,6 +68,15 @@ def _iso_from_ms(ts_ms: Optional[int]) -> Optional[str]:
     return datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).isoformat()
 
 
+def _normalize_iso_timestamp(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
 def map_direction_to_flag(gaze_direction: str) -> Optional[str]:
     direction = str(gaze_direction or "").upper()
     if direction in {"LEFT", "RIGHT"}:
@@ -77,11 +93,14 @@ def map_direction_to_flag(gaze_direction: str) -> Optional[str]:
 def detect_gaze_metrics(frame) -> Dict[str, Any]:
     """Run lightweight face-position based gaze direction detection."""
     unavailable_payload = {
-        "eyeContact": True,
+        "eyeContact": False,
         "gazeDirection": "DETECTOR_UNAVAILABLE",
         "conf": 0.0,
         "faceDetected": False,
         "detectorReady": False,
+        "trackingActive": False,
+        "algorithmVersion": DEFAULT_GAZE_SOURCE,
+        "source": DEFAULT_GAZE_SOURCE,
     }
     default_payload = {
         "eyeContact": False,
@@ -89,6 +108,9 @@ def detect_gaze_metrics(frame) -> Dict[str, Any]:
         "conf": 0.0,
         "faceDetected": False,
         "detectorReady": True,
+        "trackingActive": True,
+        "algorithmVersion": DEFAULT_GAZE_SOURCE,
+        "source": DEFAULT_GAZE_SOURCE,
     }
     if not CV2_AVAILABLE or not NP_AVAILABLE:
         return unavailable_payload
@@ -117,13 +139,13 @@ def detect_gaze_metrics(frame) -> Dict[str, Any]:
 
         direction = "ON_SCREEN"
         # Vertical first so down/up takes precedence when both are significant.
-        if norm_dy < -0.22:
+        if norm_dy < VERTICAL_UP_THRESHOLD:
             direction = "UP"
-        elif norm_dy > 0.24:
+        elif norm_dy > VERTICAL_DOWN_THRESHOLD:
             direction = "DOWN"
-        elif norm_dx < -0.28:
+        elif norm_dx < HORIZONTAL_LEFT_THRESHOLD:
             direction = "LEFT"
-        elif norm_dx > 0.28:
+        elif norm_dx > HORIZONTAL_RIGHT_THRESHOLD:
             direction = "RIGHT"
 
         face_area_ratio = float((w * h) / max(fw * fh, 1.0))
@@ -137,6 +159,9 @@ def detect_gaze_metrics(frame) -> Dict[str, Any]:
             "conf": round(float(conf), 4),
             "faceDetected": True,
             "detectorReady": True,
+            "trackingActive": True,
+            "algorithmVersion": DEFAULT_GAZE_SOURCE,
+            "source": DEFAULT_GAZE_SOURCE,
         }
     except Exception:
         return default_payload
@@ -175,6 +200,8 @@ class GazeSessionTracker:
         self.active_event: Optional[Dict[str, Any]] = None
         self.events: List[Dict[str, Any]] = []
         self.last_closed_by_type: Dict[str, int] = {}
+        self.source_name = DEFAULT_GAZE_SOURCE
+        self.algorithm_version = DEFAULT_GAZE_SOURCE
 
     def _clear_pending(self) -> None:
         self.pending_flag = None
@@ -231,10 +258,11 @@ class GazeSessionTracker:
             "ended_ms": ended_ms,
             "duration_ms": ended_ms - started_ms,
             "confidence": max(0, min(100, confidence)),
-            "source": "opencv_haar_v1",
+            "source": self.source_name,
             "extra": {
                 "direction_open": self.active_event.get("direction"),
                 "camera_enabled": self.camera_enabled,
+                "algorithm_version": self.algorithm_version,
             },
         }
         self._merge_or_append(event)
@@ -309,11 +337,16 @@ class GazeSessionTracker:
         eye_contact: bool,
         confidence: float,
         detector_ready: bool = True,
+        tracking_active: bool = True,
+        source: str = DEFAULT_GAZE_SOURCE,
+        algorithm_version: str = DEFAULT_GAZE_SOURCE,
     ) -> Dict[str, Any]:
         t_ms = int(t_ms)
         if self.monitoring_started_ms is None:
             self.monitoring_started_ms = t_ms
         self.monitoring_ended_ms = t_ms
+        self.source_name = str(source or DEFAULT_GAZE_SOURCE)
+        self.algorithm_version = str(algorithm_version or self.source_name or DEFAULT_GAZE_SOURCE)
 
         if not detector_ready:
             self.latest_direction = "DETECTOR_UNAVAILABLE"
@@ -327,14 +360,43 @@ class GazeSessionTracker:
             )
             return {
                 "t": t_ms,
-                "eyeContact": True,
-                "eyeContactPct": None,
+                "eyeContact": False,
+                "eyeContactPct": self.eye_contact_pct if self.total_samples > 0 else None,
                 "gazeDirection": "DETECTOR_UNAVAILABLE",
                 "conf": 0.0,
                 "faceDetected": False,
                 "activeFlag": None,
                 "cameraEnabled": self.camera_enabled,
                 "detectorReady": False,
+                "trackingActive": False,
+                "algorithmVersion": self.algorithm_version,
+                "source": self.source_name,
+            }
+
+        if not tracking_active:
+            direction = str(gaze_direction or "CALIBRATING").upper()
+            self.latest_direction = direction
+            self.latest_confidence = float(confidence or 0.0)
+            self._transition(
+                t_ms=t_ms,
+                next_flag=None,
+                confidence=0.0,
+                direction=direction,
+                force_open=False,
+            )
+            return {
+                "t": t_ms,
+                "eyeContact": False,
+                "eyeContactPct": self.eye_contact_pct if self.total_samples > 0 else None,
+                "gazeDirection": direction,
+                "conf": round(float(confidence or 0.0), 4),
+                "faceDetected": direction not in {"NO_FACE", "DETECTOR_UNAVAILABLE"},
+                "activeFlag": None,
+                "cameraEnabled": self.camera_enabled,
+                "detectorReady": True,
+                "trackingActive": False,
+                "algorithmVersion": self.algorithm_version,
+                "source": self.source_name,
             }
 
         direction = str(gaze_direction or "NO_FACE").upper()
@@ -365,6 +427,9 @@ class GazeSessionTracker:
             "activeFlag": self.active_event["event_type"] if self.active_event else None,
             "cameraEnabled": self.camera_enabled,
             "detectorReady": True,
+            "trackingActive": True,
+            "algorithmVersion": self.algorithm_version,
+            "source": self.source_name,
         }
 
     def finalize(self, t_ms: Optional[int] = None) -> None:
@@ -400,7 +465,7 @@ class GazeSessionTracker:
             "eye_contact_pct": self.eye_contact_pct if self.total_samples > 0 else None,
             "monitoring_started_at": _iso_from_ms(self.monitoring_started_ms),
             "monitoring_ended_at": _iso_from_ms(self.monitoring_ended_ms),
-            "algorithm_version": "opencv_haar_v1",
+            "algorithm_version": self.algorithm_version,
         }
 
 
@@ -408,12 +473,22 @@ def aggregate_gaze_events(rows: List[Dict[str, Any]], fallback_summary: Optional
     counts: Dict[str, int] = {}
     longest = 0
     total_ms = 0
+    started_at_values = []
+    ended_at_values = []
     for row in rows:
         et = str(row.get("event_type") or "")
         duration = int(row.get("duration_ms") or 0)
         counts[et] = counts.get(et, 0) + 1
         longest = max(longest, duration)
         total_ms += max(0, duration)
+        started_at = row.get("started_at")
+        ended_at = row.get("ended_at")
+        normalized_started_at = _normalize_iso_timestamp(started_at)
+        normalized_ended_at = _normalize_iso_timestamp(ended_at)
+        if normalized_started_at:
+            started_at_values.append(normalized_started_at)
+        if normalized_ended_at:
+            ended_at_values.append(normalized_ended_at)
 
     eye_contact_pct = None
     if isinstance(fallback_summary, dict):
@@ -425,5 +500,15 @@ def aggregate_gaze_events(rows: List[Dict[str, Any]], fallback_summary: Optional
         "total_off_screen_ms": total_ms,
         "longest_event_ms": longest,
         "eye_contact_pct": eye_contact_pct,
-        "algorithm_version": "opencv_haar_v1",
+        "monitoring_started_at": min(started_at_values) if started_at_values else (
+            fallback_summary.get("monitoring_started_at") if isinstance(fallback_summary, dict) else None
+        ),
+        "monitoring_ended_at": max(ended_at_values) if ended_at_values else (
+            fallback_summary.get("monitoring_ended_at") if isinstance(fallback_summary, dict) else None
+        ),
+        "algorithm_version": (
+            str((fallback_summary or {}).get("algorithm_version") or DEFAULT_GAZE_SOURCE)
+            if isinstance(fallback_summary, dict)
+            else DEFAULT_GAZE_SOURCE
+        ),
     }

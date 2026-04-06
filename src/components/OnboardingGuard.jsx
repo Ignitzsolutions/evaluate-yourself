@@ -2,9 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { Box, CircularProgress, Typography } from "@mui/material";
-import { authFetch } from "../utils/apiClient";
+import BackendUnavailableState from "./BackendUnavailableState";
+import { authFetch, buildAuthRequiredError, getApiErrorMessage, isAuthRequiredError, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
+import { classifyOnboardingGuardError } from "../utils/onboardingGuardState";
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -14,7 +16,8 @@ export default function OnboardingGuard({ children }) {
   const devBypass = isDevAuthBypassEnabled();
   const [checking, setChecking] = useState(true);
   const [status, setStatus] = useState({ completed: false, user_category: null });
-  const [error, setError] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
+  const [errorState, setErrorState] = useState({ kind: "", message: "" });
 
   useEffect(() => {
     let mounted = true;
@@ -22,13 +25,16 @@ export default function OnboardingGuard({ children }) {
       if (!isLoaded && !devBypass) return;
       try {
         setChecking(true);
-        setError("");
+        setErrorState({ kind: "", message: "" });
         const token = await getToken().catch(() => null);
         if (!token && !devBypass) {
-          throw new Error("Authentication required.");
+          throw buildAuthRequiredError();
         }
         const resp = await authFetch(`${API_BASE_URL}/api/profile/status`, token, { method: "GET" });
         if (!resp.ok) {
+          if (resp.status === 401 || resp.status === 403) {
+            throw buildAuthRequiredError("Your session has expired. Please sign in again.");
+          }
           const text = await resp.text();
           throw new Error(text || "Failed to verify profile status.");
         }
@@ -40,7 +46,18 @@ export default function OnboardingGuard({ children }) {
           });
         }
       } catch (err) {
-        if (mounted) setError(err.message || "Unable to verify onboarding status.");
+        if (mounted) {
+          setErrorState({
+            kind: classifyOnboardingGuardError(err, {
+              isAuthRequiredError,
+              isBackendUnavailableError,
+            }),
+            message: getApiErrorMessage(err, {
+              backendLabel: "profile service",
+              defaultMessage: "Unable to verify onboarding status.",
+            }),
+          });
+        }
       } finally {
         if (mounted) setChecking(false);
       }
@@ -49,7 +66,7 @@ export default function OnboardingGuard({ children }) {
     return () => {
       mounted = false;
     };
-  }, [devBypass, getToken, isLoaded, location.pathname]);
+  }, [devBypass, getToken, isLoaded, location.pathname, retryTick]);
 
   if (checking) {
     return (
@@ -59,10 +76,24 @@ export default function OnboardingGuard({ children }) {
     );
   }
 
-  if (error) {
+  if (errorState.kind === "backend_unavailable") {
+    return (
+      <BackendUnavailableState
+        title="Profile Service Unavailable"
+        message={errorState.message}
+        onRetry={() => setRetryTick((prev) => prev + 1)}
+      />
+    );
+  }
+
+  if (errorState.kind === "auth_required") {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (errorState.message) {
     return (
       <Box sx={{ p: 3 }}>
-        <Typography color="error">{error}</Typography>
+        <Typography color="error">{errorState.message}</Typography>
       </Box>
     );
   }

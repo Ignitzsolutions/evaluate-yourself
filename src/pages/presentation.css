@@ -1,0 +1,952 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap");
+
+.presentation-page {
+  position: relative;
+  color: #0f172a;
+  background:
+    radial-gradient(900px 320px at 10% 0%, rgba(37, 99, 235, 0.12), transparent 65%),
+    radial-gradient(800px 280px at 95% 5%, rgba(14, 165, 233, 0.1), transparent 62%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 52%, #ffffff 100%);
+  min-height: 100vh;
+  padding: 0 0 7rem;
+}
+
+.presentation-company-badge {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+  backdrop-filter: blur(10px);
+  z-index: 5;
+}
+
+.presentation-company-logo {
+  display: block;
+  height: 1.6rem;
+  width: auto;
+}
+
+.presentation-progress {
+  position: fixed;
+  top: 50%;
+  right: 1.25rem;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  z-index: 3;
+}
+
+.presentation-progress button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.presentation-progress span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.22);
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.presentation-progress button:hover span,
+.presentation-progress button:focus-visible span {
+  transform: scale(1.5);
+  background: rgba(37, 99, 235, 0.85);
+}
+
+.presentation-progress-dot.is-active span {
+  transform: scale(1.75);
+  background: rgba(37, 99, 235, 0.95);
+}
+
+.presentation-stage {
+  min-height: 100vh;
+}
+
+.presentation-slide {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 3.5rem 0;
+}
+
+.presentation-slide-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+  gap: 4.35rem;
+  align-items: center;
+}
+
+.presentation-copy {
+  max-width: 44rem;
+}
+
+.presentation-eyebrow {
+  margin: 0;
+  color: #2563eb;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.presentation-title {
+  margin: 0;
+  color: #0f172a;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-size: clamp(3.45rem, 6vw, 5.85rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  max-width: 12.5ch;
+}
+
+.presentation-title-segment-accent {
+  color: #2563eb;
+}
+
+.presentation-body {
+  margin: 0;
+  max-width: 42rem;
+  color: #475569;
+  font-family: "Manrope", sans-serif;
+  font-size: clamp(1.08rem, 1.8vw, 1.32rem);
+  line-height: 1.86;
+}
+
+.presentation-quote {
+  margin: 0;
+  color: #1d4ed8;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-size: clamp(1.08rem, 1.95vw, 1.55rem);
+  line-height: 1.6;
+}
+
+.presentation-bullet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
+.presentation-bullet-pill {
+  margin: 0;
+  padding: 0.95rem 1.15rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f172a;
+  font-family: "Manrope", sans-serif;
+  font-size: 1rem;
+  line-height: 1.4;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(12px);
+}
+
+.presentation-cta {
+  min-width: 11rem;
+  border-radius: 999px !important;
+  padding: 0.9rem 1.4rem !important;
+  text-transform: none !important;
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.96rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-cta-primary {
+  background: linear-gradient(135deg, #1e88e5 0%, #42a5f5 100%) !important;
+  color: #ffffff !important;
+}
+
+.presentation-cta-secondary {
+  border-color: rgba(30, 136, 229, 0.18) !important;
+  color: #0f172a !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(12px);
+}
+
+.presentation-visual {
+  display: flex;
+  justify-content: center;
+}
+
+.presentation-device-shell {
+  width: min(100%, 54rem);
+}
+
+.presentation-device-topbar,
+.presentation-device-screen,
+.presentation-notable-panel,
+.presentation-closing-panel,
+.presentation-contact-card {
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+.presentation-device-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.5rem 1.5rem 0 0;
+  border-bottom: none;
+}
+
+.presentation-device-dots {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.presentation-device-dots span {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  background: #dbe4f1;
+}
+
+.presentation-device-dots span:first-child {
+  background: #f59e0b;
+}
+
+.presentation-device-dots span:nth-child(2) {
+  background: #60a5fa;
+}
+
+.presentation-device-dots span:nth-child(3) {
+  background: #34d399;
+}
+
+.presentation-device-name {
+  color: #64748b;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-device-screen {
+  position: relative;
+  overflow: hidden;
+  min-height: 34rem;
+  padding: 1rem;
+  border-radius: 0 0 1.5rem 1.5rem;
+}
+
+.presentation-device-caption {
+  margin: 1.4rem auto 0 !important;
+  max-width: 34rem;
+  color: #64748b;
+  text-align: center;
+  font-family: "Manrope", sans-serif !important;
+  font-size: 1rem !important;
+  line-height: 1.8 !important;
+}
+
+.presentation-device-caption:empty {
+  display: none;
+}
+
+.presentation-notable-panel,
+.presentation-closing-panel {
+  width: min(100%, 34rem);
+  padding: 2rem;
+  border-radius: 1.8rem;
+}
+
+.presentation-panel-label,
+.presentation-closing-label {
+  margin: 0 0 1rem !important;
+  color: #2563eb;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 0.82rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+}
+
+.presentation-panel-line,
+.presentation-closing-copy {
+  margin: 0 !important;
+  color: #475569;
+  font-family: "Manrope", sans-serif !important;
+  font-size: 1rem !important;
+  line-height: 1.8 !important;
+}
+
+.presentation-closing-title {
+  margin: 0 0 1rem !important;
+  color: #0f172a;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: clamp(1.8rem, 3vw, 2.8rem) !important;
+  line-height: 1.05 !important;
+}
+
+.presentation-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.presentation-contact-card {
+  padding: 1.4rem;
+  border-radius: 1.5rem;
+}
+
+.presentation-contact-name {
+  margin: 0 0 0.5rem !important;
+  color: #0f172a;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-contact-role {
+  margin: 0 0 1rem !important;
+  color: #64748b;
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.96rem !important;
+  line-height: 1.7 !important;
+}
+
+.presentation-contact-link {
+  display: block;
+  margin-bottom: 0.45rem !important;
+  color: #2563eb !important;
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.95rem !important;
+  text-decoration: none !important;
+}
+
+.presentation-contact-link:hover,
+.presentation-contact-link:focus-visible {
+  text-decoration: underline !important;
+}
+
+.presentation-screen {
+  display: grid;
+  gap: 1rem;
+  min-height: 32rem;
+  height: 100%;
+  padding: 0.2rem;
+  color: #0f172a;
+}
+
+.presentation-screen-hero-image {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 1.35rem;
+}
+
+.presentation-screen-product-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 31rem;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: 1.35rem;
+}
+
+.presentation-screen-sidebar,
+.presentation-screen-card,
+.presentation-screen-avatar-card,
+.presentation-screen-conversation,
+.presentation-screen-mode-card,
+.presentation-screen-loop-step {
+  background: linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(247,250,255,0.9) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.presentation-screen-sidebar {
+  border-radius: 1.2rem;
+  padding: 1.2rem;
+}
+
+.presentation-screen-brand,
+.presentation-screen-title,
+.presentation-screen-card-title,
+.presentation-screen-mode-title {
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+}
+
+.presentation-screen-brand {
+  margin: 0 0 1.3rem !important;
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-sideitem {
+  margin: 0 0 0.5rem !important;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1rem;
+  color: #64748b;
+  font-size: 0.95rem !important;
+}
+
+.presentation-screen-sideitem-active {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1e40af;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-main {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.presentation-screen-title {
+  margin: 0 !important;
+  font-size: 2.25rem !important;
+  line-height: 1.08 !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-subtitle,
+.presentation-screen-card-copy,
+.presentation-screen-mode-copy,
+.presentation-screen-avatar-role,
+.presentation-screen-mini-list,
+.presentation-screen-progress-label,
+.presentation-screen-progress-number,
+.presentation-screen-metric-label {
+  color: #64748b;
+  font-family: "Manrope", sans-serif !important;
+}
+
+.presentation-screen-subtitle {
+  margin: 0 !important;
+  font-size: 1.05rem !important;
+  line-height: 1.75 !important;
+}
+
+.presentation-screen-pill-row {
+  flex-wrap: wrap;
+}
+
+.presentation-screen-pill {
+  margin: 0 !important;
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-size: 0.85rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-pill-soft {
+  background: rgba(226, 232, 240, 0.7);
+  color: #334155;
+}
+
+.presentation-screen-grid,
+.presentation-screen-row,
+.presentation-screen-signals,
+.presentation-screen-report,
+.presentation-screen-coverage {
+  display: grid;
+  gap: 1rem;
+}
+
+.presentation-screen-grid {
+  grid-template-columns: 1.2fr 0.8fr;
+}
+
+.presentation-screen-card {
+  border-radius: 1.25rem;
+  padding: 1.35rem;
+}
+
+.presentation-screen-card-large {
+  min-height: 12rem;
+}
+
+.presentation-screen-card-glass {
+  background: rgba(248, 251, 255, 0.82);
+}
+
+.presentation-screen-card-kicker {
+  margin: 0 0 0.8rem !important;
+  color: #2563eb;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+}
+
+.presentation-screen-card-title {
+  margin: 0 0 0.6rem !important;
+  font-size: 1.52rem !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-metric-label {
+  margin: 0 0 0.5rem !important;
+  font-size: 0.85rem !important;
+}
+
+.presentation-screen-metric-value {
+  margin: 0 !important;
+  color: #2563eb;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 1.8rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-metric-value-green {
+  color: #059669;
+}
+
+.presentation-screen-studio,
+.presentation-screen-report {
+  align-content: start;
+}
+
+.presentation-screen-sonia {
+  grid-template-columns: 15rem 1fr;
+  align-items: stretch;
+}
+
+.presentation-screen-avatar-card {
+  border-radius: 1.4rem;
+  padding: 1.4rem;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.presentation-screen-avatar-image {
+  display: block;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 18px 34px rgba(30, 136, 229, 0.14);
+}
+
+.presentation-screen-avatar-name {
+  margin: 1rem 0 0.35rem !important;
+  font-size: 1.35rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-conversation {
+  border-radius: 1.4rem;
+  padding: 1.4rem;
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
+.presentation-screen-message {
+  max-width: 85%;
+  padding: 1rem 1.1rem;
+  border-radius: 1.1rem;
+  font-size: 0.98rem !important;
+  line-height: 1.6 !important;
+}
+
+.presentation-screen-message-ai {
+  background: rgba(37, 99, 235, 0.08);
+  color: #0f172a;
+}
+
+.presentation-screen-message-user {
+  margin-left: auto !important;
+  background: rgba(226, 232, 240, 0.7);
+  color: #0f172a;
+}
+
+.presentation-screen-progress-row {
+  margin-bottom: 1rem;
+}
+
+.presentation-screen-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+}
+
+.presentation-screen-progress-track {
+  width: 100%;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: #e5edf8;
+  overflow: hidden;
+}
+
+.presentation-screen-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1e88e5 0%, #60a5fa 100%);
+}
+
+.presentation-screen-mode-card {
+  border-radius: 1.4rem;
+  padding: 1.4rem;
+}
+
+.presentation-screen-mode-card-blue {
+  background: linear-gradient(180deg, #eef6ff 0%, rgba(255,255,255,0.92) 100%);
+}
+
+.presentation-screen-mode-card-green {
+  background: linear-gradient(180deg, #ebfbf4 0%, rgba(255,255,255,0.92) 100%);
+}
+
+.presentation-screen-mode-card-amber {
+  background: linear-gradient(180deg, #fff5e9 0%, rgba(255,255,255,0.92) 100%);
+}
+
+.presentation-screen-mode-title {
+  margin: 0 0 0.5rem !important;
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-loop {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.presentation-screen-loop-step {
+  border-radius: 1.4rem;
+  padding: 1.4rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.presentation-screen-loop-step span {
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.presentation-screen-loop-step p {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.presentation-screen-waitlist {
+  align-content: start;
+  gap: 1.2rem;
+}
+
+.presentation-screen-waitlist-hero,
+.presentation-screen-price-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(247,250,255,0.92) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.presentation-screen-waitlist-hero {
+  border-radius: 1.35rem;
+  padding: 1.45rem;
+}
+
+.presentation-screen-waitlist-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 1rem !important;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: #1e88e5;
+  color: #ffffff;
+  font-size: 0.92rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-waitlist-title {
+  margin: 0 0 0.85rem !important;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 2rem !important;
+  line-height: 1.08 !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-waitlist-copy {
+  margin: 0 0 1rem !important;
+  color: #64748b;
+  font-size: 1rem !important;
+  line-height: 1.75 !important;
+}
+
+.presentation-screen-waitlist-form {
+  display: grid;
+  grid-template-columns: 1fr 12rem;
+  gap: 0.8rem;
+}
+
+.presentation-screen-waitlist-input,
+.presentation-screen-waitlist-button {
+  margin: 0 !important;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  font-size: 0.98rem !important;
+}
+
+.presentation-screen-waitlist-input {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #94a3b8;
+  background: rgba(255,255,255,0.96);
+}
+
+.presentation-screen-waitlist-button {
+  text-align: center;
+  background: rgba(15, 23, 42, 0.08);
+  color: #64748b;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-waitlist-pricing {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.presentation-screen-price-card {
+  border-radius: 1.35rem;
+  padding: 1.3rem;
+}
+
+.presentation-screen-price-card-featured {
+  border-color: rgba(30, 136, 229, 0.26);
+}
+
+.presentation-screen-price-tier {
+  margin: 0 0 0.85rem !important;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 1.2rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-price-value {
+  margin: 0 0 0.5rem !important;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 2rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-price-copy {
+  margin: 0 !important;
+  color: #64748b;
+  font-size: 0.98rem !important;
+  line-height: 1.65 !important;
+}
+
+.presentation-screen-quote {
+  display: grid;
+  align-content: center;
+  padding: 2rem;
+}
+
+.presentation-screen-quote-line {
+  margin: 0 !important;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 2rem !important;
+  line-height: 1.18 !important;
+  font-weight: 700 !important;
+}
+
+.presentation-screen-quote-line-soft {
+  color: #2563eb;
+}
+
+.presentation-controls {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 2rem));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18px);
+  z-index: 4;
+}
+
+.presentation-controls-meta {
+  min-width: 0;
+}
+
+.presentation-controls-label {
+  margin: 0 !important;
+  color: #64748b;
+  font-family: "Space Grotesk", "Manrope", sans-serif !important;
+  font-size: 0.92rem !important;
+  font-weight: 700 !important;
+}
+
+.presentation-nav-button {
+  min-width: 8.6rem;
+  border-radius: 999px !important;
+  padding: 0.68rem 1rem !important;
+  text-transform: none !important;
+  font-family: "Manrope", sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 0.92rem !important;
+}
+
+.presentation-nav-button-primary {
+  background: linear-gradient(135deg, #1e88e5 0%, #42a5f5 100%) !important;
+  color: #ffffff !important;
+}
+
+.presentation-nav-button-secondary {
+  background: rgba(255, 255, 255, 0.78) !important;
+  border-color: rgba(30, 136, 229, 0.18) !important;
+  color: #0f172a !important;
+}
+
+.presentation-print-deck {
+  display: none;
+}
+
+@media (max-width: 1199px) {
+  .presentation-slide-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .presentation-copy {
+    max-width: none;
+  }
+
+  .presentation-title {
+    max-width: 100%;
+  }
+
+  .presentation-visual {
+    justify-content: flex-start;
+  }
+
+  .presentation-screen-hero,
+  .presentation-screen-sonia {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 899px) {
+  .presentation-slide {
+    min-height: calc(100vh - 7rem);
+    padding: 4.5rem 0 2rem;
+  }
+
+  .presentation-progress {
+    display: none;
+  }
+
+  .presentation-company-badge {
+    top: 0.75rem;
+    right: 0.75rem;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .presentation-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .presentation-device-shell,
+  .presentation-notable-panel,
+  .presentation-closing-panel {
+    width: 100%;
+  }
+
+  .presentation-screen-grid,
+  .presentation-screen-row,
+  .presentation-screen-loop,
+  .presentation-screen-signals,
+  .presentation-screen-report,
+  .presentation-screen-coverage,
+  .presentation-screen-waitlist-pricing {
+    grid-template-columns: 1fr;
+  }
+
+  .presentation-controls {
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    transform: none;
+    width: auto;
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media print {
+  .presentation-page {
+    background: #ffffff;
+    padding: 0;
+  }
+
+  .presentation-progress,
+  .presentation-controls,
+  .presentation-company-badge,
+  .presentation-stage {
+    display: none !important;
+  }
+
+  .presentation-print-deck {
+    display: block;
+  }
+
+  .presentation-slide {
+    min-height: auto;
+    page-break-after: always;
+    break-after: page;
+    padding: 1.2rem 0;
+  }
+
+  .presentation-slide:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .presentation-device-topbar,
+  .presentation-device-screen,
+  .presentation-notable-panel,
+  .presentation-closing-panel,
+  .presentation-contact-card,
+  .presentation-screen-sidebar,
+  .presentation-screen-card,
+  .presentation-screen-avatar-card,
+  .presentation-screen-conversation,
+  .presentation-screen-mode-card,
+  .presentation-screen-loop-step,
+  .presentation-bullet-pill {
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+}

@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.params import Param
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, inspect, or_
 from sqlalchemy.orm import Session
 
 try:
@@ -167,6 +167,30 @@ def _db_engine_name(db: Session) -> str:
     return "unknown"
 
 
+def _ensure_trial_code_schema(db: Session) -> None:
+    """Fail with an actionable message when trial-code schema migrations are missing."""
+    try:
+        bind = db.get_bind()
+        if bind is None:
+            return
+        inspector = inspect(bind)
+        columns = {col.get("name") for col in inspector.get_columns("trial_codes")}
+    except Exception:
+        # Let downstream query errors surface if inspection isn't available.
+        return
+    required_columns = {"display_name", "code_suffix"}
+    missing = sorted(col for col in required_columns if col not in columns)
+    if missing:
+        missing_text = ", ".join(missing)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Database schema is out of date for trial_codes (missing: {missing_text}). "
+                "Run database migrations: alembic -c backend/alembic.ini upgrade head"
+            ),
+        )
+
+
 def _normalize_trial_code_suffix(raw_suffix: Optional[str]) -> Optional[str]:
     if raw_suffix is None:
         return None
@@ -179,6 +203,17 @@ def _normalize_trial_code_suffix(raw_suffix: Optional[str]) -> Optional[str]:
             detail="Invalid code_suffix. Use 2-12 chars, uppercase A-Z and 0-9 only.",
         )
     return suffix
+
+
+def _normalize_trial_code_display_name(raw_name: Optional[str]) -> Optional[str]:
+    if raw_name is None:
+        return None
+    value = str(raw_name).strip()
+    if not value:
+        return None
+    if len(value) > 80:
+        raise HTTPException(status_code=422, detail="display_name must be 80 characters or fewer.")
+    return value
 
 
 def _login_recency(last_login_at: Optional[datetime], now: Optional[datetime] = None) -> str:
@@ -359,9 +394,21 @@ def _sync_user_from_clerk_if_missing(db: Session, user: models.User) -> bool:
 class TrialCodeCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     duration_minutes: int = Field(default=5, ge=1, le=120)
-    expires_in_days: int = Field(default=7, ge=1, le=90)
+    expires_in_days: Optional[int] = Field(default=None, ge=1, le=90)
+    display_name: Optional[str] = None
     note: Optional[str] = None
     code_suffix: Optional[str] = None
+
+
+class CandidateBulkActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    clerk_user_ids: List[str] = Field(default_factory=list)
+    action: str
+
+
+class TrialCodeBulkDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code_ids: List[str] = Field(default_factory=list)
 
 
 @router.get("/summary")
@@ -401,6 +448,11 @@ def admin_summary(
         models.UserEntitlement.is_active == True,  # noqa: E712
         or_(models.UserEntitlement.expires_at.is_(None), models.UserEntitlement.expires_at >= now),
     ).count()
+    waitlist_signups = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
+        models.LaunchWaitlistSignup.status == "ACTIVE"
+    ).scalar() or 0
+    feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
+    feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
     total_sessions = db.query(models.InterviewSession).count()
     total_reports = db.query(models.InterviewReport).count()
     avg_score = db.query(func.avg(models.InterviewReport.overall_score)).scalar() or 0
@@ -414,6 +466,9 @@ def admin_summary(
         "total_candidates": total_candidates,
         "active_candidates": active_candidates,
         "active_trials": active_trials,
+        "waitlist_signups": int(waitlist_signups),
+        "trial_feedback_count": int(feedback_total),
+        "trial_feedback_avg_rating": round(float(feedback_avg_rating or 0), 2),
         "total_sessions": total_sessions,
         "total_reports": total_reports,
         "avg_score": int(round(float(avg_score or 0))),
@@ -573,6 +628,7 @@ def candidate_detail(
                 "starts_at": entitlement.starts_at,
                 "expires_at": entitlement.expires_at,
                 "revoked_at": entitlement.revoked_at,
+                "trial_code_display_name": code.display_name if code else None,
                 "trial_code": code.code if code else None,
                 "trial_code_suffix": code.code_suffix if code else None,
                 "trial_code_status": code.status if code else None,
@@ -626,6 +682,50 @@ def candidate_detail(
     }
 
 
+def _deactivate_candidate_record(db: Session, user: models.User, when: Optional[datetime] = None) -> Dict[str, Any]:
+    now = when or _utcnow()
+    user.is_active = False
+    revoked_count = _revoke_active_entitlements(db, user.clerk_user_id, when=now)
+    return {
+        "clerk_user_id": user.clerk_user_id,
+        "is_active": False,
+        "revoked_entitlements": revoked_count,
+    }
+
+
+def _soft_delete_candidate_record(db: Session, user: models.User, when: Optional[datetime] = None) -> Dict[str, Any]:
+    now = when or _utcnow()
+    user.is_active = False
+    user.is_deleted = True
+    user.deleted_at = now
+    revoked_count = _revoke_active_entitlements(db, user.clerk_user_id, when=now)
+    return {
+        "clerk_user_id": user.clerk_user_id,
+        "is_deleted": True,
+        "deleted_at": now,
+        "revoked_entitlements": revoked_count,
+    }
+
+
+def _delete_trial_code_record(db: Session, trial_code: models.TrialCode, when: Optional[datetime] = None) -> Dict[str, Any]:
+    now = when or _utcnow()
+    trial_code.status = "DELETED"
+    trial_code.deleted_at = now
+    trial_code.revoked_at = now
+
+    revoked = 0
+    entitlements = db.query(models.UserEntitlement).filter(
+        models.UserEntitlement.source_id == trial_code.id,
+        models.UserEntitlement.is_active == True,  # noqa: E712
+    ).all()
+    for entitlement in entitlements:
+        entitlement.is_active = False
+        entitlement.revoked_at = now
+        revoked += 1
+
+    return {"code_id": trial_code.id, "status": "DELETED", "revoked_entitlements": revoked}
+
+
 @router.post("/candidates/{clerk_user_id}/deactivate")
 def deactivate_candidate(
     clerk_user_id: str,
@@ -635,11 +735,9 @@ def deactivate_candidate(
     user = db.query(models.User).filter(models.User.clerk_user_id == clerk_user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    now = _utcnow()
-    user.is_active = False
-    revoked_count = _revoke_active_entitlements(db, clerk_user_id, when=now)
+    payload = _deactivate_candidate_record(db, user)
     db.commit()
-    return {"clerk_user_id": clerk_user_id, "is_active": False, "revoked_entitlements": revoked_count}
+    return payload
 
 
 @router.delete("/candidates/{clerk_user_id}")
@@ -651,17 +749,53 @@ def soft_delete_candidate(
     user = db.query(models.User).filter(models.User.clerk_user_id == clerk_user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    payload = _soft_delete_candidate_record(db, user)
+    db.commit()
+    return payload
+
+
+@router.post("/candidates/bulk-action")
+def bulk_candidate_action(
+    payload: CandidateBulkActionRequest,
+    _admin_user=Depends(_get_admin_user),
+    db: Session = Depends(get_db),
+):
+    action = str(payload.action or "").strip().lower()
+    if action not in {"deactivate", "delete"}:
+        raise HTTPException(status_code=422, detail="action must be 'deactivate' or 'delete'.")
+    clerk_user_ids = []
+    seen_ids = set()
+    for raw_id in payload.clerk_user_ids or []:
+        value = str(raw_id or "").strip()
+        if not value or value in seen_ids:
+            continue
+        seen_ids.add(value)
+        clerk_user_ids.append(value)
+    if not clerk_user_ids:
+        raise HTTPException(status_code=422, detail="At least one clerk_user_id is required.")
+
+    users = db.query(models.User).filter(models.User.clerk_user_id.in_(clerk_user_ids)).all()
+    user_map = {user.clerk_user_id: user for user in users}
     now = _utcnow()
-    user.is_active = False
-    user.is_deleted = True
-    user.deleted_at = now
-    revoked_count = _revoke_active_entitlements(db, clerk_user_id, when=now)
+    results = []
+    missing_ids = []
+    for clerk_user_id in clerk_user_ids:
+        user = user_map.get(clerk_user_id)
+        if not user:
+            missing_ids.append(clerk_user_id)
+            continue
+        if action == "delete":
+            results.append(_soft_delete_candidate_record(db, user, when=now))
+        else:
+            results.append(_deactivate_candidate_record(db, user, when=now))
+
     db.commit()
     return {
-        "clerk_user_id": clerk_user_id,
-        "is_deleted": True,
-        "deleted_at": now,
-        "revoked_entitlements": revoked_count,
+        "action": action,
+        "requested_count": len(clerk_user_ids),
+        "processed_count": len(results),
+        "missing_ids": missing_ids,
+        "results": results,
     }
 
 
@@ -671,7 +805,9 @@ def create_trial_code(
     admin_user=Depends(_get_admin_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_trial_code_schema(db)
     normalized_suffix = _normalize_trial_code_suffix(payload.code_suffix)
+    display_name = _normalize_trial_code_display_name(payload.display_name)
     code_value = _generate_trial_code(db, normalized_suffix)
     now = _utcnow()
     meta_payload: Dict[str, Any] = {}
@@ -682,10 +818,11 @@ def create_trial_code(
     trial_code = models.TrialCode(
         id=str(uuid.uuid4()),
         code=code_value,
+        display_name=display_name or f"Trial {code_value[-6:]}",
         code_suffix=normalized_suffix,
         status="ACTIVE",
         duration_minutes=payload.duration_minutes,
-        expires_at=now + timedelta(days=payload.expires_in_days),
+        expires_at=None,
         created_by_clerk_user_id=admin_user.clerk_user_id,
         meta_json=json.dumps(meta_payload) if meta_payload else None,
     )
@@ -695,9 +832,11 @@ def create_trial_code(
     return {
         "id": trial_code.id,
         "code": trial_code.code,
+        "display_name": trial_code.display_name,
         "status": trial_code.status,
         "duration_minutes": trial_code.duration_minutes,
         "expires_at": trial_code.expires_at,
+        "expires_policy": "manual_revoke_or_delete_only",
         "code_suffix": trial_code.code_suffix,
         "code_format_version": "v2_suffix_optional",
         "note": payload.note,
@@ -710,20 +849,37 @@ def list_trial_codes(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
     suffix: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    include_deleted: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
+    _ensure_trial_code_schema(db)
     status_value = _query_arg_or_default(status, None)
     suffix_value = _query_arg_or_default(suffix, None)
+    query_value = str(_query_arg_or_default(q, None) or "").strip()
+    include_deleted_value = bool(_query_arg_or_default(include_deleted, False))
     page_value = _query_arg_or_default(page, 1)
     page_size_value = _query_arg_or_default(page_size, 20)
 
     query = db.query(models.TrialCode)
-    if isinstance(status_value, str) and status_value.strip():
-        query = query.filter(models.TrialCode.status == status_value.strip().upper())
+    normalized_status = str(status_value or "").strip().upper()
+    if not include_deleted_value and normalized_status != "DELETED":
+        query = query.filter(models.TrialCode.status != "DELETED")
+    if normalized_status:
+        query = query.filter(models.TrialCode.status == normalized_status)
     normalized_suffix = _normalize_trial_code_suffix(suffix_value) if suffix_value is not None else None
     if normalized_suffix:
         query = query.filter(models.TrialCode.code_suffix == normalized_suffix)
+    if query_value:
+        like = f"%{query_value}%"
+        query = query.filter(
+            or_(
+                models.TrialCode.code.ilike(like),
+                models.TrialCode.display_name.ilike(like),
+                models.TrialCode.redeemed_by_clerk_user_id.ilike(like),
+            )
+        )
     total = query.count()
     rows = (
         query.order_by(models.TrialCode.created_at.desc())
@@ -739,10 +895,12 @@ def list_trial_codes(
             {
                 "id": row.id,
                 "code": row.code,
+                "display_name": row.display_name,
                 "code_suffix": row.code_suffix,
                 "status": row.status,
                 "duration_minutes": row.duration_minutes,
                 "expires_at": row.expires_at,
+                "expires_policy": "manual_revoke_or_delete_only" if row.expires_at is None else "fixed_date",
                 "created_by_clerk_user_id": row.created_by_clerk_user_id,
                 "redeemed_by_clerk_user_id": row.redeemed_by_clerk_user_id,
                 "redeemed_at": row.redeemed_at,
@@ -762,6 +920,8 @@ def list_trials_alias(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
     suffix: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    include_deleted: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -770,6 +930,8 @@ def list_trials_alias(
         db=db,
         status=status,
         suffix=suffix,
+        q=q,
+        include_deleted=include_deleted,
         page=page,
         page_size=page_size,
     )
@@ -844,6 +1006,22 @@ def admin_dashboard_overview(
         or_(models.UserEntitlement.expires_at.is_(None), models.UserEntitlement.expires_at >= now),
     ).scalar() or 0
     gaze_events_total = db.query(func.count(models.InterviewGazeEvent.id)).scalar() or 0
+    waitlist_total = db.query(func.count(models.LaunchWaitlistSignup.id)).scalar() or 0
+    waitlist_24h = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
+        models.LaunchWaitlistSignup.created_at >= window_24h
+    ).scalar() or 0
+    waitlist_source_counter: Counter = Counter()
+    for row in db.query(
+        models.LaunchWaitlistSignup.source_page,
+        func.count(models.LaunchWaitlistSignup.id),
+    ).group_by(models.LaunchWaitlistSignup.source_page).all():
+        waitlist_source_counter[_normalize_distribution_key(row[0])] = int(row[1] or 0)
+
+    feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
+    feedback_7d = db.query(func.count(models.TrialFeedback.id)).filter(
+        models.TrialFeedback.submitted_at >= window_7d
+    ).scalar() or 0
+    feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
 
     registered_total = db.query(func.count(models.User.id)).filter(
         models.User.is_deleted == False,  # noqa: E712
@@ -992,6 +1170,39 @@ def admin_dashboard_overview(
             }
         )
 
+    recent_waitlist_rows = db.query(models.LaunchWaitlistSignup).order_by(
+        models.LaunchWaitlistSignup.created_at.desc()
+    ).limit(8).all()
+    recent_waitlist = [
+        {
+            "id": row.id,
+            "email": row.email,
+            "source_page": row.source_page,
+            "intent": row.intent,
+            "status": row.status,
+            "created_at": row.created_at,
+        }
+        for row in recent_waitlist_rows
+    ]
+
+    recent_feedback_rows = db.query(models.TrialFeedback).order_by(
+        models.TrialFeedback.submitted_at.desc()
+    ).limit(8).all()
+    recent_feedback = [
+        {
+            "id": row.id,
+            "report_id": row.report_id,
+            "session_id": row.session_id,
+            "clerk_user_id": row.clerk_user_id,
+            "rating": row.rating,
+            "comment": row.comment,
+            "plan_tier": row.plan_tier,
+            "trial_mode": bool(row.trial_mode),
+            "submitted_at": row.submitted_at,
+        }
+        for row in recent_feedback_rows
+    ]
+
     active_any_ids, active_session_ids, recent_login_ids = _active_user_ids(
         db=db,
         now=now,
@@ -1043,6 +1254,8 @@ def admin_dashboard_overview(
             "user_entitlements_total": int(entitlements_total),
             "user_entitlements_active": int(entitlements_active),
             "interview_gaze_events_total": int(gaze_events_total),
+            "launch_waitlist_signups_total": int(waitlist_total),
+            "trial_feedback_total": int(feedback_total),
         },
         "candidate_funnel": {
             "registered_total": int(registered_total),
@@ -1079,6 +1292,16 @@ def admin_dashboard_overview(
             "redeem_rate_7d": float(redeem_rate_7d),
             "active_trial_entitlements": int(entitlements_active),
         },
+        "waitlist": {
+            "total": int(waitlist_total),
+            "joined_24h": int(waitlist_24h),
+            "source_distribution": dict(waitlist_source_counter),
+        },
+        "feedback": {
+            "total": int(feedback_total),
+            "submitted_7d": int(feedback_7d),
+            "avg_rating": round(float(feedback_avg_rating or 0), 2),
+        },
         "quality": {
             "invalid_contract_reports": quality_full.get("invalid_contract_reports", 0),
             "zero_score_without_evidence_attempts_blocked": quality_full.get(
@@ -1093,6 +1316,8 @@ def admin_dashboard_overview(
         "recent_activity": {
             "sessions": recent_sessions,
             "reports": recent_reports,
+            "waitlist_signups": recent_waitlist,
+            "trial_feedback": recent_feedback,
         },
     }
 
@@ -1457,27 +1682,52 @@ def delete_trial_code(
     _admin_user=Depends(_get_admin_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_trial_code_schema(db)
     trial_code = db.query(models.TrialCode).filter(models.TrialCode.id == code_id).first()
     if not trial_code:
         raise HTTPException(status_code=404, detail="Trial code not found")
+    payload = _delete_trial_code_record(db, trial_code)
+    db.commit()
+    return payload
 
+
+@router.post("/trial-codes/bulk-delete")
+def bulk_delete_trial_codes(
+    payload: TrialCodeBulkDeleteRequest,
+    _admin_user=Depends(_get_admin_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_trial_code_schema(db)
+    code_ids = []
+    seen_ids = set()
+    for raw_id in payload.code_ids or []:
+        value = str(raw_id or "").strip()
+        if not value or value in seen_ids:
+            continue
+        seen_ids.add(value)
+        code_ids.append(value)
+    if not code_ids:
+        raise HTTPException(status_code=422, detail="At least one code_id is required.")
+
+    codes = db.query(models.TrialCode).filter(models.TrialCode.id.in_(code_ids)).all()
+    code_map = {code.id: code for code in codes}
     now = _utcnow()
-    trial_code.status = "DELETED"
-    trial_code.deleted_at = now
-    trial_code.revoked_at = now
-
-    revoked = 0
-    entitlements = db.query(models.UserEntitlement).filter(
-        models.UserEntitlement.source_id == code_id,
-        models.UserEntitlement.is_active == True,  # noqa: E712
-    ).all()
-    for entitlement in entitlements:
-        entitlement.is_active = False
-        entitlement.revoked_at = now
-        revoked += 1
+    results = []
+    missing_ids = []
+    for code_id in code_ids:
+        trial_code = code_map.get(code_id)
+        if not trial_code:
+            missing_ids.append(code_id)
+            continue
+        results.append(_delete_trial_code_record(db, trial_code, when=now))
 
     db.commit()
-    return {"code_id": code_id, "status": "DELETED", "revoked_entitlements": revoked}
+    return {
+        "requested_count": len(code_ids),
+        "processed_count": len(results),
+        "missing_ids": missing_ids,
+        "results": results,
+    }
 
 
 @router.get("/evaluation/quality-summary")
@@ -1824,6 +2074,7 @@ def _trial_export_rows(db: Session, filters: Dict[str, Any]) -> List[Dict[str, A
             {
                 "trial_code_id": t.id,
                 "code": t.code,
+                "display_name": t.display_name or "",
                 "code_suffix": t.code_suffix or "",
                 "status": t.status,
                 "duration_minutes": int(t.duration_minutes or 0),

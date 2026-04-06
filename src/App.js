@@ -11,11 +11,13 @@ import Footer from "./components/Footer";
 import theme from "./theme/theme";
 
 import LandingPage from "./pages/LandingPage.jsx";
+import PresentationPage from "./pages/PresentationPage.jsx";
 import PricingPage from "./pages/PricingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Dashboard from "./pages/Dashboard";
+import AdminEntryPage from "./pages/AdminEntryPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import PreInterviewForm from "./pages/PreInterviewForm";
@@ -33,6 +35,9 @@ import AdminTrialsPage from "./pages/admin/AdminTrialsPage";
 import AdminExportsPage from "./pages/admin/AdminExportsPage";
 import AdminConfigPage from "./pages/admin/AdminConfigPage";
 import AdminQuestionBankPage from "./pages/admin/AdminQuestionBankPage";
+import NotFoundPage from "./pages/NotFoundPage";
+
+const ENABLE_REALTIME_TEST_ROUTE = String(process.env.REACT_APP_ENABLE_REALTIME_TEST_ROUTE || "false").toLowerCase() === "true";
 
 // Layout wrapper for authenticated pages with navbar
 function MainLayout() {
@@ -72,6 +77,19 @@ function PublicLayout() {
   );
 }
 
+function AuthLayout() {
+  return (
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundColor: "background.default",
+      }}
+    >
+      <Outlet />
+    </Box>
+  );
+}
+
 function LandingLayout() {
   return (
     <Box
@@ -104,18 +122,23 @@ export default function App() {
           {/* Landing route without footer */}
           <Route element={<LandingLayout />}>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/presentation" element={<PresentationPage />} />
           </Route>
 
           {/* Public routes without navbar */}
           <Route element={<PublicLayout />}>
             <Route path="/pricing" element={<PricingPage />} />
+            {ENABLE_REALTIME_TEST_ROUTE && (
+              <Route path="/test-realtime" element={<RealtimeTestPage />} />
+            )}
+          </Route>
+
+          <Route element={<AuthLayout />}>
             <Route path="/login/*" element={<LoginPage />} />
             <Route path="/register/*" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+            <Route path="/forgot-password/*" element={<ForgotPasswordPage />} />
+            <Route path="/admin" element={<AdminEntryPage />} />
             <Route path="/admin/login/*" element={<AdminLoginPage />} />
-            <Route path="/test-realtime" element={<RealtimeTestPage />} />
-            <Route path="/setup" element={<Navigate to="/interview-config" replace />} />
           </Route>
 
           {/* Auth-protected onboarding route (unguarded) */}
@@ -162,10 +185,10 @@ export default function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/history" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/history" element={<Navigate to="/dashboard" replace state={{ legacyRedirect: "history" }} />} />
             <Route path="/interviews" element={<InterviewsPage />} />
             <Route path="/interview-config" element={<PreInterviewForm />} />
-            <Route path="/report" element={<ReportPage />} />
+            <Route path="/report" element={<Navigate to="/dashboard" replace state={{ legacyRedirect: "report" }} />} />
             <Route path="/report/:sessionId" element={<ReportPage />} />
           </Route>
 
@@ -203,6 +226,11 @@ export default function App() {
                 </OnboardingGuard>
               </PrivateRoute>
             }
+          />
+
+          <Route
+            path="*"
+            element={<NotFoundPage />}
           />
         </Routes>
       </BrowserRouter>

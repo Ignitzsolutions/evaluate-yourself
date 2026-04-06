@@ -3,6 +3,7 @@ try:
         GAZE_EVENT_FACE_NOT_VISIBLE,
         GAZE_EVENT_OFF_SCREEN,
         GazeSessionTracker,
+        aggregate_gaze_events,
         map_direction_to_flag,
     )
 except Exception:
@@ -10,6 +11,7 @@ except Exception:
         GAZE_EVENT_FACE_NOT_VISIBLE,
         GAZE_EVENT_OFF_SCREEN,
         GazeSessionTracker,
+        aggregate_gaze_events,
         map_direction_to_flag,
     )
 
@@ -90,20 +92,22 @@ def test_detector_unavailable_does_not_create_false_face_not_visible_flags():
     payload = tracker.process_sample(
         t_ms=1000,
         gaze_direction="DETECTOR_UNAVAILABLE",
-        eye_contact=True,
+        eye_contact=False,
         confidence=0.0,
         detector_ready=False,
     )
     tracker.process_sample(
         t_ms=2500,
         gaze_direction="DETECTOR_UNAVAILABLE",
-        eye_contact=True,
+        eye_contact=False,
         confidence=0.0,
         detector_ready=False,
     )
     tracker.finalize(t_ms=2600)
 
     assert payload["detectorReady"] is False
+    assert payload["eyeContact"] is False
+    assert payload["gazeDirection"] == "DETECTOR_UNAVAILABLE"
     assert payload["activeFlag"] is None
     assert tracker.events == []
 
@@ -113,3 +117,59 @@ def test_summary_has_no_eye_contact_pct_without_samples():
     tracker.finalize(t_ms=1000)
     summary = tracker.summary()
     assert summary["eye_contact_pct"] is None
+
+
+def test_calibrating_samples_do_not_count_toward_eye_contact_or_create_flags():
+    tracker = GazeSessionTracker()
+
+    payload = tracker.process_sample(
+        t_ms=1000,
+        gaze_direction="CALIBRATING",
+        eye_contact=False,
+        confidence=0.75,
+        detector_ready=True,
+        tracking_active=False,
+        source="mediapipe_face_landmarker_v1",
+        algorithm_version="mediapipe_face_landmarker_v1",
+    )
+    tracker.finalize(t_ms=1600)
+
+    assert payload["trackingActive"] is False
+    assert payload["gazeDirection"] == "CALIBRATING"
+    assert payload["eyeContactPct"] is None
+    assert tracker.events == []
+    assert tracker.summary()["algorithm_version"] == "mediapipe_face_landmarker_v1"
+
+
+def test_aggregate_gaze_events_uses_rows_for_monitoring_window_and_fallback_for_eye_contact():
+    rows = [
+        {
+            "event_type": GAZE_EVENT_OFF_SCREEN,
+            "duration_ms": 1400,
+            "started_at": "2026-04-06T10:00:00+00:00",
+            "ended_at": "2026-04-06T10:00:01.400000+00:00",
+        },
+        {
+            "event_type": GAZE_EVENT_FACE_NOT_VISIBLE,
+            "duration_ms": 500,
+            "started_at": "2026-04-06T10:00:02+00:00",
+            "ended_at": "2026-04-06T10:00:02.500000+00:00",
+        },
+    ]
+    fallback = {
+        "eye_contact_pct": 61.4,
+        "algorithm_version": "mediapipe_face_landmarker_v1",
+        "calibration_valid": True,
+    }
+
+    summary = aggregate_gaze_events(rows, fallback_summary=fallback)
+
+    assert summary["total_events"] == 2
+    assert summary["events_by_type"][GAZE_EVENT_OFF_SCREEN] == 1
+    assert summary["events_by_type"][GAZE_EVENT_FACE_NOT_VISIBLE] == 1
+    assert summary["total_off_screen_ms"] == 1900
+    assert summary["longest_event_ms"] == 1400
+    assert summary["eye_contact_pct"] == 61.4
+    assert summary["monitoring_started_at"] == "2026-04-06T10:00:00+00:00"
+    assert summary["monitoring_ended_at"] == "2026-04-06T10:00:02.500000+00:00"
+    assert summary["algorithm_version"] == "mediapipe_face_landmarker_v1"

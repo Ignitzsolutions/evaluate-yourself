@@ -18,6 +18,7 @@ import {
 } from "@mui/material";
 import { CheckRounded } from "@mui/icons-material";
 import { pricingPlans, trialConfig } from "../config/pricingConfig";
+import WaitlistSignupForm from "../components/WaitlistSignupForm";
 
 export default function PricingPage() {
   const navigate = useNavigate();
@@ -44,6 +45,13 @@ export default function PricingPage() {
           <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 780 }}>
             {trialConfig.description} Upgrade when you need deeper analytics and role-specific preparation.
           </Typography>
+          <WaitlistSignupForm
+            sourcePage="pricing"
+            intent="free_trial"
+            compact
+            title="Join the free-trial waitlist"
+            helperText="Leave your email to get notified when new 5-minute trial slots open."
+          />
         </Stack>
 
         <Grid container spacing={2.5} sx={{ mb: 4 }}>
