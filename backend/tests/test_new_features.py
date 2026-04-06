@@ -355,6 +355,44 @@ class TestHiringSignal:
         # signal may shift but should not crash
         assert r_with_turns["signal"] in ("strong_hire", "hire", "borderline", "no_hire")
 
+    def test_flat_star_breakdown_shape_counts_as_detected(self):
+        turns = [
+            {
+                "star_breakdown": {
+                    "situation": True,
+                    "task": True,
+                    "action": True,
+                    "result": True,
+                },
+                "depth_signals": {
+                    "metrics_mentioned": ["30%"],
+                    "ownership_signals": 1,
+                    "impact_signals": 1,
+                    "tech_named": [],
+                },
+            }
+        ]
+        result = self.compute(78, turns, {}, "behavioral")
+        assert result["signal"] in ("hire", "strong_hire")
+
+    def test_flat_star_breakdown_format_is_supported(self):
+        turns = [{
+            "star_breakdown": {
+                "situation": True,
+                "task": True,
+                "action": True,
+                "result": True,
+            },
+            "depth_signals": {
+                "metrics_mentioned": ["30 percent"],
+                "ownership_signals": 1,
+                "impact_signals": 1,
+                "tech_named": ["Redis"],
+            },
+        }]
+        result = self.compute(78, turns, {}, "technical")
+        assert result["signal"] in ("strong_hire", "hire")
+
     def test_strong_hire_with_good_comps(self):
         comps = {k: 90 for k in ["communication", "problem_solving", "ownership"]}
         r = self._result(88, comps=comps)

@@ -2,9 +2,17 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
-import { authFetch } from '../utils/apiClient';
+import { authFetch, getApiErrorMessage, isBackendUnavailableError } from '../utils/apiClient';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { classifyConversationItem, extractTranscriptText } from '../utils/realtimeTranscript';
+import { shouldAcceptBrowserSpeechResult } from '../utils/realtimeSpeechGuards';
+import { mapLiveGazeFlag } from '../utils/gazeDirection';
+import {
+  createSessionEndError,
+  getEndErrorPresentation,
+  isCaptureEndError,
+  SESSION_END_ERROR_CODES,
+} from '../utils/interviewSessionEnding';
 import {
   Mic,
   MicOff,
@@ -25,6 +33,7 @@ import '../ui.css';
 
 const API_BASE_URL = getApiBaseUrl();
 const REALTIME_VOICE = (process.env.REACT_APP_REALTIME_VOICE || 'alloy').trim() || 'alloy';
+const DEFAULT_SONIA_AVATAR_SRC = '/assets/presentation/sonia-avatar.png';
 const resolveSoniaAvatarSrc = () => {
   if (typeof window !== 'undefined') {
     const runtimeAvatar = (window.sessionStorage.getItem('soniaAvatarSrc') || '').trim();
@@ -32,15 +41,217 @@ const resolveSoniaAvatarSrc = () => {
       return runtimeAvatar;
     }
   }
-  return (process.env.REACT_APP_SONIA_AVATAR_SRC || '/assets/sonia-avatar.png').trim() || '/assets/sonia-avatar.png';
+  return (process.env.REACT_APP_SONIA_AVATAR_SRC || '').trim() || DEFAULT_SONIA_AVATAR_SRC;
 };
 const INTERVIEW_SERVER_CONTROL_ENABLED = String(process.env.REACT_APP_INTERVIEW_SERVER_CONTROL_ENABLED || 'true').toLowerCase() === 'true';
 const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
 const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'true').toLowerCase() === 'true';
 const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'whisper').trim() || 'whisper';
 const DEDUPE_TTL_MS = 8000;
+const BROWSER_SR_AI_AUDIO_COOLDOWN_MS = 1600;
+const BROWSER_SR_USER_SPEECH_WINDOW_MS = 5000;
+const GAZE_ALGORITHM_VERSION = 'mediapipe_face_landmarker_v1';
+const GAZE_CALIBRATION_FRAMES = 18;
+const GAZE_SMOOTHING_WINDOW = 7;
+const GAZE_PREFLIGHT_MS = 1800;
+const GAZE_HORIZONTAL_DELTA_THRESHOLD = 0.055;
+const GAZE_VERTICAL_UP_DELTA_THRESHOLD = -0.055;
+const GAZE_VERTICAL_DOWN_DELTA_THRESHOLD = 0.06;
+const GAZE_HEAD_X_THRESHOLD = 0.05;
+const GAZE_HEAD_Y_THRESHOLD = 0.045;
+const GAZE_MODEL_ASSET_URL =
+  (process.env.REACT_APP_MEDIAPIPE_FACE_MODEL_URL || '').trim() ||
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const GAZE_WASM_ROOT =
+  (process.env.REACT_APP_MEDIAPIPE_WASM_ROOT || '').trim() ||
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+const LEFT_IRIS_INDICES = [468, 469, 470, 471, 472];
+const RIGHT_IRIS_INDICES = [473, 474, 475, 476, 477];
+const LEFT_EYE_INDICES = { outer: 33, inner: 133, top: 159, bottom: 145 };
+const RIGHT_EYE_INDICES = { outer: 263, inner: 362, top: 386, bottom: 374 };
+const NO_GAZE_METRICS = {
+  detectorReady: false,
+  gazeDirection: 'DETECTOR_UNAVAILABLE',
+  eyeContact: false,
+  conf: 0.0,
+  faceDetected: false,
+  trackingActive: false,
+  calibrationState: 'detector_unavailable',
+  calibrationProgress: 0,
+  calibrationQuality: null,
+  calibrationValid: false,
+  algorithmVersion: GAZE_ALGORITHM_VERSION,
+  source: GAZE_ALGORITHM_VERSION,
+};
 
-const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = null) => {
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const average = (values = []) => {
+  const numeric = values.filter((value) => Number.isFinite(value));
+  if (!numeric.length) return null;
+  return numeric.reduce((sum, value) => sum + value, 0) / numeric.length;
+};
+
+const summarizeCalibrationFrames = (frames = []) => {
+  if (!Array.isArray(frames) || frames.length < GAZE_CALIBRATION_FRAMES) {
+    return { quality: null, valid: false };
+  }
+  const spread = (key) => {
+    const values = frames.map((frame) => frame?.[key]).filter(Number.isFinite);
+    if (!values.length) return Infinity;
+    return Math.max(...values) - Math.min(...values);
+  };
+  const horizontalSpread = spread('horizontal');
+  const verticalSpread = spread('vertical');
+  const headXSpread = spread('headX');
+  const headYSpread = spread('headY');
+  const averageFaceArea = average(frames.map((frame) => frame?.faceArea)) || 0;
+  const stable =
+    horizontalSpread <= 0.06 &&
+    verticalSpread <= 0.06 &&
+    headXSpread <= 0.045 &&
+    headYSpread <= 0.045;
+  const centered = averageFaceArea >= 0.018;
+  const quality = Number(
+    clamp(
+      1 - ((horizontalSpread + verticalSpread + headXSpread + headYSpread) / 0.21),
+      0,
+      1,
+    ).toFixed(4),
+  );
+  return {
+    quality,
+    valid: stable && centered,
+  };
+};
+
+const averageLandmarkPoint = (landmarks, indices) => {
+  const points = indices
+    .map((index) => landmarks?.[index])
+    .filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (!points.length) return null;
+  return {
+    x: average(points.map((point) => point.x)),
+    y: average(points.map((point) => point.y)),
+    z: average(points.map((point) => point.z || 0)) || 0,
+  };
+};
+
+const getLandmarkPoint = (landmarks, index) => {
+  const point = landmarks?.[index];
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    return null;
+  }
+  return { x: point.x, y: point.y, z: Number(point.z || 0) };
+};
+
+const computeEyeSignal = (landmarks, eyeIndices, irisIndices) => {
+  const iris = averageLandmarkPoint(landmarks, irisIndices);
+  const outer = getLandmarkPoint(landmarks, eyeIndices.outer);
+  const inner = getLandmarkPoint(landmarks, eyeIndices.inner);
+  const top = getLandmarkPoint(landmarks, eyeIndices.top);
+  const bottom = getLandmarkPoint(landmarks, eyeIndices.bottom);
+  if (!iris || !outer || !inner || !top || !bottom) {
+    return null;
+  }
+  const minX = Math.min(outer.x, inner.x);
+  const maxX = Math.max(outer.x, inner.x);
+  const eyeWidth = Math.max(Math.abs(maxX - minX), 1e-4);
+  const eyeHeight = Math.max(Math.abs(bottom.y - top.y), 1e-4);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (top.y + bottom.y) / 2;
+  return {
+    horizontal: (iris.x - centerX) / eyeWidth,
+    vertical: (iris.y - centerY) / eyeHeight,
+    centerX,
+    centerY,
+  };
+};
+
+const computeLandmarkSample = (landmarks) => {
+  if (!Array.isArray(landmarks) || !landmarks.length) {
+    return null;
+  }
+  const leftEye = computeEyeSignal(landmarks, LEFT_EYE_INDICES, LEFT_IRIS_INDICES);
+  const rightEye = computeEyeSignal(landmarks, RIGHT_EYE_INDICES, RIGHT_IRIS_INDICES);
+  const nose = getLandmarkPoint(landmarks, 1) || getLandmarkPoint(landmarks, 4);
+  if (!leftEye || !rightEye || !nose) {
+    return null;
+  }
+  const xs = landmarks.map((point) => point?.x).filter(Number.isFinite);
+  const ys = landmarks.map((point) => point?.y).filter(Number.isFinite);
+  if (!xs.length || !ys.length) {
+    return null;
+  }
+  const faceWidth = Math.max(Math.max(...xs) - Math.min(...xs), 1e-4);
+  const faceHeight = Math.max(Math.max(...ys) - Math.min(...ys), 1e-4);
+  return {
+    horizontal: average([leftEye.horizontal, rightEye.horizontal]) || 0,
+    vertical: average([leftEye.vertical, rightEye.vertical]) || 0,
+    headX: nose.x,
+    headY: nose.y,
+    faceWidth,
+    faceHeight,
+    faceArea: faceWidth * faceHeight,
+  };
+};
+
+const classifyCalibratedGaze = (sample, baseline) => {
+  const deltaHorizontal = sample.horizontal - baseline.horizontal;
+  const deltaVertical = sample.vertical - baseline.vertical;
+  const deltaHeadX = sample.headX - baseline.headX;
+  const deltaHeadY = sample.headY - baseline.headY;
+  const eyeHorizontalSignal = Math.abs(deltaHorizontal) - Math.abs(deltaHeadX) * 0.35;
+  const eyeVerticalSignal = Math.abs(deltaVertical) - Math.abs(deltaHeadY) * 0.2;
+
+  let direction = 'ON_SCREEN';
+  if (
+    deltaVertical >= GAZE_VERTICAL_DOWN_DELTA_THRESHOLD ||
+    (eyeVerticalSignal >= GAZE_VERTICAL_DOWN_DELTA_THRESHOLD * 0.82 && deltaVertical > 0) ||
+    deltaHeadY >= GAZE_HEAD_Y_THRESHOLD
+  ) {
+    direction = 'DOWN';
+  } else if (
+    deltaVertical <= GAZE_VERTICAL_UP_DELTA_THRESHOLD ||
+    (eyeVerticalSignal >= Math.abs(GAZE_VERTICAL_UP_DELTA_THRESHOLD) * 0.82 && deltaVertical < 0) ||
+    deltaHeadY <= -GAZE_HEAD_Y_THRESHOLD
+  ) {
+    direction = 'UP';
+  } else if (
+    deltaHorizontal <= -GAZE_HORIZONTAL_DELTA_THRESHOLD ||
+    (eyeHorizontalSignal >= GAZE_HORIZONTAL_DELTA_THRESHOLD * 0.82 && deltaHorizontal < 0) ||
+    deltaHeadX <= -GAZE_HEAD_X_THRESHOLD
+  ) {
+    direction = 'LEFT';
+  } else if (
+    deltaHorizontal >= GAZE_HORIZONTAL_DELTA_THRESHOLD ||
+    (eyeHorizontalSignal >= GAZE_HORIZONTAL_DELTA_THRESHOLD * 0.82 && deltaHorizontal > 0) ||
+    deltaHeadX >= GAZE_HEAD_X_THRESHOLD
+  ) {
+    direction = 'RIGHT';
+  }
+
+  const movementMagnitude = Math.min(
+    1,
+    Math.abs(deltaHorizontal) * 4.4 +
+      Math.abs(deltaVertical) * 4.2 +
+      Math.abs(deltaHeadX) * 2.4 +
+      Math.abs(deltaHeadY) * 2.2,
+  );
+  const faceConfidence = clamp(sample.faceArea * 5.4, 0.35, 0.98);
+  const conf =
+    direction === 'ON_SCREEN'
+      ? clamp(faceConfidence * (1 - movementMagnitude * 0.35), 0.45, 0.99)
+      : clamp(faceConfidence * (0.65 + movementMagnitude * 0.45), 0.45, 0.99);
+
+  return {
+    direction,
+    conf: Number(conf.toFixed(4)),
+  };
+};
+
+const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = null, options = {}) => {
+  const opening = Boolean(options?.opening);
   const question = String(questionText || '').trim();
   const refusal = String(refusalMessage || '').trim();
   const parts = [];
@@ -48,14 +259,21 @@ const buildInterviewerUtteranceInstruction = (questionText, refusalMessage = nul
   parts.push(question);
   const script = parts.join(' ');
   return [
-    'Role: You are Sonia, a warm but professional interviewer.',
-    'Task: Ask the QUESTION below in a natural, conversational tone.',
+    'Role: You are Sonia, a strict but professional interviewer.',
+    'Task: Ask the QUESTION below in a natural, direct interview tone.',
     'Rules:',
-    '- Begin with a brief natural acknowledgment (e.g. "Got it.", "I see.", "That\'s helpful.") only if this follows a candidate answer — skip it for the opening question.',
+    '- For the opening question, begin with one short welcome sentence and then ask exactly one concrete question.',
+    '- For later turns, begin with a brief natural acknowledgment only if this follows a real candidate answer.',
     '- Then ask the QUESTION below. You may rephrase it slightly for a natural flow, but preserve the full intent.',
+    '- Be direct and interviewer-like. Do not ramble, apologize, coach, narrate the process, or say you are getting back on track.',
+    '- Keep acknowledgments restrained: examples are "Understood.", "Okay.", or "Go on."',
     '- Do NOT provide feedback, scores, or evaluate the answer.',
     '- Do NOT ask multiple questions at once.',
-    '- Keep your total response concise — under 50 words.',
+    '- Ask the question and then stop. Wait for the candidate to answer.',
+    '- If the prior candidate reply was weak, unclear, or effectively absent, restate the same question more directly instead of switching topics.',
+    '- Do not switch to a new topic just because the candidate paused. Hold the question, then repeat it once more directly if needed.',
+    '- Keep your total response concise — under 45 words for the opening, under 50 words otherwise.',
+    `OPENING_TURN: ${opening ? 'yes' : 'no'}`,
     `QUESTION: ${script}`,
   ].join('\n');
 };
@@ -158,19 +376,26 @@ export default function InterviewSessionRoom() {
   const localStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const audioElementRef = useRef(null);
+  const audioResumeActionRef = useRef(null);
   const gazeWsRef = useRef(null);
   const gazeCanvasRef = useRef(null);
   const gazeRafRef = useRef(0);
   const cameraOffRef = useRef(false);
   const faceDetectorRef = useRef(null);
+  const detectorInitPromiseRef = useRef(null);
   const detectInFlightRef = useRef(false);
-  const clientGazeRef = useRef({
-    detectorReady: false,
-    gazeDirection: 'ON_SCREEN',
-    eyeContact: true,
-    conf: 0.0,
-    faceDetected: false,
+  const gazeSampleHistoryRef = useRef([]);
+  const gazeCalibrationRef = useRef({
+    status: 'idle',
+    frames: [],
+    baseline: null,
+    completedAt: null,
+    quality: null,
+    valid: false,
   });
+  const clientGazeRef = useRef({ ...NO_GAZE_METRICS });
+  const gazeFinalizePromiseRef = useRef(null);
+  const gazeFinalizeResolverRef = useRef(null);
 
   // State
   const [status, setStatus] = useState('idle');
@@ -192,11 +417,17 @@ export default function InterviewSessionRoom() {
   const [avatarLoadError, setAvatarLoadError] = useState(false);
   const [gazeMetrics, setGazeMetrics] = useState({
     connected: false,
-    eyeContact: true,
+    eyeContact: false,
     eyeContactPct: null,
-    gazeDirection: 'ON_SCREEN',
+    gazeDirection: 'DETECTOR_UNAVAILABLE',
     activeFlag: null,
-    detectorReady: true,
+    detectorReady: false,
+    faceDetected: false,
+    trackingActive: false,
+    calibrationState: 'detector_unavailable',
+    calibrationProgress: 0,
+    calibrationQuality: null,
+    calibrationValid: false,
   });
   const capturedAiRef = useRef(new Map());
   const capturedUserRef = useRef(new Map());
@@ -222,12 +453,16 @@ export default function InterviewSessionRoom() {
   const pendingUserTranscriptRef = useRef({});
   const finalUserTranscriptItemIdsRef = useRef(new Set());
   const pendingOpeningQuestionRef = useRef(null);
+  const pendingOpeningInstructionRef = useRef(null);
   const transcriptionReapplyAttemptedRef = useRef(false);
   const transcriptionFallbackNotifiedRef = useRef(false);
   const legacySessionSchemaFallbackTriedRef = useRef(false);
   const browserSpeechRef = useRef(null);
   const browserSpeechShouldRunRef = useRef(false);
   const lastUserTranscriptRef = useRef({ text: '', at: 0 });
+  const aiSpeakingRef = useRef(false);
+  const lastAiAudioStoppedAtRef = useRef(0);
+  const lastUserSpeechSignalAtRef = useRef(0);
   const captureStatsRef = useRef({
     captured_user_turns: 0,
     captured_ai_turns: 0,
@@ -243,7 +478,7 @@ export default function InterviewSessionRoom() {
   const [endError, setEndError] = useState(null);
   const [showEndErrorDialog, setShowEndErrorDialog] = useState(false);
 
-  // In-session capture warnings: null | 'fallback' | 'no_audio'
+  // In-session capture warnings: null | 'fallback' | 'no_audio' | 'audio_blocked'
   const [captureWarning, setCaptureWarning] = useState(null);
   const pendingTranscriptPayloadRef = useRef(null);
 
@@ -255,6 +490,18 @@ export default function InterviewSessionRoom() {
     const stats = captureStatsRef.current;
     const key = String(reason);
     stats.dropped_events[key] = (stats.dropped_events[key] || 0) + 1;
+  }, []);
+
+  const setAiSpeakingState = useCallback((active) => {
+    aiSpeakingRef.current = Boolean(active);
+    setAiSpeaking(Boolean(active));
+    if (!active) {
+      lastAiAudioStoppedAtRef.current = Date.now();
+    }
+  }, []);
+
+  const markUserSpeechSignal = useCallback(() => {
+    lastUserSpeechSignalAtRef.current = Date.now();
   }, []);
 
   const rememberByTtl = useCallback((storeRef, key, ttlMs = DEDUPE_TTL_MS) => {
@@ -319,12 +566,14 @@ export default function InterviewSessionRoom() {
     
     // Update drain tracking
     lastMessageAtRef.current = Date.now();
-    
-    setTranscript(prev => [...prev, {
-      speaker,
-      text,
-      timestamp: ts
-    }]);
+
+    if (speaker === 'ai' || speaker === 'user') {
+      setTranscript(prev => [...prev, {
+        speaker,
+        text,
+        timestamp: ts
+      }]);
+    }
 
     // Also collect for saving (refs are source of truth)
     if (speaker === 'ai') {
@@ -425,20 +674,42 @@ export default function InterviewSessionRoom() {
     return url.toString();
   }, [sessionId]);
 
-  const stopGazeMonitoring = useCallback(() => {
+  const settleGazeFinalize = useCallback((payload) => {
+    if (typeof gazeFinalizeResolverRef.current !== 'function') return;
+    const resolver = gazeFinalizeResolverRef.current;
+    gazeFinalizeResolverRef.current = null;
+    gazeFinalizePromiseRef.current = null;
+    resolver(payload);
+  }, []);
+
+  const stopGazeMonitoring = useCallback((options = {}) => {
+    const resetDetector = options.resetDetector !== false;
     if (gazeRafRef.current) {
       cancelAnimationFrame(gazeRafRef.current);
       gazeRafRef.current = 0;
     }
-    faceDetectorRef.current = null;
-    detectInFlightRef.current = false;
-    clientGazeRef.current = {
-      detectorReady: false,
-      gazeDirection: 'ON_SCREEN',
-      eyeContact: true,
-      conf: 0.0,
-      faceDetected: false,
-    };
+    if (resetDetector) {
+      if (faceDetectorRef.current?.close) {
+        try {
+          faceDetectorRef.current.close();
+        } catch {
+          // no-op
+        }
+      }
+      faceDetectorRef.current = null;
+      detectorInitPromiseRef.current = null;
+      detectInFlightRef.current = false;
+      gazeSampleHistoryRef.current = [];
+      gazeCalibrationRef.current = {
+        status: 'idle',
+        frames: [],
+        baseline: null,
+        completedAt: null,
+        quality: null,
+        valid: false,
+      };
+      clientGazeRef.current = { ...NO_GAZE_METRICS };
+    }
     if (gazeWsRef.current) {
       try {
         gazeWsRef.current.close();
@@ -447,26 +718,192 @@ export default function InterviewSessionRoom() {
       }
       gazeWsRef.current = null;
     }
-    setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null }));
-  }, []);
+    settleGazeFinalize({ finalized: false, reason: resetDetector ? 'STOP' : 'SOCKET_CLOSED' });
+    setGazeMetrics((prev) => ({
+      ...prev,
+      connected: false,
+      activeFlag: null,
+      faceDetected: resetDetector ? false : prev.faceDetected,
+      detectorReady: resetDetector ? false : prev.detectorReady,
+      trackingActive: resetDetector ? false : prev.trackingActive,
+      calibrationState: resetDetector ? 'detector_unavailable' : prev.calibrationState,
+      calibrationProgress: resetDetector ? 0 : prev.calibrationProgress,
+      calibrationQuality: resetDetector ? null : prev.calibrationQuality,
+      calibrationValid: resetDetector ? false : prev.calibrationValid,
+      gazeDirection: resetDetector ? 'DETECTOR_UNAVAILABLE' : prev.gazeDirection,
+    }));
+  }, [settleGazeFinalize]);
 
-  const createOrReuseFaceDetector = useCallback(() => {
+  const createOrReuseFaceDetector = useCallback(async () => {
     if (faceDetectorRef.current) {
       return faceDetectorRef.current;
     }
-    const FaceDetectorCtor = typeof window !== 'undefined' ? window.FaceDetector : null;
-    if (!FaceDetectorCtor) {
-      return null;
+    if (detectorInitPromiseRef.current) {
+      return detectorInitPromiseRef.current;
     }
-    try {
-      faceDetectorRef.current = new FaceDetectorCtor({
-        fastMode: true,
-        maxDetectedFaces: 1,
-      });
-      return faceDetectorRef.current;
-    } catch {
-      return null;
+    detectorInitPromiseRef.current = (async () => {
+      try {
+        const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
+        const vision = await FilesetResolver.forVisionTasks(GAZE_WASM_ROOT);
+        let detector = null;
+        for (const delegate of ['GPU', 'CPU']) {
+          try {
+            detector = await FaceLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: GAZE_MODEL_ASSET_URL,
+                delegate,
+              },
+              runningMode: 'VIDEO',
+              numFaces: 1,
+              outputFaceBlendshapes: false,
+              outputFacialTransformationMatrixes: false,
+            });
+            break;
+          } catch (delegateError) {
+            if (delegate === 'CPU') {
+              throw delegateError;
+            }
+          }
+        }
+        faceDetectorRef.current = detector;
+        gazeSampleHistoryRef.current = [];
+        gazeCalibrationRef.current = {
+          status: 'collecting',
+          frames: [],
+          baseline: null,
+          completedAt: null,
+          quality: null,
+          valid: false,
+        };
+        return detector;
+      } catch (error) {
+        console.warn('Failed to initialize MediaPipe gaze detector:', error);
+        faceDetectorRef.current = null;
+        return null;
+      } finally {
+        detectorInitPromiseRef.current = null;
+      }
+    })();
+    return detectorInitPromiseRef.current;
+  }, []);
+
+  const classifyLandmarkResult = useCallback((landmarks) => {
+    const calibration = gazeCalibrationRef.current;
+    const progressFromFrames = Math.round(
+      clamp((calibration.frames?.length || 0) / GAZE_CALIBRATION_FRAMES, 0, 1) * 100,
+    );
+    if (!Array.isArray(landmarks) || !landmarks.length) {
+      gazeSampleHistoryRef.current = [];
+      return {
+        detectorReady: true,
+        gazeDirection: 'NO_FACE',
+        eyeContact: false,
+        conf: 0.0,
+        faceDetected: false,
+        trackingActive: calibration.status === 'complete',
+        calibrationState: calibration.status === 'complete' ? 'complete' : 'calibrating',
+        calibrationProgress: calibration.status === 'complete' ? 100 : progressFromFrames,
+        calibrationQuality: calibration.quality,
+        calibrationValid: Boolean(calibration.valid),
+        algorithmVersion: GAZE_ALGORITHM_VERSION,
+        source: GAZE_ALGORITHM_VERSION,
+      };
     }
+
+    const sample = computeLandmarkSample(landmarks);
+    if (!sample) {
+      return {
+        detectorReady: true,
+        gazeDirection: 'NO_FACE',
+        eyeContact: false,
+        conf: 0.0,
+        faceDetected: false,
+        trackingActive: false,
+        calibrationState: 'calibrating',
+        calibrationProgress: progressFromFrames,
+        calibrationQuality: calibration.quality,
+        calibrationValid: Boolean(calibration.valid),
+        algorithmVersion: GAZE_ALGORITHM_VERSION,
+        source: GAZE_ALGORITHM_VERSION,
+      };
+    }
+
+    if (calibration.status !== 'complete') {
+      calibration.status = 'collecting';
+      calibration.frames = [...calibration.frames, sample].slice(-GAZE_CALIBRATION_FRAMES);
+      const calibrationProgress = Math.round(
+        clamp(calibration.frames.length / GAZE_CALIBRATION_FRAMES, 0, 1) * 100,
+      );
+      if (calibration.frames.length < GAZE_CALIBRATION_FRAMES) {
+        return {
+          detectorReady: true,
+          gazeDirection: 'CALIBRATING',
+          eyeContact: false,
+          conf: Number(clamp(sample.faceArea * 5, 0.45, 0.9).toFixed(4)),
+          faceDetected: true,
+          trackingActive: false,
+          calibrationState: 'calibrating',
+          calibrationProgress,
+          calibrationQuality: calibration.quality,
+          calibrationValid: Boolean(calibration.valid),
+          algorithmVersion: GAZE_ALGORITHM_VERSION,
+          source: GAZE_ALGORITHM_VERSION,
+        };
+      }
+      const calibrationSummary = summarizeCalibrationFrames(calibration.frames);
+      calibration.quality = calibrationSummary.quality;
+      calibration.valid = calibrationSummary.valid;
+      if (!calibration.valid) {
+        calibration.frames = calibration.frames.slice(-Math.ceil(GAZE_CALIBRATION_FRAMES * 0.7));
+        return {
+          detectorReady: true,
+          gazeDirection: 'CALIBRATING',
+          eyeContact: false,
+          conf: Number(clamp(sample.faceArea * 5, 0.45, 0.9).toFixed(4)),
+          faceDetected: true,
+          trackingActive: false,
+          calibrationState: 'calibrating',
+          calibrationProgress,
+          calibrationQuality: calibration.quality,
+          calibrationValid: false,
+          algorithmVersion: GAZE_ALGORITHM_VERSION,
+          source: GAZE_ALGORITHM_VERSION,
+        };
+      }
+      calibration.baseline = {
+        horizontal: average(calibration.frames.map((frame) => frame.horizontal)) || 0,
+        vertical: average(calibration.frames.map((frame) => frame.vertical)) || 0,
+        headX: average(calibration.frames.map((frame) => frame.headX)) || 0,
+        headY: average(calibration.frames.map((frame) => frame.headY)) || 0,
+      };
+      calibration.status = 'complete';
+      calibration.completedAt = Date.now();
+      gazeSampleHistoryRef.current = [];
+    }
+
+    gazeSampleHistoryRef.current = [...gazeSampleHistoryRef.current, sample].slice(-GAZE_SMOOTHING_WINDOW);
+    const averagedSample = {
+      horizontal: average(gazeSampleHistoryRef.current.map((frame) => frame.horizontal)) || sample.horizontal,
+      vertical: average(gazeSampleHistoryRef.current.map((frame) => frame.vertical)) || sample.vertical,
+      headX: average(gazeSampleHistoryRef.current.map((frame) => frame.headX)) || sample.headX,
+      headY: average(gazeSampleHistoryRef.current.map((frame) => frame.headY)) || sample.headY,
+      faceArea: average(gazeSampleHistoryRef.current.map((frame) => frame.faceArea)) || sample.faceArea,
+    };
+    const classified = classifyCalibratedGaze(averagedSample, calibration.baseline);
+    return {
+      detectorReady: true,
+      gazeDirection: classified.direction,
+      eyeContact: classified.direction === 'ON_SCREEN',
+      conf: classified.conf,
+      faceDetected: true,
+      trackingActive: true,
+      calibrationState: 'complete',
+      calibrationProgress: 100,
+      calibrationQuality: calibration.quality,
+      calibrationValid: Boolean(calibration.valid),
+      algorithmVersion: GAZE_ALGORITHM_VERSION,
+      source: GAZE_ALGORITHM_VERSION,
+    };
   }, []);
 
   const runGazePreflight = useCallback(async () => {
@@ -483,18 +920,14 @@ export default function InterviewSessionRoom() {
       // ignore preview warmup failure
     }
 
-    const detector = createOrReuseFaceDetector();
+    const detector = await createOrReuseFaceDetector();
     if (!detector) {
-      clientGazeRef.current = {
-        detectorReady: false,
-        gazeDirection: 'ON_SCREEN',
-        eyeContact: true,
-        conf: 0.0,
-        faceDetected: false,
-      };
+      clientGazeRef.current = { ...NO_GAZE_METRICS };
       setGazeMetrics((prev) => ({
         ...prev,
         detectorReady: false,
+        trackingActive: false,
+        calibrationState: 'detector_unavailable',
       }));
       return;
     }
@@ -508,60 +941,38 @@ export default function InterviewSessionRoom() {
     canvas.width = 320;
     canvas.height = 240;
 
-    const classifyFaceBox = (faceBox, frameW, frameH) => {
-      const x = Number(faceBox?.x ?? 0);
-      const y = Number(faceBox?.y ?? 0);
-      const w = Number(faceBox?.width ?? 0);
-      const h = Number(faceBox?.height ?? 0);
-      if (!w || !h || !frameW || !frameH) {
-        return {
-          detectorReady: true,
-          gazeDirection: 'NO_FACE',
-          eyeContact: false,
-          conf: 0.0,
-          faceDetected: false,
-        };
-      }
-      const faceCx = x + (w / 2);
-      const faceCy = y + (h / 2);
-      const normDx = (faceCx - (frameW / 2)) / Math.max(frameW / 2, 1);
-      const normDy = (faceCy - (frameH / 2)) / Math.max(frameH / 2, 1);
-      let gazeDirection = 'ON_SCREEN';
-      if (normDy < -0.22) gazeDirection = 'UP';
-      else if (normDy > 0.24) gazeDirection = 'DOWN';
-      else if (normDx < -0.28) gazeDirection = 'LEFT';
-      else if (normDx > 0.28) gazeDirection = 'RIGHT';
-      const faceAreaRatio = (w * h) / Math.max(frameW * frameH, 1);
-      const centerPenalty = Math.min(1, Math.sqrt((normDx ** 2) + (normDy ** 2)));
-      const conf = Math.min(1, Math.max(0, (faceAreaRatio * 6.5) * (1 - (0.45 * centerPenalty))));
-      return {
-        detectorReady: true,
-        gazeDirection,
-        eyeContact: gazeDirection === 'ON_SCREEN',
-        conf: Number(conf.toFixed(4)),
-        faceDetected: true,
-      };
-    };
-
     const startedAt = Date.now();
     let lastSample = {
       detectorReady: true,
-      gazeDirection: 'NO_FACE',
+      gazeDirection: 'CALIBRATING',
       eyeContact: false,
       conf: 0.0,
       faceDetected: false,
+      trackingActive: false,
+      calibrationState: 'calibrating',
+      calibrationQuality: null,
+      calibrationValid: false,
+      algorithmVersion: GAZE_ALGORITHM_VERSION,
+      source: GAZE_ALGORITHM_VERSION,
     };
-    while (Date.now() - startedAt < 650) {
+    while (Date.now() - startedAt < GAZE_PREFLIGHT_MS) {
       try {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const faces = await detector.detect(canvas);
-        if (Array.isArray(faces) && faces.length > 0) {
-          const topFace = [...faces].sort((a, b) => {
-            const areaA = (a.boundingBox?.width || 0) * (a.boundingBox?.height || 0);
-            const areaB = (b.boundingBox?.width || 0) * (b.boundingBox?.height || 0);
-            return areaB - areaA;
-          })[0];
-          lastSample = classifyFaceBox(topFace?.boundingBox, canvas.width, canvas.height);
+        const result = await detector.detectForVideo(video, performance.now());
+        lastSample = classifyLandmarkResult(result?.faceLandmarks?.[0] || null);
+        const nextSample = lastSample;
+        setGazeMetrics((prev) => ({
+          ...prev,
+          detectorReady: nextSample.detectorReady !== false,
+          gazeDirection: nextSample.gazeDirection || 'DETECTOR_UNAVAILABLE',
+          faceDetected: Boolean(nextSample.faceDetected),
+          trackingActive: Boolean(nextSample.trackingActive),
+          calibrationState: nextSample.calibrationState || 'calibrating',
+          calibrationProgress: Number(nextSample.calibrationProgress || 0),
+          calibrationQuality: nextSample.calibrationQuality ?? null,
+          calibrationValid: Boolean(nextSample.calibrationValid),
+        }));
+        if (nextSample.trackingActive) {
           break;
         }
       } catch {
@@ -573,9 +984,16 @@ export default function InterviewSessionRoom() {
     clientGazeRef.current = lastSample;
     setGazeMetrics((prev) => ({
       ...prev,
-      detectorReady: true,
+      detectorReady: lastSample.detectorReady !== false,
+      gazeDirection: lastSample.gazeDirection || 'DETECTOR_UNAVAILABLE',
+      faceDetected: Boolean(lastSample.faceDetected),
+      trackingActive: Boolean(lastSample.trackingActive),
+      calibrationState: lastSample.calibrationState || 'calibrating',
+      calibrationProgress: Number(lastSample.calibrationProgress || 0),
+      calibrationQuality: lastSample.calibrationQuality ?? null,
+      calibrationValid: Boolean(lastSample.calibrationValid),
     }));
-  }, [createOrReuseFaceDetector]);
+  }, [classifyLandmarkResult, createOrReuseFaceDetector]);
 
   const startGazeMonitoring = useCallback(async (token) => {
     const stream = localStreamRef.current;
@@ -590,7 +1008,7 @@ export default function InterviewSessionRoom() {
       }
     }
 
-    stopGazeMonitoring();
+    stopGazeMonitoring({ resetDetector: false });
     const ws = new WebSocket(buildGazeWsUrl(token));
     gazeWsRef.current = ws;
     let readyResolved = false;
@@ -609,54 +1027,10 @@ export default function InterviewSessionRoom() {
       ws.send(JSON.stringify({ type: 'camera_state', enabled, t: Date.now() }));
     };
 
-    const classifyFaceBox = (faceBox, frameW, frameH) => {
-      const x = Number(faceBox?.x ?? 0);
-      const y = Number(faceBox?.y ?? 0);
-      const w = Number(faceBox?.width ?? 0);
-      const h = Number(faceBox?.height ?? 0);
-      if (!w || !h || !frameW || !frameH) {
-        return {
-          detectorReady: true,
-          gazeDirection: 'NO_FACE',
-          eyeContact: false,
-          conf: 0.0,
-          faceDetected: false,
-        };
-      }
-
-      const faceCx = x + (w / 2);
-      const faceCy = y + (h / 2);
-      const normDx = (faceCx - (frameW / 2)) / Math.max(frameW / 2, 1);
-      const normDy = (faceCy - (frameH / 2)) / Math.max(frameH / 2, 1);
-
-      let gazeDirection = 'ON_SCREEN';
-      if (normDy < -0.22) gazeDirection = 'UP';
-      else if (normDy > 0.24) gazeDirection = 'DOWN';
-      else if (normDx < -0.28) gazeDirection = 'LEFT';
-      else if (normDx > 0.28) gazeDirection = 'RIGHT';
-
-      const faceAreaRatio = (w * h) / Math.max(frameW * frameH, 1);
-      const centerPenalty = Math.min(1, Math.sqrt((normDx ** 2) + (normDy ** 2)));
-      const conf = Math.min(1, Math.max(0, (faceAreaRatio * 6.5) * (1 - (0.45 * centerPenalty))));
-      return {
-        detectorReady: true,
-        gazeDirection,
-        eyeContact: gazeDirection === 'ON_SCREEN',
-        conf: Number(conf.toFixed(4)),
-        faceDetected: true,
-      };
-    };
-
-    ws.onopen = () => {
-      const detector = createOrReuseFaceDetector();
+    ws.onopen = async () => {
+      const detector = await createOrReuseFaceDetector();
       if (!detector && !clientGazeRef.current.detectorReady) {
-        clientGazeRef.current = {
-          detectorReady: false,
-          gazeDirection: 'ON_SCREEN',
-          eyeContact: true,
-          conf: 0.0,
-          faceDetected: false,
-        };
+        clientGazeRef.current = { ...NO_GAZE_METRICS };
         settleReady({ connected: true, detectorReady: false, reason: 'NO_DETECTOR' });
       }
 
@@ -683,39 +1057,37 @@ export default function InterviewSessionRoom() {
           const detector = faceDetectorRef.current;
           if (detector && !detectInFlightRef.current) {
             detectInFlightRef.current = true;
-            detector.detect(canvas)
-              .then((faces) => {
-                if (Array.isArray(faces) && faces.length > 0) {
-                  const topFace = [...faces].sort((a, b) => {
-                    const areaA = (a.boundingBox?.width || 0) * (a.boundingBox?.height || 0);
-                    const areaB = (b.boundingBox?.width || 0) * (b.boundingBox?.height || 0);
-                    return areaB - areaA;
-                  })[0];
-                  clientGazeRef.current = classifyFaceBox(topFace?.boundingBox, canvas.width, canvas.height);
-                } else {
-                  clientGazeRef.current = {
+            detector.detectForVideo(video, performance.now())
+              .then((result) => {
+                clientGazeRef.current = classifyLandmarkResult(result?.faceLandmarks?.[0] || null);
+                setGazeMetrics((prev) => ({
+                  ...prev,
+                  connected: true,
+                  detectorReady: clientGazeRef.current.detectorReady !== false,
+                  gazeDirection: clientGazeRef.current.gazeDirection || 'DETECTOR_UNAVAILABLE',
+                  faceDetected: Boolean(clientGazeRef.current.faceDetected),
+                  trackingActive: Boolean(clientGazeRef.current.trackingActive),
+                  calibrationState: clientGazeRef.current.calibrationState || 'calibrating',
+                  calibrationProgress: Number(clientGazeRef.current.calibrationProgress || 0),
+                  calibrationQuality: clientGazeRef.current.calibrationQuality ?? null,
+                  calibrationValid: Boolean(clientGazeRef.current.calibrationValid),
+                }));
+                if (!readyResolved && clientGazeRef.current.detectorReady) {
+                  settleReady({
+                    connected: true,
                     detectorReady: true,
-                    gazeDirection: 'NO_FACE',
-                    eyeContact: false,
-                    conf: 0.0,
-                    faceDetected: false,
-                  };
+                    reason: clientGazeRef.current.trackingActive ? 'LANDMARKS_ACTIVE' : 'CALIBRATING',
+                  });
                 }
               })
               .catch(() => {
-                clientGazeRef.current = {
-                  detectorReady: false,
-                  gazeDirection: 'ON_SCREEN',
-                  eyeContact: true,
-                  conf: 0.0,
-                  faceDetected: false,
-                };
+                clientGazeRef.current = { ...NO_GAZE_METRICS };
               })
               .finally(() => {
                 detectInFlightRef.current = false;
               });
           }
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          const dataUrl = clientGazeRef.current.detectorReady ? '' : canvas.toDataURL('image/jpeg', 0.6);
           ws.send(JSON.stringify({
             type: 'frame',
             t: Date.now(),
@@ -738,18 +1110,36 @@ export default function InterviewSessionRoom() {
             connected: true,
             eyeContact: Boolean(message.eyeContact),
             eyeContactPct: Number.isFinite(pctRaw) ? pctRaw : null,
-            gazeDirection: message.gazeDirection || 'ON_SCREEN',
+            gazeDirection: message.gazeDirection || 'DETECTOR_UNAVAILABLE',
             activeFlag: message.activeFlag || null,
             detectorReady: message.detectorReady !== false,
+            faceDetected: Boolean(message.faceDetected),
+            trackingActive: Boolean(message.trackingActive),
+            calibrationState: message.calibrationState || (message.trackingActive ? 'complete' : 'calibrating'),
+            calibrationProgress: Number(message.calibrationProgress || (message.trackingActive ? 100 : clientGazeRef.current.calibrationProgress || 0)),
+            calibrationQuality: message.calibrationQuality ?? clientGazeRef.current.calibrationQuality ?? null,
+            calibrationValid: Boolean(message.calibrationValid ?? clientGazeRef.current.calibrationValid),
           });
           settleReady({
             connected: true,
             detectorReady: message.detectorReady !== false,
             reason: 'METRICS',
           });
+        } else if (message.type === 'finalized') {
+          const summary = message.summary || {};
+          setGazeMetrics((prev) => ({
+            ...prev,
+            connected: false,
+            eyeContactPct: Number.isFinite(Number(summary.eyeContactPct)) ? Number(summary.eyeContactPct) : prev.eyeContactPct,
+            activeFlag: null,
+            calibrationState: summary.calibrationState || prev.calibrationState,
+            calibrationQuality: summary.calibrationQuality ?? prev.calibrationQuality,
+            calibrationValid: Boolean(summary.calibrationValid ?? prev.calibrationValid),
+          }));
+          settleGazeFinalize({ finalized: true, summary });
         } else if (message.type === 'error') {
           console.warn('Gaze monitor error:', message.error || 'Unknown gaze websocket error');
-          setGazeMetrics((prev) => ({ ...prev, connected: false }));
+          setGazeMetrics((prev) => ({ ...prev, connected: false, trackingActive: false }));
           settleReady({ connected: false, detectorReady: false, reason: 'WS_ERROR_MESSAGE' });
         }
       } catch {
@@ -762,13 +1152,15 @@ export default function InterviewSessionRoom() {
         cancelAnimationFrame(gazeRafRef.current);
         gazeRafRef.current = 0;
       }
-      setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null }));
+      setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null, faceDetected: false, trackingActive: false }));
       gazeWsRef.current = null;
+      settleGazeFinalize({ finalized: false, reason: 'WS_CLOSE' });
       settleReady({ connected: false, detectorReady: false, reason: 'WS_CLOSE' });
     };
 
     ws.onerror = () => {
-      setGazeMetrics((prev) => ({ ...prev, connected: false }));
+      setGazeMetrics((prev) => ({ ...prev, connected: false, faceDetected: false, trackingActive: false }));
+      settleGazeFinalize({ finalized: false, reason: 'WS_ERROR' });
       settleReady({ connected: false, detectorReady: false, reason: 'WS_ERROR' });
     };
 
@@ -783,7 +1175,40 @@ export default function InterviewSessionRoom() {
     });
     const startupState = await Promise.race([readyPromise, timeoutPromise]);
     return startupState;
-  }, [buildGazeWsUrl, createOrReuseFaceDetector, stopGazeMonitoring]);
+  }, [buildGazeWsUrl, classifyLandmarkResult, createOrReuseFaceDetector, settleGazeFinalize, stopGazeMonitoring]);
+
+  const finalizeGazeMonitoring = useCallback(async () => {
+    const ws = gazeWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      stopGazeMonitoring({ resetDetector: false });
+      return { finalized: false, reason: 'NO_SOCKET' };
+    }
+    if (!gazeFinalizePromiseRef.current) {
+      gazeFinalizePromiseRef.current = new Promise((resolve) => {
+        const timeoutId = setTimeout(() => {
+          gazeFinalizeResolverRef.current = null;
+          gazeFinalizePromiseRef.current = null;
+          resolve({ finalized: false, reason: 'TIMEOUT' });
+        }, 1000);
+        gazeFinalizeResolverRef.current = (payload) => {
+          clearTimeout(timeoutId);
+          resolve(payload);
+        };
+      });
+      ws.send(JSON.stringify({
+        type: 'finalize',
+        t: Date.now(),
+        clientMetrics: clientGazeRef.current,
+      }));
+    }
+    try {
+      return await gazeFinalizePromiseRef.current;
+    } catch {
+      return { finalized: false, reason: 'FAILED' };
+    } finally {
+      stopGazeMonitoring({ resetDetector: false });
+    }
+  }, [stopGazeMonitoring]);
 
   useEffect(() => {
     cameraOffRef.current = cameraOff;
@@ -873,7 +1298,7 @@ export default function InterviewSessionRoom() {
           if (decision?.policy_action === 'REFUSED_META_CONTROL' && decision?.refusal_message) {
             addTranscript('system', decision.refusal_message);
           }
-          const wrappedInstruction = buildInterviewerUtteranceInstruction(
+          const wrappedInstruction = String(decision?.utterance_instruction || '').trim() || buildInterviewerUtteranceInstruction(
             nextQuestion,
             decision?.policy_action === 'REFUSED_META_CONTROL' ? decision?.refusal_message : null,
           );
@@ -952,9 +1377,31 @@ export default function InterviewSessionRoom() {
           if (!result || !result.isFinal || !result[0]) continue;
           const text = String(result[0].transcript || '').trim();
           if (!text) continue;
+          const echoCandidate = isEchoOfAI(text);
+          const speechDecision = shouldAcceptBrowserSpeechResult({
+            text,
+            aiSpeaking: aiSpeakingRef.current,
+            msSinceAiAudioStopped: lastAiAudioStoppedAtRef.current
+              ? Date.now() - lastAiAudioStoppedAtRef.current
+              : Number.POSITIVE_INFINITY,
+            msSinceUserSpeechSignal: lastUserSpeechSignalAtRef.current
+              ? Date.now() - lastUserSpeechSignalAtRef.current
+              : Number.POSITIVE_INFINITY,
+            userSpeechSignalAfterLastAiAudio:
+              !lastAiAudioStoppedAtRef.current ||
+              lastUserSpeechSignalAtRef.current > lastAiAudioStoppedAtRef.current,
+            looksLikeAssistantEcho: echoCandidate,
+            aiAudioCooldownMs: BROWSER_SR_AI_AUDIO_COOLDOWN_MS,
+            userSpeechWindowMs: BROWSER_SR_USER_SPEECH_WINDOW_MS,
+          });
+          if (!speechDecision.accept) {
+            incrementDroppedEvent(speechDecision.reason);
+            continue;
+          }
           const key = `browser-sr:${text.toLowerCase().replace(/\s+/g, ' ')}`;
           if (!rememberByTtl(capturedUserRef, key)) {
             addTranscript('user', text);
+            markUserSpeechSignal();
           } else {
             incrementDroppedEvent('duplicate_browser_speech_text');
           }
@@ -982,7 +1429,7 @@ export default function InterviewSessionRoom() {
     } catch (e) {
       incrementDroppedEvent('browser_speech_start_failed');
     }
-  }, [addTranscript, incrementDroppedEvent, rememberByTtl]);
+  }, [addTranscript, incrementDroppedEvent, isEchoOfAI, markUserSpeechSignal, rememberByTtl]);
 
   // Connect to Realtime API (proven logic from RealtimeTestPage)
   const handleConnect = useCallback(async () => {
@@ -1015,6 +1462,16 @@ export default function InterviewSessionRoom() {
       adaptiveInFlightRef.current = false;
       pendingUserTranscriptRef.current = {};
       finalUserTranscriptItemIdsRef.current = new Set();
+      pendingOpeningQuestionRef.current = null;
+      pendingOpeningInstructionRef.current = null;
+      lastAiSpokenTextRef.current = '';
+      lastSentQuestionTextRef.current = '';
+      lastAIItemRef.current = null;
+      lastCommittedInputItemRef.current = null;
+      lastAiAudioStoppedAtRef.current = 0;
+      lastUserSpeechSignalAtRef.current = 0;
+      aiSpeakingRef.current = false;
+      setAiSpeaking(false);
       transcriptionReapplyAttemptedRef.current = false;
       transcriptionFallbackNotifiedRef.current = false;
       capturedAiRef.current = new Map();
@@ -1093,8 +1550,8 @@ export default function InterviewSessionRoom() {
           console.warn('Local video preview failed:', previewErr);
         }
       }
+      addTranscript('system', 'Running quick gaze pre-check...');
       await runGazePreflight();
-      startBrowserSpeechRecognition();
 
       // Step 2: Create RTCPeerConnection
       const pc = new RTCPeerConnection();
@@ -1134,27 +1591,43 @@ export default function InterviewSessionRoom() {
       audioElement.preload = 'auto';
       audioElement.volume = 1;
       audioElementRef.current = audioElement;
+      const sessionUpdateCompat = {
+        schema: 'legacy',
+        includeDualTranscriptionKeys: DUAL_TRANSCRIPTION_KEYS,
+      };
+
+      audioElement.onplaying = () => {
+        audioResumeActionRef.current = null;
+        setCaptureWarning((prev) => (prev === 'audio_blocked' ? null : prev));
+      };
 
       pc.ontrack = async (event) => {
         console.log('Remote track received', event);
         audioElement.srcObject = event.streams[0];
         try {
           await audioElement.play();
+          audioResumeActionRef.current = null;
+          setCaptureWarning((prev) => (prev === 'audio_blocked' ? null : prev));
           addTranscript('system', 'Audio playback started');
         } catch (err) {
           console.error('Audio play error:', err);
           if (err?.name === 'NotAllowedError') {
+            setCaptureWarning('audio_blocked');
             addTranscript('system', 'Click anywhere to enable Sonia audio playback.');
             const resumeAudio = async () => {
               try {
                 await audioElement.play();
+                audioResumeActionRef.current = null;
+                setCaptureWarning((prev) => (prev === 'audio_blocked' ? null : prev));
                 addTranscript('system', 'Audio playback resumed');
               } catch (resumeErr) {
                 console.error('Audio resume error:', resumeErr);
               }
             };
+            audioResumeActionRef.current = resumeAudio;
             window.addEventListener('pointerdown', resumeAudio, { once: true });
           } else {
+            setCaptureWarning('audio_blocked');
             setError(`Audio playback failed: ${err.message}`);
           }
         }
@@ -1164,41 +1637,69 @@ export default function InterviewSessionRoom() {
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
-      const sendSessionUpdate = () => {
+      const sendSessionUpdate = (overrides = {}) => {
         if (dc.readyState !== 'open') return false;
-        const sessionPayload = {
-          type: 'session.update',
-          session: {
-            voice: REALTIME_VOICE,
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.55,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-              create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
-              interrupt_response: true,
-            },
-            input_audio_transcription: {
-              model: TRANSCRIPTION_MODEL,
-              language: 'en',
-            },
-          },
+        Object.assign(sessionUpdateCompat, overrides || {});
+        const turnDetection = {
+          type: 'server_vad',
+          threshold: 0.55,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+          create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
+          interrupt_response: true,
         };
+        const transcriptionConfig = {
+          model: TRANSCRIPTION_MODEL,
+          language: 'en',
+        };
+        const sessionPayload = sessionUpdateCompat.schema === 'nested'
+          ? {
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                audio: {
+                  input: {
+                    turn_detection: turnDetection,
+                    transcription: transcriptionConfig,
+                  },
+                  output: {
+                    voice: REALTIME_VOICE,
+                  },
+                },
+              },
+            }
+          : {
+              type: 'session.update',
+              session: {
+                voice: REALTIME_VOICE,
+                turn_detection: turnDetection,
+                input_audio_transcription: transcriptionConfig,
+              },
+            };
+
+        if (sessionUpdateCompat.schema === 'nested' && sessionUpdateCompat.includeDualTranscriptionKeys) {
+          sessionPayload.session.input_audio_transcription = transcriptionConfig;
+        }
+
+        if (sessionUpdateCompat.schema === 'legacy' && !sessionUpdateCompat.includeDualTranscriptionKeys) {
+          delete sessionPayload.session.input_audio_transcription;
+        }
 
         dc.send(JSON.stringify(sessionPayload));
         addTranscript(
           'system',
-          `Sent session.update (voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL})`,
+          `Sent session.update (schema=${sessionUpdateCompat.schema}, voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${sessionUpdateCompat.includeDualTranscriptionKeys ? 'on' : 'off'})`,
         );
         return true;
       };
 
-      const sendServerQuestion = (questionText) => {
+      const sendServerQuestion = (questionText, options = {}) => {
         const q = String(questionText || '').trim();
         if (!q || !dcRef.current || dcRef.current.readyState !== 'open') return false;
         // Track immediately for echo detection timing — before audio transcript events arrive
         lastSentQuestionTextRef.current = q;
-        const wrappedInstruction = buildInterviewerUtteranceInstruction(q);
+        const wrappedInstruction = String(options?.instruction || '').trim()
+          || buildInterviewerUtteranceInstruction(q, null, options);
         dcRef.current.send(
           JSON.stringify({
             type: 'response.create',
@@ -1223,8 +1724,14 @@ export default function InterviewSessionRoom() {
           }
           if (pendingOpeningQuestionRef.current) {
             try {
-              const sent = sendServerQuestion(pendingOpeningQuestionRef.current);
-              if (sent) pendingOpeningQuestionRef.current = null;
+              const sent = sendServerQuestion(pendingOpeningQuestionRef.current, {
+                opening: true,
+                instruction: pendingOpeningInstructionRef.current,
+              });
+              if (sent) {
+                pendingOpeningQuestionRef.current = null;
+                pendingOpeningInstructionRef.current = null;
+              }
             } catch (err) {
               console.error('Error sending pending opening question:', err);
             }
@@ -1281,16 +1788,47 @@ export default function InterviewSessionRoom() {
               && !legacySessionSchemaFallbackTriedRef.current
             ) {
               legacySessionSchemaFallbackTriedRef.current = true;
-              console.warn('Realtime schema fallback: retrying session.update without legacy keys');
+              console.warn('Realtime schema fallback: switching to nested audio session schema');
               incrementDroppedEvent('legacy_turn_detection_param_rejected');
               try {
-                const resent = sendSessionUpdate();
+                const resent = sendSessionUpdate({ schema: 'nested' });
                 if (resent) {
                   addTranscript('system', 'Applied compatibility fallback for realtime session schema');
                 }
               } catch (reapplyErr) {
                 console.warn('Failed to retry session.update without legacy keys:', reapplyErr);
                 incrementDroppedEvent('legacy_schema_fallback_failed');
+              }
+            } else if (
+              errMsg.includes("Unknown parameter: 'session.audio.input.turn_detection'")
+              && sessionUpdateCompat.schema !== 'legacy'
+            ) {
+              console.warn('Realtime schema fallback: switching back to legacy session schema');
+              incrementDroppedEvent('nested_turn_detection_param_rejected');
+              try {
+                const resent = sendSessionUpdate({ schema: 'legacy' });
+                if (resent) {
+                  addTranscript('system', 'Applied legacy compatibility fallback for realtime session schema');
+                }
+              } catch (reapplyErr) {
+                console.warn('Failed to retry session.update with legacy schema:', reapplyErr);
+                incrementDroppedEvent('legacy_schema_retry_failed');
+              }
+            } else if (
+              (errMsg.includes("Unknown parameter: 'session.input_audio_transcription'")
+                || errMsg.includes("Unknown parameter: 'input_audio_transcription'"))
+              && sessionUpdateCompat.includeDualTranscriptionKeys
+            ) {
+              console.warn('Realtime transcription fallback: disabling duplicate top-level transcription keys');
+              incrementDroppedEvent('dual_transcription_keys_rejected');
+              try {
+                const resent = sendSessionUpdate({ includeDualTranscriptionKeys: false });
+                if (resent) {
+                  addTranscript('system', 'Adjusted transcription compatibility settings for realtime session');
+                }
+              } catch (reapplyErr) {
+                console.warn('Failed to retry session.update without duplicate transcription keys:', reapplyErr);
+                incrementDroppedEvent('dual_transcription_retry_failed');
               }
             } else {
               setError(errMsg);
@@ -1308,10 +1846,10 @@ export default function InterviewSessionRoom() {
             }
           } else if (msgType === 'response.output_text.delta') {
             if (msg.delta) {
-              setAiSpeaking(true);
+              setAiSpeakingState(true);
             }
           } else if (msgType === 'response.output_text.done') {
-            setAiSpeaking(false);
+            setAiSpeakingState(false);
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'text';
             const key = `${responseId}:${finalText}`;
@@ -1330,10 +1868,10 @@ export default function InterviewSessionRoom() {
           } else if (msgType === 'response.output_audio_transcript.delta') {
             const text = msg.delta || msg.transcript || msg.text || msg.transcript_delta || null;
             if (text) {
-              setAiSpeaking(true);
+              setAiSpeakingState(true);
             }
           } else if (msgType === 'response.output_audio_transcript.done' || msgType === 'response.output_audio_transcript.completed') {
-            setAiSpeaking(false);
+            setAiSpeakingState(false);
             const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'audio';
             const key = `${responseId}:${finalText}`;
@@ -1352,7 +1890,7 @@ export default function InterviewSessionRoom() {
               });
             }
           } else if (msgType === 'response.done') {
-            setAiSpeaking(false);
+            setAiSpeakingState(false);
             const responseId = msg.response_id || msg.response?.id || 'done';
             const finalText = extractResponseDoneText(msg);
             const key = `${responseId}:${finalText}`;
@@ -1369,7 +1907,7 @@ export default function InterviewSessionRoom() {
               });
             }
           } else if (msgType === 'response.completed') {
-            setAiSpeaking(false);
+            setAiSpeakingState(false);
             // Increment question count - this is the primary event for question completion
             const responseId = msg.response_id || msg.response?.id;
             if (responseId && !countedResponseIdsRef.current.has(responseId)) {
@@ -1380,6 +1918,10 @@ export default function InterviewSessionRoom() {
                 return newCount;
               });
             }
+          } else if (msgType === 'output_audio_buffer.started') {
+            setAiSpeakingState(true);
+          } else if (msgType === 'output_audio_buffer.stopped') {
+            setAiSpeakingState(false);
           }
 
           // Handle user transcription events (fallbacks + conversation items)
@@ -1402,6 +1944,7 @@ export default function InterviewSessionRoom() {
               lastCommittedInputItemRef.current = committedItemId;
               console.log('[input_audio_buffer.committed] item id:', committedItemId);
             }
+            markUserSpeechSignal();
           } else if (
             (msgType.includes('input_audio_transcription') || msgType.includes('input_audio_buffer.transcription')) &&
             (msgType.endsWith('.completed') || msgType.endsWith('.done') || msgType.endsWith('completed') || msgType.endsWith('done'))
@@ -1471,9 +2014,11 @@ export default function InterviewSessionRoom() {
             }
           } else if (msg.type === 'input_audio_buffer.speech_started') {
             setMicActive(true);
+            markUserSpeechSignal();
             addTranscript('system', 'User started speaking');
           } else if (msg.type === 'input_audio_buffer.speech_stopped') {
             setMicActive(false);
+            markUserSpeechSignal();
             addTranscript('system', 'User stopped speaking');
           }
         } catch (err) {
@@ -1598,6 +2143,8 @@ export default function InterviewSessionRoom() {
         addTranscript('system', 'Gaze monitoring is unavailable at startup.');
       } else if (gazeBootstrap.detectorReady === false) {
         addTranscript('system', 'Gaze detector is limited in this environment.');
+      } else {
+        addTranscript('system', 'Gaze calibration complete.');
       }
 
       addTranscript('system', 'SDP answer received from backend');
@@ -1607,10 +2154,12 @@ export default function InterviewSessionRoom() {
       addTranscript('system', 'Remote description set, connection establishing...');
       if (data.openingQuestion && String(data.openingQuestion).trim()) {
         const opening = String(data.openingQuestion).trim();
+        const openingInstruction = String(data.openingQuestionInstruction || '').trim();
         if (dcRef.current && dcRef.current.readyState === 'open') {
-          sendServerQuestion(opening);
+          sendServerQuestion(opening, { opening: true, instruction: openingInstruction });
         } else {
           pendingOpeningQuestionRef.current = opening;
+          pendingOpeningInstructionRef.current = openingInstruction;
         }
       }
 
@@ -1618,13 +2167,18 @@ export default function InterviewSessionRoom() {
       console.error('Connection error:', err);
       setStatus('error');
 
-      let errorMessage = err.message || 'Connection failed';
+      let errorMessage = getApiErrorMessage(err, {
+        backendLabel: 'interview service',
+        defaultMessage: 'Connection failed',
+      });
       if (err.message && err.message.includes('Permission denied')) {
         errorMessage = 'Camera and microphone permissions are required. Please allow access in browser settings and try again.';
       } else if (err.message && err.message.includes('NotAllowedError')) {
         errorMessage = 'Camera and microphone access was denied. Please check your browser permissions and try again.';
       } else if (err.message && err.message.includes('NotFoundError')) {
         errorMessage = 'Camera or microphone was not found. Please connect both devices and try again.';
+      } else if (isBackendUnavailableError(err)) {
+        errorMessage = 'Cannot reach the interview service. Start the backend server and reconnect.';
       }
 
       setError(errorMessage);
@@ -1668,6 +2222,9 @@ export default function InterviewSessionRoom() {
     stopGazeMonitoring,
     startBrowserSpeechRecognition,
     stopBrowserSpeechRecognition,
+    isEchoOfAI,
+    markUserSpeechSignal,
+    setAiSpeakingState,
   ]);
 
   // Build canonical transcript payload (structured/hybrid/raw)
@@ -1755,7 +2312,11 @@ export default function InterviewSessionRoom() {
 
       // If absolutely no messages, cannot save
       if (transcriptPayload.raw_messages.length === 0) {
-        throw new Error('No messages captured - cannot generate report');
+        setCaptureWarning('no_audio');
+        throw createSessionEndError(
+          SESSION_END_ERROR_CODES.EMPTY_CAPTURE,
+          'No interview turns were captured. We did not generate a report. Resume the interview and answer at least one question before ending the session.'
+        );
       }
 
       // Calculate metrics (user-centric)
@@ -1778,6 +2339,14 @@ export default function InterviewSessionRoom() {
       const durationMinutes = Math.max(1, Math.round(timeElapsed / 60));
       const answeredCount = Math.max(transcriptPayload.qa_pairs.length, userMessages.length);
       const eyeContactMetric = Number.isFinite(gazeMetrics.eyeContactPct) ? gazeMetrics.eyeContactPct : null;
+
+      if (userMessages.length === 0 || userWordCount === 0) {
+        setCaptureWarning('no_audio');
+        throw createSessionEndError(
+          SESSION_END_ERROR_CODES.NO_CANDIDATE_AUDIO,
+          'No candidate answer was captured. We did not generate a report. Please verify microphone and transcript capture, then try again.'
+        );
+      }
 
       // Auth header
       let headers = { 'Content-Type': 'application/json' };
@@ -1901,9 +2470,8 @@ export default function InterviewSessionRoom() {
       await sleep(50);
     }
 
-    // Flush gaze WS so backend persists finalized events before transcript/report aggregation.
-    stopGazeMonitoring();
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Flush gaze WS with an explicit finalize handshake so persisted gaze state is complete.
+    await finalizeGazeMonitoring();
 
     const transcriptPayload = buildCanonicalTranscriptPayload();
     isEndingRef.current = true;
@@ -1912,7 +2480,7 @@ export default function InterviewSessionRoom() {
     console.log('[runSaveFlow] Calling saveAndGenerateReport...');
     const saveData = await saveAndGenerateReport({ transcript: transcriptPayload, sessionFeedback });
     return saveData;
-  }, [buildCanonicalTranscriptPayload, saveAndGenerateReport, stopGazeMonitoring]);
+  }, [buildCanonicalTranscriptPayload, finalizeGazeMonitoring, saveAndGenerateReport]);
 
   const handleDisconnect = useCallback(async (sessionFeedback = null) => {
     // Single-flight guard
@@ -1952,10 +2520,11 @@ export default function InterviewSessionRoom() {
         audioElementRef.current.srcObject = null;
         audioElementRef.current = null;
       }
+      audioResumeActionRef.current = null;
 
       setStatus('idle');
       setMicActive(false);
-      setAiSpeaking(false);
+      setAiSpeakingState(false);
       endInProgressRef.current = false;
 
       navigate(`/report/${reportId}`, {
@@ -1980,7 +2549,7 @@ export default function InterviewSessionRoom() {
       // DO NOT reset endInProgressRef - modal controls that
     } finally {
     }
-  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
 
   // Retry handler
   const handleRetryEnd = useCallback(async () => {
@@ -2014,8 +2583,10 @@ export default function InterviewSessionRoom() {
         audioElementRef.current.srcObject = null;
         audioElementRef.current = null;
       }
+      audioResumeActionRef.current = null;
 
       setStatus('idle');
+      setAiSpeakingState(false);
       endInProgressRef.current = false;
 
       navigate(`/report/${reportId}`, {
@@ -2037,7 +2608,15 @@ export default function InterviewSessionRoom() {
       isEndingRef.current = false;
     } finally {
     }
-  }, [runSaveFlow, navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+
+  const handleResumeInterview = useCallback(() => {
+    setEndError(null);
+    setShowEndErrorDialog(false);
+    setStatus('connected');
+    endInProgressRef.current = false;
+    isEndingRef.current = false;
+  }, []);
 
   // End without saving handler
   const handleEndWithoutSaving = useCallback(async () => {
@@ -2067,18 +2646,20 @@ export default function InterviewSessionRoom() {
         audioElementRef.current.srcObject = null;
         audioElementRef.current = null;
       }
+      audioResumeActionRef.current = null;
     } finally {
       setStatus('idle');
       setMicActive(false);
-      setAiSpeaking(false);
+      setAiSpeakingState(false);
       endInProgressRef.current = false;
       isEndingRef.current = false;
       pendingTranscriptPayloadRef.current = null;
       navigate('/dashboard');
     }
-  }, [navigate, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
 
   const gazeStatus = useMemo(() => {
+    const liveFlag = mapLiveGazeFlag(gazeMetrics.activeFlag, gazeMetrics.gazeDirection);
     if (cameraOff) {
       return { label: 'Camera Off', tone: 'warn' };
     }
@@ -2089,22 +2670,70 @@ export default function InterviewSessionRoom() {
       return { label: 'Gaze Offline', tone: 'neutral' };
     }
     if (!gazeMetrics.detectorReady) {
-      return { label: 'Gaze Limited', tone: 'neutral' };
+      return { label: 'Detector Unavailable', tone: 'neutral' };
     }
-    if (gazeMetrics.activeFlag === 'FACE_NOT_VISIBLE') {
+    if (!gazeMetrics.faceDetected && !liveFlag) {
+      return { label: 'Face Not Detected', tone: 'warn' };
+    }
+    if (!Number.isFinite(gazeMetrics.eyeContactPct)) {
+      const progress = Math.max(0, Math.min(100, Number(gazeMetrics.calibrationProgress || 0)));
+      return { label: progress > 0 ? `Calibrating ${progress}%` : 'Calibrating', tone: 'neutral' };
+    }
+    if (liveFlag === 'FACE_NOT_VISIBLE') {
       return { label: 'Face Not Visible', tone: 'warn' };
     }
-    if (gazeMetrics.activeFlag === 'LOOKING_DOWN') {
+    if (liveFlag === 'LOOKING_DOWN') {
       return { label: 'Looking Down', tone: 'warn' };
     }
-    if (gazeMetrics.activeFlag === 'LOOKING_UP') {
+    if (liveFlag === 'LOOKING_UP') {
       return { label: 'Looking Up', tone: 'warn' };
     }
-    if (gazeMetrics.activeFlag === 'OFF_SCREEN') {
+    if (liveFlag === 'OFF_SCREEN') {
       return { label: 'Looking Away', tone: 'warn' };
     }
     return { label: 'On Screen', tone: 'ok' };
   }, [cameraOff, gazeMetrics, status]);
+
+  const stageAssistLabel = useMemo(() => {
+    if (status === 'connecting' || status === 'idle') {
+      return 'Connecting Sonia and preparing the interview session.';
+    }
+    if (cameraOff) {
+      return 'Camera is off. Turn it back on if you want gaze tracking and a full interview recording setup.';
+    }
+    if (gazeMetrics.detectorReady && gazeMetrics.calibrationState !== 'complete') {
+      const progress = Math.max(0, Math.min(100, Number(gazeMetrics.calibrationProgress || 0)));
+      return progress > 0
+        ? `Center your face and look toward Sonia for a moment. Gaze calibration is ${progress}% complete.`
+        : 'Center your face and look toward Sonia for a moment so gaze calibration can finish.';
+    }
+    if (gazeMetrics.detectorReady && !gazeMetrics.faceDetected) {
+      return 'Keep your full face in frame. The system tracks eye direction as well as face presence.';
+    }
+    if (captureWarning === 'audio_blocked') {
+      return 'Browser audio is blocked. Use the stage button to enable Sonia playback before continuing.';
+    }
+    if (aiSpeaking) {
+      return 'Sonia is speaking. Let the question finish, then answer directly and stay specific.';
+    }
+    if (captureWarning === 'no_audio') {
+      return 'No candidate speech has been captured yet. Check your mic, browser permissions, and transcript flow.';
+    }
+    if (status === 'connected' || status === 'ready') {
+      return 'Sonia is waiting. Answer directly, stay concrete, and stop once your point is made.';
+    }
+    return 'Interview session ready.';
+  }, [aiSpeaking, cameraOff, captureWarning, gazeMetrics.calibrationProgress, gazeMetrics.calibrationState, gazeMetrics.detectorReady, gazeMetrics.faceDetected, status]);
+
+  const handleResumeSoniaAudio = useCallback(async () => {
+    try {
+      if (audioResumeActionRef.current) {
+        await audioResumeActionRef.current();
+      }
+    } catch (err) {
+      console.error('Audio resume CTA failed:', err);
+    }
+  }, []);
 
   if (!user) {
     return (
@@ -2113,6 +2742,9 @@ export default function InterviewSessionRoom() {
       </Box>
     );
   }
+
+  const endErrorPresentation = getEndErrorPresentation(endError);
+  const showCaptureRecoveryAction = isCaptureEndError(endError);
 
   return (
     <div className="session-shell meet-shell">
@@ -2147,18 +2779,27 @@ export default function InterviewSessionRoom() {
           🎙️ No speech detected yet. Please check your microphone is unmuted and permissions are granted.
         </div>
       )}
+      {captureWarning === 'audio_blocked' && (
+        <div className="meet-capture-banner meet-capture-banner--warn">
+          🔊 Sonia audio is blocked by the browser. Use the stage button to enable playback.
+        </div>
+      )}
 
       {/* Main Stage */}
       <div className="meet-stage-wrap">
         <div className="meet-stage">
-          <div className={`meet-gaze-badge ${gazeStatus.tone}`}>
-            {gazeStatus.label}
-            {gazeMetrics.connected && gazeMetrics.detectorReady && Number.isFinite(gazeMetrics.eyeContactPct) && (
-              <span className="meet-gaze-score">{Math.round(gazeMetrics.eyeContactPct || 0)}%</span>
-            )}
+        <div className={`meet-gaze-badge ${gazeStatus.tone}`}>
+          {gazeStatus.label}
+        </div>
+          <div className="meet-stage-meta">
+            <span>{interviewType}</span>
+            <span>•</span>
+            <span>{effectiveDurationMinutes}m target</span>
+            <span>•</span>
+            <span>{status === 'connected' ? 'Live' : status === 'connecting' ? 'Connecting' : 'Ready'}</span>
           </div>
           <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
-            {!avatarLoadError && (
+            {soniaAvatarSrc && !avatarLoadError && (
               <img
                 src={soniaAvatarSrc}
                 alt="Sonia interviewer avatar"
@@ -2168,15 +2809,30 @@ export default function InterviewSessionRoom() {
               />
             )}
             {avatarLoadError && (
-              <div className="meet-sonia-head">
-                <div className="meet-sonia-face">
-                  <div className="meet-sonia-eyes" />
-                  <div className={`meet-sonia-mouth ${aiSpeaking ? 'speaking' : 'idle'}`} />
+              <div className="meet-sonia-orb" aria-hidden="true">
+                <div className="meet-sonia-ring outer" />
+                <div className="meet-sonia-ring" />
+                <div className="meet-sonia-core" />
+                <div className="meet-sonia-wave">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                  <span />
                 </div>
               </div>
             )}
           </div>
           <div className="meet-nameplate">Sonia</div>
+          <div className="meet-agent-status">{stageAssistLabel}</div>
+          {captureWarning === 'audio_blocked' && (
+            <div className="meet-stage-audio-cta">
+              <div className="meet-stage-audio-copy">Sonia is connected. Browser autoplay is blocking her voice.</div>
+              <Button variant="contained" onClick={handleResumeSoniaAudio}>
+                Enable Sonia Audio
+              </Button>
+            </div>
+          )}
           {(status === 'connecting' || status === 'idle') && (
             <div className="meet-stage-status">Connecting…</div>
           )}
@@ -2189,14 +2845,34 @@ export default function InterviewSessionRoom() {
                     {micMuted ? 'Mic Off' : 'Mic On'} · {cameraOff ? 'Cam Off' : 'Cam On'}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="meet-self-toggle"
-                  onClick={() => setSelfViewHidden((prev) => !prev)}
-                  aria-label={selfViewHidden ? 'Expand self view' : 'Collapse self view'}
-                >
-                  {selfViewHidden ? 'Show' : 'Hide'}
-                </button>
+                <div className="meet-self-actions">
+                  <button
+                    type="button"
+                    className={`meet-self-action-btn ${micMuted ? 'off' : 'on'}`}
+                    onClick={() => setMicMuted(prev => !prev)}
+                    aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    title={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  >
+                    {micMuted ? <MicOff fontSize="inherit" /> : <Mic fontSize="inherit" />}
+                  </button>
+                  <button
+                    type="button"
+                    className={`meet-self-action-btn ${cameraOff ? 'off' : 'on'}`}
+                    onClick={() => setCameraOff(prev => !prev)}
+                    aria-label={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                    title={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                  >
+                    {cameraOff ? <VideocamOff fontSize="inherit" /> : <Videocam fontSize="inherit" />}
+                  </button>
+                  <button
+                    type="button"
+                    className="meet-self-toggle"
+                    onClick={() => setSelfViewHidden((prev) => !prev)}
+                    aria-label={selfViewHidden ? 'Expand self view' : 'Collapse self view'}
+                  >
+                    {selfViewHidden ? 'Show' : 'Hide'}
+                  </button>
+                </div>
               </div>
               <video
                 ref={localVideoRef}
@@ -2232,28 +2908,6 @@ export default function InterviewSessionRoom() {
           </div>
         ) : (
           <div className="meet-controls-row">
-            <div className="meet-controls-cluster" role="group" aria-label="Call controls">
-              <button
-                type="button"
-                className={`meet-control-btn ${micMuted ? 'off' : 'on'}`}
-                onClick={() => setMicMuted(prev => !prev)}
-                aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'}
-                aria-pressed={micMuted}
-                title={micMuted ? 'Unmute' : 'Mute'}
-              >
-                {micMuted ? <MicOff /> : <Mic />}
-              </button>
-              <button
-                type="button"
-                className={`meet-control-btn ${cameraOff ? 'off' : 'on'}`}
-                onClick={() => setCameraOff(prev => !prev)}
-                aria-label={cameraOff ? 'Turn on camera' : 'Turn off camera'}
-                aria-pressed={cameraOff}
-                title={cameraOff ? 'Camera on' : 'Camera off'}
-              >
-                {cameraOff ? <VideocamOff /> : <Videocam />}
-              </button>
-            </div>
             {(status === 'error' || status === 'disconnected' || status === 'failed') && (
               <Button
                 variant="outlined"
@@ -2322,10 +2976,10 @@ export default function InterviewSessionRoom() {
 
       {/* Retry Error Dialog */}
       <Dialog open={showEndErrorDialog} onClose={() => {}} disableEscapeKeyDown>
-        <DialogTitle>Couldn't Generate Report</DialogTitle>
+        <DialogTitle>{endErrorPresentation.title}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            The interview is still connected. You can retry generating the report, or end without saving.
+            {endErrorPresentation.description}
           </Typography>
           {endError && (
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, marginTop: 12, color: '#ef4444' }}>
@@ -2337,8 +2991,12 @@ export default function InterviewSessionRoom() {
           <Button onClick={handleEndWithoutSaving} color="error">
             End Without Saving
           </Button>
-          <Button onClick={handleRetryEnd} variant="contained" autoFocus>
-            Retry
+          <Button
+            onClick={showCaptureRecoveryAction ? handleResumeInterview : handleRetryEnd}
+            variant="contained"
+            autoFocus
+          >
+            {endErrorPresentation.primaryActionLabel}
           </Button>
         </DialogActions>
       </Dialog>

@@ -23,6 +23,15 @@ def _safe_score(v: Any) -> Optional[float]:
         return None
 
 
+def _star_detected(star_breakdown: Any, component: str) -> bool:
+    if not isinstance(star_breakdown, dict):
+        return False
+    value = star_breakdown.get(component)
+    if isinstance(value, dict):
+        return bool(value.get("detected", False))
+    return bool(value)
+
+
 def compute_hiring_signal(
     overall_score: int,
     turn_analyses: List[Dict[str, Any]],
@@ -60,20 +69,20 @@ def compute_hiring_signal(
         )
         if very_short >= len(turn_analyses) * 0.6 and len(turn_analyses) >= 2:
             red_flags.append(
-                f"{very_short}/{len(turn_analyses)} answers were very short (<40 words) — insufficient evidence for scoring."
+                f"{very_short}/{len(turn_analyses)} answers were materially underdeveloped (<40 words), limiting confidence in the assessment."
             )
 
         # Flag: zero STAR completion across all questions
         star_detected_any = any(
             any(
-                t.get("star_breakdown", {}).get(c, {}).get("detected", False)
+                _star_detected(t.get("star_breakdown", {}), c)
                 for c in ("situation", "task", "action", "result")
             )
             for t in turn_analyses
         )
         if not star_detected_any and interview_type in ("behavioral", "mixed"):
             red_flags.append(
-                "No STAR structure detected in any answer — responses lacked situational context, ownership statements, or measurable results."
+                "Behavioral evidence lacked STAR discipline: responses did not consistently establish context, ownership, and outcome."
             )
 
         # Flag: high hedge density across most turns
@@ -84,7 +93,7 @@ def compute_hiring_signal(
         )
         if high_hedge_turns >= len(turn_analyses) * 0.6 and len(turn_analyses) >= 2:
             red_flags.append(
-                "Excessive hedging language detected across most answers — may signal low confidence or uncertainty."
+                "Hedging language appeared across most answers, which weakened executive presence and decision confidence."
             )
 
         # Green flag: strong quantified answers
@@ -95,7 +104,7 @@ def compute_hiring_signal(
         )
         if quantified >= len(turn_analyses) * 0.5 and len(turn_analyses) >= 2:
             green_flags.append(
-                f"Used quantified metrics in {quantified}/{len(turn_analyses)} answers — strong evidence of impact-driven thinking."
+                f"Used quantified evidence in {quantified}/{len(turn_analyses)} answers, which materially strengthened credibility and business impact."
             )
 
         # Green flag: STAR completeness in most answers
@@ -103,12 +112,12 @@ def compute_hiring_signal(
             1 for t in turn_analyses
             if sum(
                 1 for c in ("situation", "task", "action", "result")
-                if t.get("star_breakdown", {}).get(c, {}).get("detected", False)
+                if _star_detected(t.get("star_breakdown", {}), c)
             ) >= 3
         )
         if star_complete >= len(turn_analyses) * 0.5 and len(turn_analyses) >= 2:
             green_flags.append(
-                f"Full STAR structure (3+ components) detected in {star_complete}/{len(turn_analyses)} answers — well-structured communication."
+                f"Delivered well-structured behavioral answers in {star_complete}/{len(turn_analyses)} turns with strong STAR coverage."
             )
 
     if competency_scores:
@@ -119,7 +128,7 @@ def compute_hiring_signal(
         if top_comps:
             top_comp, top_score = max(top_comps, key=lambda x: x[1])
             green_flags.append(
-                f"Exceptional {top_comp.replace('_', ' ')} score ({top_score}/100) — clear standout strength."
+                f"{top_comp.replace('_', ' ').title()} is a standout capability at {top_score}/100 and reads as a repeatable strength."
             )
 
         # Red flag: any critical competency = 0 with enough data
@@ -131,7 +140,7 @@ def compute_hiring_signal(
         for comp in critical:
             if competency_scores.get(comp, 100) == 0 and turn_analyses:
                 red_flags.append(
-                    f"{comp.replace('_', ' ').title()} score is 0 — no evidence for this core competency."
+                    f"No reliable evidence was captured for {comp.replace('_', ' ')}, which is a core competency for this interview."
                 )
 
     # ─── Determine signal ─────────────────────────────────────────────────────
@@ -160,15 +169,15 @@ def compute_hiring_signal(
 
     # 1. Overall score context
     score_context = (
-        f"Overall score of {overall_score}/100 "
+        f"Overall score: {overall_score}/100. "
         + (
-            "places the candidate in the strong hire range."
+            "The candidate performed at a strong-hire level with consistently persuasive evidence."
             if overall_score >= _STRONG_HIRE_THRESHOLD
-            else "places the candidate solidly above the hire threshold."
+            else "The evidence supports a hire recommendation, with capability clearly above the baseline threshold."
             if overall_score >= _HIRE_THRESHOLD
-            else "places the candidate in borderline territory — strong in some areas but inconsistent."
+            else "The interview showed credible strengths, but the evidence was not consistent enough for a confident hire."
             if overall_score >= _BORDERLINE_THRESHOLD
-            else "is below the hire threshold, with insufficient evidence of required competencies."
+            else "The interview did not produce enough high-quality evidence to support a hire recommendation."
         )
     )
     rationale_bullets.append(score_context)
@@ -180,7 +189,7 @@ def compute_hiring_signal(
         best = max(competency_scores, key=lambda k: competency_scores[k], default=None)
         if best:
             rationale_bullets.append(
-                f"Strongest dimension: {best.replace('_', ' ')} ({competency_scores[best]}/100)."
+                f"Strongest dimension: {best.replace('_', ' ')} at {competency_scores[best]}/100."
             )
 
     # 3. Top concern or red flag
@@ -188,7 +197,7 @@ def compute_hiring_signal(
         rationale_bullets.append(f"Key concern: {red_flags[0]}")
     else:
         rationale_bullets.append(
-            "No major red flags detected. Candidate demonstrated sufficient evidence across evaluated dimensions."
+            "No material red flags were identified in the evaluated evidence."
         )
 
     return {
