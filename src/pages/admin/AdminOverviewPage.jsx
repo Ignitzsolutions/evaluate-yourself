@@ -252,7 +252,7 @@ export default function AdminOverviewPage() {
                 <TableBody>
                   {(overview?.recent_activity?.waitlist_signups || []).map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell>{compactText(row.email, 36)}</TableCell>
+                      <TableCell>{compactText(row.email)}</TableCell>
                       <TableCell>{row.source_page}</TableCell>
                       <TableCell>{formatDateTime(row.created_at)}</TableCell>
                     </TableRow>
