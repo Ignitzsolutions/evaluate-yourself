@@ -18,7 +18,7 @@ def test_get_or_create_user_does_not_overwrite_another_users_phone():
             db=db,
             clerk_user_id="user_one",
             email="one@example.com",
-            phone_e164="+919900000001",
+            "+919900000001",
         )
         second = get_or_create_user(
             db=db,
@@ -29,7 +29,7 @@ def test_get_or_create_user_does_not_overwrite_another_users_phone():
         updated_second = get_or_create_user(
             db=db,
             clerk_user_id="user_two",
-            phone_e164="+919900000001",
+            "+919900000001",
         )
 
         db.refresh(first)
@@ -46,7 +46,7 @@ def test_get_or_create_user_persists_verified_phone_for_new_user():
             db=db,
             clerk_user_id="user_three",
             email="three@example.com",
-            phone_e164="+919900000003",
+            "+919900000003",
         )
 
         row = db.query(User).filter(User.clerk_user_id == "user_three").first()
