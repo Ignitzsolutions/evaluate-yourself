@@ -289,7 +289,7 @@ def _clarity_score(answer_text: str) -> tuple[int, str]:
         score -= 2.0
     elif word_count < 25:
         score -= 1.0
-    elif 25 <= word_count <= 90:
+    elif word_count <= 90:
         score += 0.5
     elif word_count > 140:
         score -= 0.25
