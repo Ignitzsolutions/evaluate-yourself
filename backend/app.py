@@ -3859,25 +3859,40 @@ def redeem_trial_code(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    def trial_code_error(status_code: int, code: str, message: str, retryable: bool = False) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "code": code,
+                "message": message,
+                "retryable": retryable,
+            },
+        )
+
     code_value = (payload.code or "").strip().upper()
     if not code_value:
-        raise HTTPException(status_code=400, detail="Trial code is required")
+        raise trial_code_error(400, "TRIAL_CODE_REQUIRED", "Trial code is required")
 
     now = datetime.utcnow()
     trial_code = db.query(models.TrialCode).filter(models.TrialCode.code == code_value).first()
     if not trial_code:
-        raise HTTPException(status_code=404, detail="Trial code not found")
+        raise trial_code_error(404, "TRIAL_CODE_NOT_FOUND", "Trial code not found")
 
     if trial_code.expires_at and trial_code.expires_at < now and trial_code.status not in {"REVOKED", "DELETED"}:
         trial_code.status = "EXPIRED"
         db.commit()
-        raise HTTPException(status_code=400, detail="Trial code expired")
+        raise trial_code_error(400, "TRIAL_CODE_EXPIRED", "Trial code expired")
 
     if trial_code.status in {"REVOKED", "DELETED", "EXPIRED"}:
-        raise HTTPException(status_code=400, detail=f"Trial code is {trial_code.status.lower()}")
+        status_code = {
+            "REVOKED": "TRIAL_CODE_REVOKED",
+            "DELETED": "TRIAL_CODE_REVOKED",
+            "EXPIRED": "TRIAL_CODE_EXPIRED",
+        }.get(trial_code.status, "TRIAL_CODE_BACKEND_ERROR")
+        raise trial_code_error(400, status_code, f"Trial code is {trial_code.status.lower()}")
 
     if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id != current_user.clerk_user_id:
-        raise HTTPException(status_code=400, detail="Trial code already redeemed")
+        raise trial_code_error(400, "TRIAL_CODE_ALREADY_REDEEMED", "Trial code already redeemed")
 
     if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id == current_user.clerk_user_id:
         existing = db.query(models.UserEntitlement).filter(

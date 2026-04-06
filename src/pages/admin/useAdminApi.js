@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { authFetch } from "../../utils/apiClient";
+import { authFetch, throwForResponse } from "../../utils/apiClient";
 import { getApiBaseUrl } from "../../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../../utils/devAuthBypass";
 
@@ -17,10 +17,9 @@ export function useAdminApi() {
         throw new Error("Authentication required.");
       }
       const resp = await authFetch(`${API_BASE}${path}`, token, options);
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => "");
-        throw new Error(text || `Request failed: ${resp.status}`);
-      }
+      await throwForResponse(resp, {
+        defaultMessage: `Request failed: ${resp.status}`,
+      });
       return resp.json();
     },
     [devBypass, getToken],
