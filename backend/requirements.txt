@@ -34,6 +34,7 @@ azure-identity==1.17.1
 
 # PDF generation
 reportlab==4.0.9
+xhtml2pdf>=0.2.16,<0.3.0
 
 # Database (Auth & user persistence)
 sqlalchemy>=2.0.0

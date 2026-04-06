@@ -22,6 +22,7 @@ import {
 } from "@mui/material";
 import { authFetch } from "../../utils/apiClient";
 import { useAdminApi } from "./useAdminApi";
+import { buildSearchParams, readStringParam } from "./adminSearchParams";
 import { formatDateTime } from "./adminUtils";
 
 const exportTypes = ["all", "candidates", "interviews", "reports", "trials"];
@@ -30,15 +31,25 @@ export default function AdminExportsPage() {
   const { requestJson, apiBase } = useAdminApi();
   const { getToken } = useAuth();
   const { refreshTick, setLastRefreshedAt, tableDensity, triggerRefresh } = useOutletContext();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get("highlight");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [items, setItems] = useState([]);
-  const [exportType, setExportType] = useState("all");
+  const [exportType, setExportType] = useState(() => readStringParam(searchParams, "type", "all"));
   const [downloadingId, setDownloadingId] = useState("");
+
+  useEffect(() => {
+    setSearchParams(
+      buildSearchParams([
+        ["type", exportType, "all"],
+        ["highlight", highlightId, ""],
+      ]),
+      { replace: true },
+    );
+  }, [exportType, highlightId, setSearchParams]);
 
   const query = useMemo(() => {
     return exportType === "all" ? "?page=1&page_size=50" : `?page=1&page_size=50&export_type=${encodeURIComponent(exportType)}`;

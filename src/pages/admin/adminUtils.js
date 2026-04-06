@@ -11,6 +11,11 @@ export const formatDateTime = (value) => {
   }
 };
 
+export const formatExpiryDateTime = (value) => {
+  if (!value) return "Never";
+  return formatDateTime(value);
+};
+
 export const safeArray = (value) => (Array.isArray(value) ? value : []);
 
 export const compactText = (items = []) => {
@@ -37,6 +42,16 @@ export const sessionStatusChip = (status) => {
   if (token === "COMPLETED") return <Chip label="Completed" size="small" color="success" />;
   if (token === "ACTIVE") return <Chip label="Active" size="small" color="primary" />;
   if (token === "FAILED") return <Chip label="Failed" size="small" color="error" />;
+  return <Chip label={token || "Unknown"} size="small" variant="outlined" />;
+};
+
+export const trialStatusChip = (status) => {
+  const token = String(status || "").toUpperCase();
+  if (token === "ACTIVE") return <Chip label="Active" size="small" color="success" />;
+  if (token === "REDEEMED") return <Chip label="Redeemed" size="small" color="primary" />;
+  if (token === "REVOKED") return <Chip label="Revoked" size="small" color="warning" />;
+  if (token === "DELETED") return <Chip label="Deleted" size="small" color="error" />;
+  if (token === "EXPIRED") return <Chip label="Expired" size="small" variant="outlined" />;
   return <Chip label={token || "Unknown"} size="small" variant="outlined" />;
 };
 
@@ -68,3 +83,32 @@ export const renderTopItems = (items = [], options = {}) => {
 };
 
 export const formatAdminInterviewType = (value) => formatInterviewTypeLabel(value);
+
+export const readSearchParam = (searchParams, key, fallback = "") => {
+  const value = searchParams?.get?.(key);
+  return value == null ? fallback : value;
+};
+
+export const readBooleanSearchParam = (searchParams, key, fallback = false) => {
+  const value = searchParams?.get?.(key);
+  if (value == null) return fallback;
+  return value === "1" || value === "true";
+};
+
+export const updateSearchParamsState = (setSearchParams, updates, options = { replace: true }) => {
+  setSearchParams((current) => {
+    const next = new URLSearchParams(current);
+    Object.entries(updates || {}).forEach(([key, value]) => {
+      if (value == null || value === "" || value === false) {
+        next.delete(key);
+        return;
+      }
+      if (value === true) {
+        next.set(key, "1");
+        return;
+      }
+      next.set(key, String(value));
+    });
+    return next;
+  }, options);
+};

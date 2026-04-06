@@ -24,7 +24,11 @@ def _db():
 
 def test_admin_can_create_and_list_trial_codes():
     db = _db()
-    payload = admin_module.TrialCodeCreateRequest(duration_minutes=5, expires_in_days=7, note="campaign-a")
+    payload = admin_module.TrialCodeCreateRequest(
+        display_name="Campaign A",
+        duration_minutes=5,
+        note="campaign-a",
+    )
     create_resp = admin_module.create_trial_code(
         payload=payload,
         admin_user=FakeUser("admin_1"),
@@ -32,6 +36,9 @@ def test_admin_can_create_and_list_trial_codes():
     )
     assert create_resp["code"].startswith("TRY-")
     assert create_resp["status"] == "ACTIVE"
+    assert create_resp["display_name"] == "Campaign A"
+    assert create_resp["expires_at"] is None
+    assert create_resp["expires_policy"] == "manual_revoke_or_delete_only"
 
     list_resp = admin_module.list_trial_codes(
         _admin_user=FakeUser("admin_1"),
@@ -43,13 +50,42 @@ def test_admin_can_create_and_list_trial_codes():
     items = list_resp["items"]
     assert len(items) == 1
     assert items[0]["code"] == create_resp["code"]
+    assert items[0]["display_name"] == "Campaign A"
+    assert items[0]["expires_at"] is None
+    assert items[0]["expires_policy"] == "manual_revoke_or_delete_only"
+
+
+def test_admin_trial_codes_default_to_non_expiring():
+    db = _db()
+    payload = admin_module.TrialCodeCreateRequest(
+        display_name="Always On Trial",
+        duration_minutes=10,
+        note="non-expiring",
+    )
+
+    create_resp = admin_module.create_trial_code(
+        payload=payload,
+        admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert create_resp["expires_at"] is None
+
+    list_resp = admin_module.list_trial_codes(
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+        page=1,
+        page_size=10,
+        status=None,
+    )
+    assert list_resp["items"][0]["expires_at"] is None
 
 
 def test_admin_trial_code_suffix_create_and_filter():
     db = _db()
     payload = admin_module.TrialCodeCreateRequest(
+        display_name="Suffix Campaign",
         duration_minutes=5,
-        expires_in_days=7,
         note="suffix-campaign",
         code_suffix="abc12",
     )
@@ -61,6 +97,8 @@ def test_admin_trial_code_suffix_create_and_filter():
     assert create_resp["code"].endswith("-ABC12")
     assert create_resp["code_suffix"] == "ABC12"
     assert create_resp["code_format_version"] == "v2_suffix_optional"
+    assert create_resp["display_name"] == "Suffix Campaign"
+    assert create_resp["expires_at"] is None
 
     list_resp = admin_module.list_trial_codes(
         _admin_user=FakeUser("admin_1"),
@@ -73,13 +111,15 @@ def test_admin_trial_code_suffix_create_and_filter():
     assert list_resp["total"] == 1
     assert list_resp["items"][0]["code_suffix"] == "ABC12"
     assert list_resp["items"][0]["note"] == "suffix-campaign"
+    assert list_resp["items"][0]["display_name"] == "Suffix Campaign"
+    assert list_resp["items"][0]["expires_at"] is None
+    assert list_resp["items"][0]["expires_policy"] == "manual_revoke_or_delete_only"
 
 
 def test_admin_trial_code_invalid_suffix_rejected():
     db = _db()
     payload = admin_module.TrialCodeCreateRequest(
         duration_minutes=5,
-        expires_in_days=7,
         code_suffix="bad-suffix!",
     )
     try:
@@ -181,6 +221,373 @@ def test_delete_trial_code_revokes_active_entitlement():
     assert code.status == "DELETED"
     assert ent.is_active is False
     assert ent.revoked_at is not None
+
+
+def test_bulk_candidate_action_can_deactivate_multiple_candidates():
+    db = _db()
+    first = models.User(
+        id="u_bulk_1",
+        clerk_user_id="candidate_bulk_1",
+        email="bulk1@example.com",
+        full_name="Bulk One",
+        is_active=True,
+        is_deleted=False,
+    )
+    second = models.User(
+        id="u_bulk_2",
+        clerk_user_id="candidate_bulk_2",
+        email="bulk2@example.com",
+        full_name="Bulk Two",
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add_all([first, second])
+    db.commit()
+
+    resp = admin_module.bulk_candidate_action(
+        payload=admin_module.CandidateBulkActionRequest(
+            clerk_user_ids=["candidate_bulk_1", "candidate_bulk_2"],
+            action="deactivate",
+        ),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["action"] == "deactivate"
+    assert resp["processed_count"] == 2
+    db.refresh(first)
+    db.refresh(second)
+    assert first.is_active is False
+    assert second.is_active is False
+
+
+def test_bulk_delete_trial_codes_marks_selected_rows_deleted():
+    db = _db()
+    first = models.TrialCode(
+        id="tc_bulk_1",
+        code="TRY-BULK001",
+        display_name="Bulk Trial One",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=None,
+        created_by_clerk_user_id="admin_1",
+    )
+    second = models.TrialCode(
+        id="tc_bulk_2",
+        code="TRY-BULK002",
+        display_name="Bulk Trial Two",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=None,
+        created_by_clerk_user_id="admin_1",
+    )
+    db.add_all([first, second])
+    db.commit()
+
+    resp = admin_module.bulk_delete_trial_codes(
+        payload=admin_module.TrialCodeBulkDeleteRequest(code_ids=["tc_bulk_1", "tc_bulk_2"]),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["processed_count"] == 2
+    db.refresh(first)
+    db.refresh(second)
+    assert first.status == "DELETED"
+    assert second.status == "DELETED"
+
+
+def test_bulk_candidate_action_deactivates_multiple_candidates():
+    db = _db()
+    users = [
+        models.User(
+            id="u1",
+            clerk_user_id="candidate_1",
+            email="candidate1@example.com",
+            full_name="Candidate One",
+            is_active=True,
+            is_deleted=False,
+        ),
+        models.User(
+            id="u2",
+            clerk_user_id="candidate_2",
+            email="candidate2@example.com",
+            full_name="Candidate Two",
+            is_active=True,
+            is_deleted=False,
+        ),
+    ]
+    entitlements = [
+        models.UserEntitlement(
+            id="e1",
+            clerk_user_id="candidate_1",
+            source_type="TRIAL_CODE",
+            source_id="code_1",
+            plan_tier="trial",
+            duration_minutes_effective=5,
+            is_active=True,
+            starts_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            expires_at=None,
+        ),
+        models.UserEntitlement(
+            id="e2",
+            clerk_user_id="candidate_2",
+            source_type="TRIAL_CODE",
+            source_id="code_2",
+            plan_tier="trial",
+            duration_minutes_effective=5,
+            is_active=True,
+            starts_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            expires_at=None,
+        ),
+    ]
+    db.add_all(users + entitlements)
+    db.commit()
+
+    resp = admin_module.bulk_candidate_action(
+        payload=admin_module.CandidateBulkActionRequest(
+            clerk_user_ids=["candidate_1", "candidate_2"],
+            action="deactivate",
+        ),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["processed_count"] == 2
+    for user in users:
+        db.refresh(user)
+        assert user.is_active is False
+    for entitlement in entitlements:
+        db.refresh(entitlement)
+        assert entitlement.is_active is False
+        assert entitlement.revoked_at is not None
+
+
+def test_bulk_candidate_action_dedupes_ids_and_reports_missing_rows():
+    db = _db()
+    user = models.User(
+        id="u1",
+        clerk_user_id="candidate_1",
+        email="candidate1@example.com",
+        full_name="Candidate One",
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add(user)
+    db.commit()
+
+    resp = admin_module.bulk_candidate_action(
+        payload=admin_module.CandidateBulkActionRequest(
+            clerk_user_ids=["candidate_1", "candidate_1", "missing_user"],
+            action="delete",
+        ),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["requested_count"] == 2
+    assert resp["processed_count"] == 1
+    assert resp["missing_ids"] == ["missing_user"]
+    db.refresh(user)
+    assert user.is_deleted is True
+    assert user.is_active is False
+
+
+def test_bulk_delete_trial_codes_revokes_entitlements():
+    db = _db()
+    codes = [
+        models.TrialCode(
+            id="tc_1",
+            code="TRY-BULK001",
+            display_name="Bulk One",
+            status="ACTIVE",
+            duration_minutes=5,
+            expires_at=None,
+            created_by_clerk_user_id="admin_1",
+        ),
+        models.TrialCode(
+            id="tc_2",
+            code="TRY-BULK002",
+            display_name="Bulk Two",
+            status="REDEEMED",
+            duration_minutes=5,
+            expires_at=None,
+            created_by_clerk_user_id="admin_1",
+        ),
+    ]
+    entitlement = models.UserEntitlement(
+        id="e1",
+        clerk_user_id="candidate_1",
+        source_type="TRIAL_CODE",
+        source_id="tc_2",
+        plan_tier="trial",
+        duration_minutes_effective=5,
+        is_active=True,
+        starts_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        expires_at=None,
+    )
+    db.add_all(codes + [entitlement])
+    db.commit()
+
+    resp = admin_module.bulk_delete_trial_codes(
+        payload=admin_module.TrialCodeBulkDeleteRequest(code_ids=["tc_1", "tc_2"]),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["processed_count"] == 2
+    for code in codes:
+        db.refresh(code)
+        assert code.status == "DELETED"
+        assert code.deleted_at is not None
+    db.refresh(entitlement)
+    assert entitlement.is_active is False
+    assert entitlement.revoked_at is not None
+
+
+def test_bulk_delete_trial_codes_dedupes_ids_and_reports_missing_rows():
+    db = _db()
+    code = models.TrialCode(
+        id="tc_1",
+        code="TRY-BULK003",
+        display_name="Bulk Three",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=None,
+        created_by_clerk_user_id="admin_1",
+    )
+    db.add(code)
+    db.commit()
+
+    resp = admin_module.bulk_delete_trial_codes(
+        payload=admin_module.TrialCodeBulkDeleteRequest(code_ids=["tc_1", "tc_1", "missing_trial"]),
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+    )
+
+    assert resp["requested_count"] == 2
+    assert resp["processed_count"] == 1
+    assert resp["missing_ids"] == ["missing_trial"]
+    db.refresh(code)
+    assert code.status == "DELETED"
+
+
+def test_deleted_trial_codes_hidden_by_default_and_returned_when_requested():
+    db = _db()
+    active = models.TrialCode(
+        id="tc_active",
+        code="TRY-ACTIVE1",
+        display_name="Visible Trial",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=3),
+        created_by_clerk_user_id="admin_1",
+    )
+    deleted = models.TrialCode(
+        id="tc_deleted",
+        code="TRY-DELETED1",
+        display_name="Deleted Trial",
+        status="DELETED",
+        duration_minutes=5,
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=3),
+        created_by_clerk_user_id="admin_1",
+        deleted_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    db.add(active)
+    db.add(deleted)
+    db.commit()
+
+    default_resp = admin_module.list_trial_codes(
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+        page=1,
+        page_size=10,
+        status=None,
+    )
+    assert default_resp["total"] == 1
+    assert [row["id"] for row in default_resp["items"]] == ["tc_active"]
+
+    include_deleted_resp = admin_module.list_trial_codes(
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+        include_deleted=True,
+        page=1,
+        page_size=10,
+        status=None,
+    )
+    assert include_deleted_resp["total"] == 2
+    assert {row["id"] for row in include_deleted_resp["items"]} == {"tc_active", "tc_deleted"}
+
+
+def test_trial_code_list_can_search_by_display_name_or_code():
+    db = _db()
+    first = models.TrialCode(
+        id="tc_search_1",
+        code="TRY-SEARCH01",
+        display_name="Referral Drive",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=None,
+        created_by_clerk_user_id="admin_1",
+    )
+    second = models.TrialCode(
+        id="tc_search_2",
+        code="TRY-ALPHA99",
+        display_name="Campus Pilot",
+        status="ACTIVE",
+        duration_minutes=5,
+        expires_at=None,
+        created_by_clerk_user_id="admin_1",
+    )
+    db.add(first)
+    db.add(second)
+    db.commit()
+
+    by_name = admin_module.list_trial_codes(
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+        q="Referral",
+        page=1,
+        page_size=10,
+        status=None,
+    )
+    assert [row["id"] for row in by_name["items"]] == ["tc_search_1"]
+
+    by_code = admin_module.list_trial_codes(
+        _admin_user=FakeUser("admin_1"),
+        db=db,
+        q="ALPHA99",
+        page=1,
+        page_size=10,
+        status=None,
+    )
+    assert [row["id"] for row in by_code["items"]] == ["tc_search_2"]
+
+
+def test_trial_code_list_returns_actionable_error_when_schema_is_outdated():
+    db = _db()
+    original_inspect = admin_module.inspect
+
+    class _Inspector:
+        def get_columns(self, _table_name: str):
+            return [{"name": "id"}, {"name": "code"}, {"name": "status"}]
+
+    admin_module.inspect = lambda _bind: _Inspector()
+    try:
+        admin_module.list_trial_codes(
+            _admin_user=FakeUser("admin_1"),
+            db=db,
+            page=1,
+            page_size=10,
+            status=None,
+        )
+        assert False, "Expected HTTPException when required trial_codes columns are missing"
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert "Database schema is out of date for trial_codes" in str(exc.detail)
+        assert "alembic -c backend/alembic.ini upgrade head" in str(exc.detail)
+    finally:
+        admin_module.inspect = original_inspect
 
 
 def test_evaluation_quality_summary_counts_invalid_contracts():

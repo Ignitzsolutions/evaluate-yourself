@@ -6,6 +6,7 @@
     "@clerk/clerk-react": "^5.0.0",
     "@emotion/react": "^11.11.0",
     "@emotion/styled": "^11.11.0",
+    "@mediapipe/tasks-vision": "^0.10.32",
     "@mui/icons-material": "^5.18.0",
     "@mui/material": "^5.15.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.45.0",
@@ -20,6 +21,7 @@
     "@testing-library/react": "^14.2.2"
   },
   "scripts": {
+    "postinstall": "node scripts/fix-mediapipe-sourcemap.js",
     "start": "react-scripts start",
     "start:frontend": "./start-frontend.sh",
     "start:backend": "./start-backend.sh",

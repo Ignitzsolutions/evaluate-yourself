@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -26,11 +26,15 @@ def _pick_primary_email(payload: Dict) -> Optional[str]:
     emails = payload.get("email_addresses") or []
     if primary_id:
         for item in emails:
-            if item.get("id") == primary_id and item.get("email_address"):
+            if (
+                item.get("id") == primary_id
+                and item.get("email_address")
+                and _is_verified_contact(item)
+            ):
                 return str(item.get("email_address")).strip().lower()
     for item in emails:
         email = item.get("email_address")
-        if email:
+        if email and _is_verified_contact(item):
             return str(email).strip().lower()
     return None
 
@@ -40,13 +44,30 @@ def _pick_primary_phone(payload: Dict) -> Optional[str]:
     numbers = payload.get("phone_numbers") or []
     if primary_id:
         for item in numbers:
-            if item.get("id") == primary_id and item.get("phone_number"):
+            if (
+                item.get("id") == primary_id
+                and item.get("phone_number")
+                and _is_verified_contact(item)
+            ):
                 return normalize_phone_e164(item.get("phone_number"))
     for item in numbers:
         number = item.get("phone_number")
-        if number:
+        if number and _is_verified_contact(item):
             return normalize_phone_e164(number)
     return None
+
+
+def _verification_status(item: Dict) -> Optional[str]:
+    verification = item.get("verification")
+    if isinstance(verification, dict):
+        status = verification.get("status")
+        if isinstance(status, str) and status.strip():
+            return status.strip().lower()
+    return None
+
+
+def _is_verified_contact(item: Dict) -> bool:
+    return _verification_status(item) == "verified"
 
 
 def _pick_full_name(payload: Dict) -> Optional[str]:
@@ -63,10 +84,16 @@ def _pick_full_name(payload: Dict) -> Optional[str]:
     return None
 
 
-def fetch_clerk_contact_fields(clerk_user_id: str) -> Dict[str, Optional[str]]:
+def fetch_clerk_contact_fields(clerk_user_id: str) -> Dict[str, Any]:
     secret = (os.getenv("CLERK_SECRET_KEY") or "").strip()
     if not secret or not clerk_user_id:
-        return {"email": None, "full_name": None, "phone_e164": None}
+        return {
+            "email": None,
+            "email_verified": False,
+            "full_name": None,
+            "phone_e164": None,
+            "phone_verified": False,
+        }
 
     api_base = (os.getenv("CLERK_API_BASE_URL") or "https://api.clerk.com/v1").rstrip("/")
     url = f"{api_base}/users/{clerk_user_id}"
@@ -78,16 +105,32 @@ def fetch_clerk_contact_fields(clerk_user_id: str) -> Dict[str, Optional[str]]:
             timeout=6,
         )
         if response.status_code == 404:
-            return {"email": None, "full_name": None, "phone_e164": None}
+            return {
+                "email": None,
+                "email_verified": False,
+                "full_name": None,
+                "phone_e164": None,
+                "phone_verified": False,
+            }
         response.raise_for_status()
         payload = response.json() if response.content else {}
     except Exception as exc:
         logging.warning("Failed to fetch Clerk profile for %s: %s", clerk_user_id, exc)
-        return {"email": None, "full_name": None, "phone_e164": None}
+        return {
+            "email": None,
+            "email_verified": False,
+            "full_name": None,
+            "phone_e164": None,
+            "phone_verified": False,
+        }
+
+    email = _pick_primary_email(payload)
+    phone_e164 = _pick_primary_phone(payload)
 
     return {
-        "email": _pick_primary_email(payload),
+        "email": email,
+        "email_verified": bool(email),
         "full_name": _pick_full_name(payload),
-        "phone_e164": _pick_primary_phone(payload),
+        "phone_e164": phone_e164,
+        "phone_verified": bool(phone_e164),
     }
-
