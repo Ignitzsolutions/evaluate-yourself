@@ -68,6 +68,15 @@ def _iso_from_ms(ts_ms: Optional[int]) -> Optional[str]:
     return datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).isoformat()
 
 
+def _normalize_iso_timestamp(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
 def map_direction_to_flag(gaze_direction: str) -> Optional[str]:
     direction = str(gaze_direction or "").upper()
     if direction in {"LEFT", "RIGHT"}:
@@ -474,10 +483,12 @@ def aggregate_gaze_events(rows: List[Dict[str, Any]], fallback_summary: Optional
         total_ms += max(0, duration)
         started_at = row.get("started_at")
         ended_at = row.get("ended_at")
-        if started_at:
-            started_at_values.append(started_at)
-        if ended_at:
-            ended_at_values.append(ended_at)
+        normalized_started_at = _normalize_iso_timestamp(started_at)
+        normalized_ended_at = _normalize_iso_timestamp(ended_at)
+        if normalized_started_at:
+            started_at_values.append(normalized_started_at)
+        if normalized_ended_at:
+            ended_at_values.append(normalized_ended_at)
 
     eye_contact_pct = None
     if isinstance(fallback_summary, dict):
@@ -489,10 +500,10 @@ def aggregate_gaze_events(rows: List[Dict[str, Any]], fallback_summary: Optional
         "total_off_screen_ms": total_ms,
         "longest_event_ms": longest,
         "eye_contact_pct": eye_contact_pct,
-        "monitoring_started_at": min(started_at_values).isoformat() if started_at_values else (
+        "monitoring_started_at": min(started_at_values) if started_at_values else (
             fallback_summary.get("monitoring_started_at") if isinstance(fallback_summary, dict) else None
         ),
-        "monitoring_ended_at": max(ended_at_values).isoformat() if ended_at_values else (
+        "monitoring_ended_at": max(ended_at_values) if ended_at_values else (
             fallback_summary.get("monitoring_ended_at") if isinstance(fallback_summary, dict) else None
         ),
         "algorithm_version": (
