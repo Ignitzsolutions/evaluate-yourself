@@ -49,3 +49,31 @@ def test_confidence_tier_thresholds():
     assert compute_confidence_tier(49, 2) == "low"
     assert compute_confidence_tier(50, 2) == "medium"
     assert compute_confidence_tier(250, 4) == "high"
+
+
+def test_specific_answer_scores_higher_than_generic_long_answer():
+    question = "Tell me about a technical challenge you solved recently."
+    generic = evaluate_turn(
+        question_text=question,
+        candidate_answer_text=(
+            "I worked on a lot of different projects and handled many tasks across the team. "
+            "It was challenging but I managed, learned a lot, and helped the team deliver. "
+            "I usually do my best, communicate well, and adapt easily in different situations."
+        ),
+        interview_type="technical",
+    )
+    specific = evaluate_turn(
+        question_text=question,
+        candidate_answer_text=(
+            "I led a checkout latency fix after p95 rose above 1.8 seconds. "
+            "I added Redis caching, removed two N+1 queries, and introduced an index on order lookups. "
+            "That reduced p95 latency by 32% and cut timeout complaints by half within the week."
+        ),
+        interview_type="technical",
+    )
+
+    assert generic["evidence_quality"] < specific["evidence_quality"]
+    assert generic["depth"] < specific["depth"]
+    assert generic["relevance"] < specific["relevance"]
+    assert "generic_low_evidence" in generic["weak_signal_flags"]
+    assert specific["weak_signal_flags"] == []
