@@ -49,6 +49,14 @@ def main() -> int:
             _expect(base_url, "/api/profile/status", [200, 401]),
             _expect(base_url, "/api/interview/skill-catalog", [200, 401]),
             _expect(base_url, "/openapi.json", [200]),
+            _expect(base_url, "/api/admin/dashboard/overview", [200, 401, 403]),
+            _expect(base_url, "/api/admin/question-bank/tracks?interview_type=technical", [200, 401, 403]),
+            _expect(base_url, "/api/admin/categories", [404]),
+            _expect(
+                base_url,
+                "/api/admin/sales/summary?page=1&pageSize=25&sortBy=created_at&sortDir=desc",
+                [404],
+            ),
         ]
     )
     if not checks_ok:

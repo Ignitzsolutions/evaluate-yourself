@@ -52,8 +52,11 @@ deploy.zip
 .deploy_tmp/
 backend.log
 backend.restart.log
+backend.run.log
+backend/debug.log
 frontend.log
 frontend.restart.log
+frontend.run.log
 azure-master-doc.pdf
 .python-version
 .env.development

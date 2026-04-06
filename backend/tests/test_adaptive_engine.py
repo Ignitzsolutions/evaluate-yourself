@@ -105,3 +105,101 @@ def test_opening_question_respects_selected_skills():
     assert opening["question_id"]
     assert opening["source"]
     assert isinstance(opening["next_question"], str) and opening["next_question"]
+
+
+def test_behavioral_opening_avoids_generic_tell_me_about_yourself():
+    opening = choose_opening_question(
+        interview_type="behavioral",
+        difficulty="mid",
+        role="Engineering Manager",
+        question_mix="behavioral",
+        selected_skills=[],
+    )
+    assert "tell me about yourself" not in opening["next_question"].lower()
+    assert "current role and your most significant professional achievement" not in opening["next_question"].lower()
+
+
+def test_low_depth_followup_uses_answer_aware_generator(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.interview.adaptive_engine.evaluate_turn",
+        lambda **kwargs: {
+            "clarity": 4,
+            "depth": 1,
+            "relevance": 4,
+            "confidence": "medium",
+            "rationale": "needs more depth",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.services.interview.adaptive_engine.generate_followup",
+        lambda **kwargs: "What tradeoff mattered most in that decision?",
+    )
+
+    result = decide_next_turn(
+        last_user_turn=(
+            "I improved the service by tightening retries, cleaning up failure handling, "
+            "and reducing noisy incidents, but I have not gone deep into the tradeoff details yet."
+        ),
+        recent_transcript=[
+            {"speaker": "ai", "text": "Walk me through a recent reliability improvement you owned."},
+            {
+                "speaker": "user",
+                "text": (
+                    "I improved the service by tightening retries, cleaning up failure handling, "
+                    "and reducing noisy incidents, but I have not gone deep into the tradeoff details yet."
+                ),
+            },
+        ],
+        interview_type="technical",
+        difficulty="mid",
+        role="Backend Engineer",
+        company="Acme",
+        question_mix="technical",
+        interview_style="neutral",
+        duration_minutes=20,
+        asked_question_ids=["q1"],
+    )
+
+    assert result["followup_type"] == "probe"
+    assert result["next_question"] == "What tradeoff mattered most in that decision?"
+
+
+def test_opening_window_uses_thread_probe_before_switching_topics(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.interview.adaptive_engine.evaluate_turn",
+        lambda **kwargs: {
+            "clarity": 4,
+            "depth": 4,
+            "relevance": 4,
+            "confidence": "high",
+            "rationale": "strong opening answer",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.services.interview.adaptive_engine.generate_followup",
+        lambda **kwargs: "What was the hardest technical tradeoff you had to make there?",
+    )
+
+    result = decide_next_turn(
+        last_user_turn=(
+            "I owned the retry redesign, reduced recovery time, and coordinated the rollout with the platform team "
+            "after we saw repeated failures in production."
+        ),
+        recent_transcript=[
+            {"speaker": "ai", "text": "Walk me through a recent technical problem you owned end-to-end."},
+            {"speaker": "user", "text": "I owned the retry redesign and coordinated the rollout."},
+        ],
+        interview_type="technical",
+        difficulty="mid",
+        role="Backend Engineer",
+        company="Acme",
+        question_mix="technical",
+        interview_style="neutral",
+        duration_minutes=15,
+        asked_question_ids=["opening_q"],
+    )
+
+    assert result["reason"] == "opening_thread_probe"
+    assert result["followup_type"] == "probe"
+    assert result["question_id"] == "followup_opening_thread"
+    assert result["next_question"] == "What was the hardest technical tradeoff you had to make there?"

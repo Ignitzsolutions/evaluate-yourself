@@ -14,6 +14,7 @@ describe("PricingPage", () => {
     );
 
     expect(screen.getByText(/Try Free for 5 Minutes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Join the free-trial waitlist/i)).toBeInTheDocument();
     expect(screen.getByText("₹499")).toBeInTheDocument();
     expect(screen.getByText("₹1,499")).toBeInTheDocument();
     expect(screen.getByText("₹7,999")).toBeInTheDocument();

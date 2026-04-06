@@ -3,32 +3,34 @@
 
 set -e
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "🚀 Starting Backend Server..."
 echo "=============================="
 
 # Check if we're in the right directory
-if [ ! -d "backend" ]; then
+if [ ! -d "${ROOT_DIR}/backend" ]; then
     echo "❌ Error: backend directory not found. Run this script from the project root."
     exit 1
 fi
 
 # Check if virtual environment exists
-if [ ! -d ".venv" ]; then
+if [ ! -d "${ROOT_DIR}/.venv" ]; then
     echo "⚠️  Virtual environment not found. Creating one..."
-    python3 -m venv .venv
+    python3 -m venv "${ROOT_DIR}/.venv"
     echo "✅ Virtual environment created"
 fi
 
 # Activate virtual environment
 echo "📦 Activating virtual environment..."
-source .venv/bin/activate
+source "${ROOT_DIR}/.venv/bin/activate"
 
 # Check if .env file exists
-if [ ! -f "backend/.env" ]; then
+if [ ! -f "${ROOT_DIR}/backend/.env" ]; then
     echo "⚠️  Warning: backend/.env file not found."
     echo "   Creating from .env.example..."
-    if [ -f "backend/.env.example" ]; then
-        cp backend/.env.example backend/.env
+    if [ -f "${ROOT_DIR}/backend/.env.example" ]; then
+        cp "${ROOT_DIR}/backend/.env.example" "${ROOT_DIR}/backend/.env"
         echo "   Please edit backend/.env and add your Azure OpenAI keys"
     else
         echo "   Please create backend/.env with your configuration"
@@ -37,8 +39,21 @@ fi
 
 # Install/update dependencies
 echo "📥 Checking dependencies..."
-pip install -q -r backend/requirements.txt || {
+pip install -q -r "${ROOT_DIR}/backend/requirements.txt" || {
     echo "❌ Failed to install dependencies"
+    exit 1
+}
+
+# Run DB migrations before booting API to avoid runtime schema drift failures.
+echo "🗄️ Applying database migrations..."
+python -m alembic -c "${ROOT_DIR}/backend/alembic.ini" upgrade head || {
+    echo "❌ Failed to apply database migrations"
+    exit 1
+}
+
+echo "🧪 Verifying schema health..."
+python "${ROOT_DIR}/backend/scripts/schema_smoke.py" || {
+    echo "❌ Schema smoke failed"
     exit 1
 }
 
@@ -54,7 +69,7 @@ if lsof -Pi :${PORT} -sTCP:LISTEN -t >/dev/null 2>&1 ; then
 fi
 
 # Change to backend directory
-cd backend
+cd "${ROOT_DIR}/backend"
 
 echo ""
 echo "🔧 Starting FastAPI server on http://localhost:${PORT}"
