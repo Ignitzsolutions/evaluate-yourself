@@ -991,6 +991,45 @@
   background: rgba(255,255,255,.84);
   backdrop-filter: blur(12px);
 }
+.meet-runtime-badges{
+  width: min(1180px, 95vw);
+  margin: 10px auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px;
+}
+.meet-runtime-badge{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(191,219,254,.8);
+  background: rgba(255,255,255,.92);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(15,23,42,.05);
+}
+.meet-runtime-badge.ok{
+  color: #166534;
+  background: rgba(220,252,231,.95);
+  border-color: rgba(34,197,94,.24);
+}
+.meet-runtime-badge.live{
+  color: #1d4ed8;
+  background: rgba(239,246,255,.98);
+  border-color: rgba(59,130,246,.24);
+}
+.meet-runtime-badge.warn{
+  color: #b45309;
+  background: rgba(255,247,237,.96);
+  border-color: rgba(251,146,60,.28);
+}
+.meet-runtime-badge.neutral{
+  color: #334155;
+}
 .meet-stage-wrap{
   padding: 26px 20px 112px;
 }
@@ -1004,6 +1043,7 @@
   background:
     radial-gradient(circle at top, rgba(191,219,254,.9), transparent 32%),
     linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.98));
+  border-color: rgba(191,219,254,.7);
 }
 .meet-stage::before{
   content: "";

@@ -1,4 +1,5 @@
 import {
+  buildAdaptiveTurnFallbackQuestion,
   buildRealtimeSessionUpdateEvent,
   canSendOpeningPrompt,
 } from "../interviewRealtime";
@@ -90,5 +91,36 @@ describe("canSendOpeningPrompt", () => {
         openingAlreadySent: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("buildAdaptiveTurnFallbackQuestion", () => {
+  it("builds a behavioral-safe recovery prompt when the interview is behavioral", () => {
+    expect(
+      buildAdaptiveTurnFallbackQuestion({
+        interviewType: "behavioral",
+        role: "Engineering Manager",
+        company: "OpenAI",
+      }),
+    ).toMatch(/recent challenge/i);
+  });
+
+  it("builds a technical-safe recovery prompt when the interview is technical", () => {
+    expect(
+      buildAdaptiveTurnFallbackQuestion({
+        interviewType: "technical",
+        role: "Backend Engineer",
+        company: "OpenAI",
+      }),
+    ).toMatch(/recent technical problem/i);
+  });
+
+  it("falls back to a mixed project prompt when no specific family is forced", () => {
+    expect(
+      buildAdaptiveTurnFallbackQuestion({
+        interviewType: "mixed",
+        questionMix: "balanced",
+      }),
+    ).toMatch(/recent project/i);
   });
 });

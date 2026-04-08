@@ -47,6 +47,7 @@ def test_redeem_trial_code_returns_structured_already_redeemed_error():
             code="TRY-TAKEN",
             status="REDEEMED",
             duration_minutes=5,
+            expires_at=datetime.utcnow() + timedelta(days=1),
             created_by_clerk_user_id="admin_1",
             redeemed_by_clerk_user_id="candidate_2",
             redeemed_at=datetime.utcnow(),
@@ -108,6 +109,7 @@ def test_redeem_trial_code_success_returns_entitlement_payload():
             code="TRY-READY",
             status="ACTIVE",
             duration_minutes=7,
+            expires_at=datetime.utcnow() + timedelta(days=1),
             created_by_clerk_user_id="admin_1",
         )
     )

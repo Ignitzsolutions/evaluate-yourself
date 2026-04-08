@@ -131,6 +131,57 @@ class InterviewGazeEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class InterviewRound(Base):
+    __tablename__ = "interview_rounds"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    round_index = Column(Integer, nullable=False, default=0)
+    phase = Column(String, nullable=False, default="intro")
+    agent_owner = Column(String, nullable=False, default="orchestrator")
+    status = Column(String, nullable=False, default="ACTIVE")
+    question_id = Column(String, nullable=True)
+    question_text = Column(Text, nullable=True)
+    handoff_reason = Column(String, nullable=True)
+    summary_json = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class SessionMemorySnapshot(Base):
+    __tablename__ = "session_memory_snapshots"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    round_index = Column(Integer, nullable=False, default=0)
+    snapshot_kind = Column(String, nullable=False, default="carry_forward")
+    resume_token = Column(String, nullable=True, index=True)
+    memory_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class EvidenceArtifact(Base):
+    __tablename__ = "evidence_artifacts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    artifact_type = Column(String, index=True, nullable=False, default="capture_bundle")
+    source = Column(String, nullable=False, default="client_capture")
+    trust_level = Column(String, nullable=False, default="trusted")
+    artifact_status = Column(String, nullable=False, default="READY")
+    payload_json = Column(Text, nullable=False, default="{}")
+    word_timestamps_json = Column(Text, nullable=False, default="[]")
+    capture_integrity_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class TrialCode(Base):
     __tablename__ = "trial_codes"
 

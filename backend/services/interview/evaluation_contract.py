@@ -39,6 +39,9 @@ def validate_evaluation_contract(
     candidate_turn_count = _as_int(capture.get("candidate_turn_count"), 0)
     turns_evaluated = _as_int(capture.get("turns_evaluated"), 0)
     overall_score = _as_int(final_scores.get("overall_score"), 0)
+    capture_status = str(capture.get("capture_status") or "").strip().upper()
+    fallback_candidate_turn_count = _as_int(capture.get("fallback_candidate_turn_count"), 0)
+    uses_fallback_transcript = bool(capture.get("evaluation_uses_fallback_transcript"))
 
     if overall_score > 0 and candidate_word_count == 0:
         flags.append("INVALID_SCORE_WITH_ZERO_CANDIDATE_WORDS")
@@ -56,6 +59,10 @@ def validate_evaluation_contract(
         flags.append("INVALID_SCORE_WITH_ZERO_EVALUATED_TURNS")
     if overall_score > 0 and (not isinstance(turns, list) or len(turns) == 0):
         flags.append("INVALID_SCORE_WITHOUT_TURN_EVIDENCE")
+    if overall_score > 0 and capture_status in {"INCOMPLETE_NO_CANDIDATE_AUDIO", "INCOMPLETE_FALLBACK_ONLY_CAPTURE"}:
+        flags.append(f"INVALID_SCORE_FOR_CAPTURE_STATUS:{capture_status}")
+    if overall_score > 0 and (uses_fallback_transcript or fallback_candidate_turn_count > 0):
+        flags.append("INVALID_SCORE_WITH_FALLBACK_CANDIDATE_TRANSCRIPT")
 
     if isinstance(turns, list):
         for turn in turns:

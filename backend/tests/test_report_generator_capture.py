@@ -59,7 +59,7 @@ def test_report_marks_complete_when_candidate_turns_exist():
     assert report.metrics["capture_status"] == "COMPLETE"
 
 
-def test_report_score_is_bounded_with_floor_and_ceiling():
+def test_report_score_is_bounded_without_forcing_an_optimistic_floor():
     session = FakeSession(
         transcript_history=[
             {
@@ -71,7 +71,7 @@ def test_report_score_is_bounded_with_floor_and_ceiling():
         evaluations=[{"clarity": 5, "depth": 5, "relevance": 5, "star_completeness": {}}],
     )
     report = generate_report(session, "mixed", 2)
-    assert 20 <= report.overall_score <= 100
+    assert 0 <= report.overall_score <= 100
 
 
 def test_structure_score_falls_back_to_clarity_key_when_clarity_score_missing():

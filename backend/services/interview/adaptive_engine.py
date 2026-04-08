@@ -338,6 +338,69 @@ def choose_opening_question(
     }
 
 
+def build_recoverable_fallback_turn(
+    *,
+    interview_type: str,
+    difficulty: str,
+    role: Optional[str],
+    question_mix: str,
+    interview_style: str,
+    duration_minutes: Optional[int],
+    asked_question_ids: List[str],
+    selected_skills: Optional[List[str]] = None,
+    db: Any = None,
+    error_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_difficulty = normalize_difficulty(difficulty)
+    normalized_selected_skills = normalize_track_ids(selected_skills)
+    bank_type = _resolve_question_type(
+        interview_type=interview_type,
+        question_mix=question_mix,
+        asked_count=len(asked_question_ids),
+        selected_skills=normalized_selected_skills,
+    )
+    next_question, question_id, source = _select_next_bank_question(
+        interview_type=bank_type,
+        difficulty=normalized_difficulty,
+        asked_question_ids=asked_question_ids,
+        role=role,
+        selected_skills=normalized_selected_skills,
+        db=db,
+    )
+    if not next_question:
+        if bank_type == "behavioral":
+            next_question = "Tell me about a recent challenge at work and the concrete steps you took to handle it."
+        elif bank_type == "technical":
+            next_question = "Walk me through a recent technical problem you solved, including your approach and tradeoffs."
+        else:
+            next_question = "Tell me about a recent project and the most important decision you made during it."
+        question_id = "fallback_recovery"
+        source = "recoverable_fallback"
+
+    return {
+        "next_question": next_question,
+        "question_id": question_id or "fallback_recovery",
+        "reason": "adaptive_turn_recovery",
+        "followup_type": "recovery",
+        "difficulty_next": normalized_difficulty,
+        "turn_scores": {},
+        "policy_action": "RECOVERABLE_ERROR",
+        "refusal_message": None,
+        "selected_skills_applied": normalized_selected_skills,
+        "adaptive_path": {
+            "interview_style": interview_style,
+            "question_mix": question_mix,
+            "duration_minutes": duration_minutes,
+            "source": source,
+        },
+        "recoverable_error": {
+            "code": "ADAPTIVE_TURN_UNAVAILABLE",
+            "message": error_message or "Adaptive scoring was unavailable for this turn. Sonia continued with a safe fallback question.",
+            "retryable": True,
+        },
+    }
+
+
 def decide_next_turn(
     *,
     last_user_turn: str,

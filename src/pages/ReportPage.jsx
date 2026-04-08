@@ -291,9 +291,15 @@ export default function ReportPage() {
   const captureEvidence = metrics.capture_evidence && typeof metrics.capture_evidence === "object"
     ? metrics.capture_evidence
     : {};
+  const captureIntegrity = metrics.capture_integrity && typeof metrics.capture_integrity === "object"
+    ? metrics.capture_integrity
+    : {};
   const scoreProvenance = metrics.score_provenance && typeof metrics.score_provenance === "object"
     ? metrics.score_provenance
     : {};
+  const scoreTrustLevel = typeof metrics.score_trust_level === "string"
+    ? metrics.score_trust_level
+    : "trusted";
   const rubricVersion = metrics.rubric_version || scoreProvenance.rubric_version || evaluationExplainability?.rubric_version || "unknown";
   const scorerVersion = metrics.scorer_version || scoreProvenance.scorer_version || evaluationExplainability?.scorer_version || "unknown";
   const turnEvidence = Array.isArray(metrics.turn_evidence) ? metrics.turn_evidence : [];
@@ -304,6 +310,14 @@ export default function ReportPage() {
   );
   const sessionFeedback = metrics.session_feedback && typeof metrics.session_feedback === "object"
     ? metrics.session_feedback
+    : null;
+  const communicationSignals = metrics.communication_signals && typeof metrics.communication_signals === "object"
+    ? metrics.communication_signals
+    : (metrics.evaluation_channels?.english_communication && typeof metrics.evaluation_channels.english_communication === "object"
+      ? metrics.evaluation_channels.english_communication
+      : {});
+  const confidenceScore = typeof metrics.confidence_score === "number"
+    ? metrics.confidence_score
     : null;
 
   useEffect(() => {
@@ -466,6 +480,16 @@ export default function ReportPage() {
           </Typography>
         </Alert>
       )}
+      {captureStatus === "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Evaluation incomplete: only browser fallback transcript was captured for the candidate.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            The interview transcript remains visible for review, but fallback-only candidate transcript is excluded from trusted scoring.
+          </Typography>
+        </Alert>
+      )}
       {isPartialCapture && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -476,10 +500,27 @@ export default function ReportPage() {
           </Typography>
         </Alert>
       )}
-      {!isIncompleteCapture && !isPartialCapture && (
+      {!isIncompleteCapture && !isPartialCapture && captureStatus !== "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
         <Alert severity="success" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             Evaluation complete: candidate responses were captured and analyzed.
+          </Typography>
+        </Alert>
+      )}
+      {scoreTrustLevel === "mixed_evidence" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Mixed transcript evidence detected.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Browser fallback transcript kept the interview moving, but scoring used only trusted server-captured candidate turns.
+          </Typography>
+        </Alert>
+      )}
+      {scoreTrustLevel === "coaching_only" && !isIncompleteCapture && captureStatus !== "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            This score should be treated as coaching-quality guidance, not a fully trusted evaluation.
           </Typography>
         </Alert>
       )}
@@ -513,6 +554,15 @@ export default function ReportPage() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Contract checks verify whether captured evidence is sufficient for a valid score.
           </Typography>
+          {(captureIntegrity.trusted_candidate_turn_count > 0 || captureIntegrity.fallback_candidate_turn_count > 0) && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Trusted candidate turns: <strong>{captureIntegrity.trusted_candidate_turn_count ?? 0}</strong>
+              {" · "}
+              Fallback candidate turns: <strong>{captureIntegrity.fallback_candidate_turn_count ?? 0}</strong>
+              {" · "}
+              Score trust: <strong>{scoreTrustLevel}</strong>
+            </Typography>
+          )}
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} md={3}>
               <Card variant="outlined"><CardContent>
@@ -576,6 +626,62 @@ export default function ReportPage() {
             <Typography variant="body2" color="text.secondary">
               Evidence-backed turns persisted: <strong>{turnEvidence.length}</strong>
             </Typography>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Communication Signals
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Pacing and filler metrics are derived from trusted candidate transcript only.
+          </Typography>
+
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Confidence Score</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {confidenceScore != null ? confidenceScore : "—"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Pacing Band</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700, textTransform: "capitalize" }}>
+                  {communicationSignals.pacing_band || "unknown"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Filler Words</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {communicationSignals.filler_word_count ?? "—"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Fillers / 100 Words</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {communicationSignals.filler_words_per_100 ?? "—"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+          </Grid>
+
+          {Array.isArray(communicationSignals.quality_flags) && communicationSignals.quality_flags.length > 0 ? (
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+              {communicationSignals.quality_flags.map((flag) => (
+                <Chip key={flag} size="small" label={flag} color="warning" variant="outlined" />
+              ))}
+            </Box>
+          ) : (
+            <Alert severity="success">No pacing or filler-risk flags were raised from the trusted transcript.</Alert>
           )}
         </CardContent>
       </Card>

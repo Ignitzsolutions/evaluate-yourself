@@ -97,17 +97,17 @@ def generate_report(
             # Fallback: estimate communication from filler density in rationale or use clarity
             avg_communication = avg_clarity * 0.9  # slight discount if no separate signal
     
-    # Calculate overall score (0-100) with deterministic floor/ceiling.
-    if capture_incomplete:
+    # Calculate overall score (0-100) without optimistic floors when evidence is weak.
+    if capture_incomplete or not evaluations:
         overall_score = 0
     else:
         # Weight: clarity 25%, communication 20%, depth 30%, relevance 25%
         signal_sum = (avg_clarity * 0.25 + avg_communication * 0.20 + avg_depth * 0.30 + avg_relevance * 0.25)
         if signal_sum > 0:
             raw_score = int(round(signal_sum * 20))
-            overall_score = max(20, min(100, raw_score))
+            overall_score = max(0, min(100, raw_score))
         else:
-            overall_score = 40
+            overall_score = 0
     
     # Build score breakdown
     def _score_0_100(value: float) -> int:

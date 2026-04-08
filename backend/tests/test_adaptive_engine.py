@@ -1,4 +1,9 @@
-from backend.services.interview.adaptive_engine import choose_opening_question, decide_next_turn, normalize_difficulty
+from backend.services.interview.adaptive_engine import (
+    build_recoverable_fallback_turn,
+    choose_opening_question,
+    decide_next_turn,
+    normalize_difficulty,
+)
 
 
 def test_normalize_difficulty_mapping():
@@ -105,3 +110,22 @@ def test_opening_question_respects_selected_skills():
     assert opening["question_id"]
     assert opening["source"]
     assert isinstance(opening["next_question"], str) and opening["next_question"]
+
+
+def test_recoverable_fallback_turn_returns_safe_next_question():
+    decision = build_recoverable_fallback_turn(
+        interview_type="technical",
+        difficulty="mid",
+        role="Backend Engineer",
+        question_mix="technical",
+        interview_style="neutral",
+        duration_minutes=10,
+        asked_question_ids=[],
+        selected_skills=["python_sql_github_cloud"],
+        db=None,
+    )
+
+    assert decision["followup_type"] == "recovery"
+    assert decision["policy_action"] == "RECOVERABLE_ERROR"
+    assert decision["recoverable_error"]["retryable"] is True
+    assert isinstance(decision["next_question"], str) and decision["next_question"]

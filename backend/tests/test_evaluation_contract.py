@@ -96,3 +96,28 @@ def test_contract_rejects_nonzero_score_with_low_word_evidence():
     assert contract["contract_passed"] is False
     assert contract["final_scores"]["overall_score"] == 0
     assert any("LOW_EVIDENCE_WORDS" in flag for flag in contract["validation_flags"])
+
+
+def test_contract_rejects_nonzero_score_when_fallback_candidate_transcript_was_used():
+    contract = apply_evaluation_contract(
+        capture_evidence={
+            "capture_status": "INCOMPLETE_FALLBACK_ONLY_CAPTURE",
+            "candidate_word_count": 0,
+            "candidate_turn_count": 0,
+            "turns_evaluated": 0,
+            "fallback_candidate_turn_count": 1,
+            "evaluation_uses_fallback_transcript": True,
+        },
+        score_provenance={
+            "source": "server_deterministic_rubric",
+            "confidence": "low",
+        },
+        turn_evidence=[],
+        final_scores={"overall_score": 35},
+        enforcement_mode="enforce",
+        allowed_sources=ALLOWED_SOURCES,
+    )
+
+    assert contract["contract_passed"] is False
+    assert contract["final_scores"]["overall_score"] == 0
+    assert "INVALID_SCORE_WITH_FALLBACK_CANDIDATE_TRANSCRIPT" in contract["validation_flags"]

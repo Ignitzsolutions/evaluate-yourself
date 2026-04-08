@@ -43,3 +43,35 @@ export function canSendOpeningPrompt({
     Boolean(String(openingQuestion || "").trim())
   );
 }
+
+export function buildAdaptiveTurnFallbackQuestion({
+  interviewType,
+  role,
+  company,
+  questionMix,
+}) {
+  const normalizedType = String(interviewType || "mixed").trim().toLowerCase();
+  const normalizedMix = String(questionMix || "balanced").trim().toLowerCase();
+  const roleHint = String(role || "").trim();
+  const companyHint = String(company || "").trim();
+  const contextParts = [];
+
+  if (roleHint) {
+    contextParts.push(`for a ${roleHint} role`);
+  }
+  if (companyHint) {
+    contextParts.push(`at ${companyHint}`);
+  }
+
+  const contextSuffix = contextParts.length ? ` ${contextParts.join(" ")}` : "";
+
+  if (normalizedType === "behavioral" || normalizedMix === "behavioral") {
+    return `Tell me about a recent challenge${contextSuffix} and the concrete steps you took to handle it.`;
+  }
+
+  if (normalizedType === "technical" || normalizedMix === "technical") {
+    return `Walk me through a recent technical problem${contextSuffix}, including your approach, tradeoffs, and outcome.`;
+  }
+
+  return `Tell me about a recent project${contextSuffix} and the most important decision you made during it.`;
+}
