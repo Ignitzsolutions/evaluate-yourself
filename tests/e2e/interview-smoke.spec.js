@@ -14,17 +14,7 @@ async function installBrowserMocks(page) {
       if (typeof MediaStream !== "undefined") {
         return new MediaStream();
       }
-      return {
-        getTracks() {
-          return [];
-        },
-        getAudioTracks() {
-          return [];
-        },
-        getVideoTracks() {
-          return [];
-        },
-      };
+      return new FakeMediaStream();
     };
 
     class FakeMediaStreamTrack {
