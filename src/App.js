@@ -37,8 +37,6 @@ import AdminConfigPage from "./pages/admin/AdminConfigPage";
 import AdminQuestionBankPage from "./pages/admin/AdminQuestionBankPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
-const ENABLE_REALTIME_TEST_ROUTE = String(process.env.REACT_APP_ENABLE_REALTIME_TEST_ROUTE || "false").toLowerCase() === "true";
-
 // Layout wrapper for authenticated pages with navbar
 function MainLayout() {
   return (
@@ -128,9 +126,7 @@ export default function App() {
           {/* Public routes without navbar */}
           <Route element={<PublicLayout />}>
             <Route path="/pricing" element={<PricingPage />} />
-            {ENABLE_REALTIME_TEST_ROUTE && (
-              <Route path="/test-realtime" element={<RealtimeTestPage />} />
-            )}
+            <Route path="/test-realtime" element={<RealtimeTestPage />} />
           </Route>
 
           <Route element={<AuthLayout />}>

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,17 +47,41 @@ from services.interview_state_store import InterviewStateStore
 from db.redis_client import get_redis_client
 from services.interview_evaluator import evaluate_response
 from services.report_generator import generate_report as generate_interview_report
-from services.report_generator import (
-    build_score_ledger,
-    overall_score_formula_text,
-    overall_score_weight_summary,
-)
 from services.interview.adaptive_engine import (
+    build_recoverable_fallback_turn,
     choose_opening_question,
     decide_next_turn,
     normalize_difficulty,
 )
-from services.interview.followup_generator import generate_followup
+from services.interview.conversation_planner import (
+    build_bootstrap_conversation_plan,
+    plan_next_turn as plan_next_turn_graph,
+)
+from services.interview.persistence import (
+    load_latest_evidence_artifact,
+    persist_evidence_artifact,
+    persist_interview_round,
+    persist_session_memory_snapshot,
+)
+try:
+    from backend.agents.judge_router import (
+        build_evaluation_channel_plan,
+        route_evaluation_channels,
+    )
+except Exception:  # pragma: no cover
+    from agents.judge_router import (  # type: ignore
+        build_evaluation_channel_plan,
+        route_evaluation_channels,
+    )
+from services.interview.report_pipeline import (
+    build_candidate_turn_pairs_for_evaluation,
+    determine_score_trust_level,
+    normalize_transcript_payload,
+)
+from services.interview.communication_analytics import (
+    analyze_communication_metrics,
+    compute_confidence_score,
+)
 from services.interview.policy_guard import sanitize_context_text
 from services.interview.skill_tracks import (
     derive_profile_default_tracks,
@@ -87,25 +111,13 @@ from services.gaze_monitor import (
     decode_data_url_to_frame,
     detect_gaze_metrics,
 )
-from services.interview_report_artifact import (
-    determine_report_state,
-    render_interview_report_html,
-    render_interview_report_pdf_bytes,
-)
-from services.admin_auth_config import (
-    build_admin_auth_summary,
-    resolve_admin_auth_config,
-    validate_admin_auth_config,
-)
-from services.clerk_auth_config import (
-    build_clerk_auth_summary,
-    resolve_clerk_auth_config,
-    validate_clerk_auth_config,
-)
-from services.rate_limiter import (
-    build_default_rate_limiter,
-    register_rate_limit_middleware,
-)
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing, Rect, String
 
 #database imports
 from db.database import DATABASE_URL, SessionLocal, engine
@@ -341,10 +353,7 @@ def _extract_phone_verified_from_claims(decoded: Dict[str, Any]) -> bool:
             return value
     return False
 
-AUTO_CREATE_TABLES = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes", "on"}
-if AUTO_CREATE_TABLES:
-    # Emergency/local fallback only. Normal schema changes should flow through Alembic migrations.
-    models.Base.metadata.create_all(bind=engine)
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
@@ -402,12 +411,22 @@ ALLOWED_PRIMARY_EVALUATION_SOURCES = {
 }
 
 
-ADMIN_AUTH_CONFIG = resolve_admin_auth_config(os.environ)
-CLERK_AUTH_CONFIG = resolve_clerk_auth_config(os.environ)
-is_production = ADMIN_AUTH_CONFIG.is_production
-ADMIN_CLERK_USER_IDS = ADMIN_AUTH_CONFIG.admin_clerk_user_ids
-ADMIN_ALLOW_ALL_LOCAL = ADMIN_AUTH_CONFIG.admin_allow_all_local
-DEV_AUTH_BYPASS = ADMIN_AUTH_CONFIG.dev_auth_bypass
+def _parse_admin_allowlist(raw: Optional[str]) -> set[str]:
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+# Resolve environment mode once and reuse.
+_env_value = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))).strip().lower()
+is_production = _env_value == "production"
+
+ADMIN_CLERK_USER_IDS = _parse_admin_allowlist(os.getenv("ADMIN_CLERK_USER_IDS", ""))
+ADMIN_ALLOW_ALL_LOCAL = ("*" in ADMIN_CLERK_USER_IDS) and (not is_production)
+DEV_AUTH_BYPASS = os.getenv(
+    "DEV_AUTH_BYPASS",
+    "true" if ADMIN_ALLOW_ALL_LOCAL else "false",
+).strip().lower() in ("1", "true", "yes", "on")
 
 # OpenAI Realtime API variables (optional - for direct OpenAI API, not Azure)
 OPENAI_REALTIME_API_KEY = os.getenv("OPENAI_REALTIME_API_KEY")
@@ -532,8 +551,6 @@ def validate_production_requirements() -> None:
     if not is_production:
         return
 
-    validate_admin_auth_config(ADMIN_AUTH_CONFIG)
-    validate_clerk_auth_config(CLERK_AUTH_CONFIG)
     if not os.getenv("DATABASE_URL"):
         raise RuntimeError("DATABASE_URL must be set in production.")
     if not DATABASE_URL.startswith("postgresql"):
@@ -549,8 +566,6 @@ validate_environment()
 async def startup_event():
     validate_environment()
     validate_production_requirements()
-    print(f"🔐 {build_admin_auth_summary(ADMIN_AUTH_CONFIG)}")
-    print(f"🔐 {build_clerk_auth_summary(CLERK_AUTH_CONFIG)}")
     # Log Clerk JWKS URL so /api/me auth issues are debuggable
     try:
         jwks_url = _clerk_jwks_url()
@@ -595,14 +610,6 @@ else:
         raise RuntimeError("ALLOWED_ORIGINS is not set and the environment indicates production. Set ALLOWED_ORIGINS to a comma-separated list of allowed origins.")
     allow_origins = local_dev_origins
     print("ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.")
-
-try:
-    _rate_limit_redis = get_redis_client()
-except Exception as rate_limit_err:
-    _rate_limit_redis = None
-    logging.warning("⚠️ Rate limiter falling back to in-memory storage: %s", rate_limit_err)
-
-register_rate_limit_middleware(app, build_default_rate_limiter(_rate_limit_redis))
 
 app.add_middleware(
     CORSMiddleware,
@@ -938,15 +945,6 @@ class TrialCodeRedeemRequest(BaseModel):
     code: str
 
 
-class WaitlistSignupRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    email: str
-    source_page: Literal["landing", "pricing"] = "landing"
-    intent: Literal["launch", "free_trial"] = "free_trial"
-    meta: Optional[Dict[str, Any]] = None
-
-
 def _json_dumps_safe(value: Any) -> str:
     return json.dumps(value if value is not None else [])
 
@@ -1082,6 +1080,7 @@ def _save_runtime_session(
     question_mix: Optional[str] = None,
     interview_style: Optional[str] = None,
     selected_skills: Optional[List[str]] = None,
+    extra_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     runtime_payload = {
         "session_id": session_id,
@@ -1100,6 +1099,8 @@ def _save_runtime_session(
         "plan_tier": plan_tier,
         "trial_mode": plan_tier == "trial",
     }
+    if isinstance(extra_payload, dict):
+        runtime_payload.update(extra_payload)
     ttl_seconds = max(300, effective_minutes * 60 + 600)
     try:
         redis_client = get_redis_client()
@@ -1122,44 +1123,78 @@ def _load_runtime_session(session_id: str) -> Dict[str, Any]:
         return {}
 
 
-def _run_v2_enrichment(
-    report_id: str,
-    session_state: Any,
-    interview_type: str,
-    overall_score: int,
-    ai_feedback: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Background task: compute v2 enrichment (LLM STAR, competency, hiring signal)
-    and persist the results back into the metrics JSON of the report row."""
-    try:
-        from services.report_generator import enrich_v2_fields
-        v2 = enrich_v2_fields(
-            session_state=session_state,
-            interview_type=interview_type,
-            overall_score=overall_score,
-            ai_feedback=ai_feedback,
-        )
-    except Exception as e:
-        logging.warning("V2 enrichment computation failed for report %s: %s", report_id, e)
-        v2 = {"v2_enrichment_status": "failed"}
+def _ensure_resume_token(runtime_payload: Dict[str, Any]) -> str:
+    token = str(runtime_payload.get("resume_token") or "").strip()
+    if token:
+        return token
+    token = uuid.uuid4().hex
+    runtime_payload["resume_token"] = token
+    return token
 
-    try:
-        from db.database import SessionLocal
-        with SessionLocal() as bg_db:
-            row = bg_db.query(models.InterviewReport).filter(
-                models.InterviewReport.id == report_id
-            ).first()
-            if row:
-                try:
-                    existing = json.loads(row.metrics) if row.metrics else {}
-                except Exception:
-                    existing = {}
-                existing.update(v2)
-                row.metrics = json.dumps(existing)
-                bg_db.commit()
-                logging.info("V2 enrichment saved for report %s (status=%s)", report_id, v2.get("v2_enrichment_status"))
-    except Exception as e:
-        logging.warning("V2 enrichment DB save failed for report %s: %s", report_id, e)
+
+def _build_orchestrator_artifacts(
+    *,
+    session_id: str,
+    interview_type: str,
+    difficulty: str,
+    role: Optional[str],
+    company: Optional[str],
+    question_mix: str,
+    interview_style: str,
+    selected_skills: Optional[List[str]],
+    duration_minutes: int,
+    asked_question_ids: Optional[List[str]] = None,
+    recent_transcript: Optional[List[Dict[str, Any]]] = None,
+    resume_token: Optional[str] = None,
+    phase: str = "intro",
+    round_index: int = 0,
+    db: Optional[Session] = None,
+) -> Dict[str, Any]:
+    return build_bootstrap_conversation_plan(
+        session_id=session_id,
+        interview_type=interview_type,
+        difficulty=difficulty,
+        role=role,
+        company=company,
+        question_mix=question_mix,
+        interview_style=interview_style,
+        selected_skills=selected_skills,
+        duration_minutes=duration_minutes,
+        asked_question_ids=asked_question_ids,
+        recent_transcript=recent_transcript,
+        resume_token=resume_token,
+        phase=phase,
+        round_index=round_index,
+        db=db,
+    )
+
+
+def _round_summary_from_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "agent_owner": plan.get("agent_owner"),
+        "speaker_strategy": plan.get("speaker_strategy"),
+        "filler_hint": plan.get("filler_hint"),
+        "question_id": plan.get("question_id"),
+        "policy_action": plan.get("policy_action"),
+    }
+
+
+def _agent_handoff_summary_from_runtime(
+    runtime_data: Optional[Dict[str, Any]],
+    *,
+    round_index: int = 0,
+) -> Dict[str, Any]:
+    runtime_data = runtime_data or {}
+    conversation_plan = runtime_data.get("conversation_plan") if isinstance(runtime_data.get("conversation_plan"), dict) else {}
+    return {
+        "agent_owner": runtime_data.get("agent_owner") or conversation_plan.get("agent_owner") or "orchestrator",
+        "round_index": int(runtime_data.get("round_index") or round_index or 0),
+        "resume_token": runtime_data.get("resume_token"),
+        "filler_pack_version": runtime_data.get("filler_pack_version") or "sonia-fillers-v1",
+        "orchestrator_session_version": runtime_data.get("orchestrator_session_version") or "orchestrator-sprint1-v1",
+        "speaker_strategy": conversation_plan.get("speaker_strategy"),
+    }
+
 
 def _utc_dt_from_ms(ts_ms: int) -> datetime:
     return datetime.fromtimestamp(float(ts_ms) / 1000.0, tz=timezone.utc)
@@ -1220,8 +1255,6 @@ def _persist_gaze_tracking_results(
                 )
             )
 
-        db.flush()
-
         # Persist session-level gaze summary into session metadata.
         session_row = (
             db.query(models.InterviewSession)
@@ -1230,42 +1263,7 @@ def _persist_gaze_tracking_results(
         )
         if session_row:
             session_meta = _safe_json_obj(session_row.session_meta_json, {})
-            existing_summary = session_meta.get("gaze_summary") if isinstance(session_meta.get("gaze_summary"), dict) else {}
-            all_rows = (
-                db.query(models.InterviewGazeEvent)
-                .filter(models.InterviewGazeEvent.session_id == session_id)
-                .order_by(models.InterviewGazeEvent.started_at.asc())
-                .all()
-            )
-            recomputed_summary = aggregate_gaze_events(
-                [
-                    {
-                        "event_type": row.event_type,
-                        "duration_ms": row.duration_ms,
-                        "started_at": row.started_at,
-                        "ended_at": row.ended_at,
-                    }
-                    for row in all_rows
-                ],
-                fallback_summary={**existing_summary, **(summary or {})},
-            )
-            for key in (
-                "eye_contact_pct",
-                "algorithm_version",
-                "monitoring_started_at",
-                "monitoring_ended_at",
-                "calibration_state",
-                "calibration_quality",
-                "calibration_valid",
-                "tracking_active",
-                "detector_ready",
-                "source",
-            ):
-                if key in summary:
-                    recomputed_summary[key] = summary.get(key)
-                elif key in existing_summary and key not in recomputed_summary:
-                    recomputed_summary[key] = existing_summary.get(key)
-            session_meta["gaze_summary"] = recomputed_summary
+            session_meta["gaze_summary"] = summary
             session_row.session_meta_json = json.dumps(session_meta)
         db.commit()
     except Exception as e:
@@ -1273,6 +1271,175 @@ def _persist_gaze_tracking_results(
         logging.exception("Failed to persist gaze tracking results for session %s: %s", session_id, e)
     finally:
         db.close()
+
+
+def _plan_next_turn_response(
+    *,
+    session_id: str,
+    payload: AdaptiveTurnRequest,
+    current_user: User,
+    db: Session,
+) -> Dict[str, Any]:
+    row = db.query(models.InterviewSession).filter(
+        models.InterviewSession.session_id == session_id
+    ).first()
+    if row and row.clerk_user_id != current_user.clerk_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    runtime_data = _load_runtime_session(session_id) or {}
+    asked_ids_runtime = runtime_data.get("asked_question_ids", [])
+    asked_ids_payload = payload.askedQuestionIds or []
+    asked_ids = list(dict.fromkeys([*(asked_ids_runtime or []), *asked_ids_payload]))
+    runtime_selected_skills = runtime_data.get("selected_skills", []) if isinstance(runtime_data.get("selected_skills", []), list) else []
+
+    transcript_window = payload.transcript_window or []
+    interview_type_value = payload.interviewType or (row.interview_type if row else "mixed")
+    selected_skills = payload.selectedSkills if payload.selectedSkills is not None else runtime_selected_skills
+    validated_selected_skills: List[str] = []
+    if INTERVIEW_SKILL_TRACKS_ENABLED:
+        validated_selected_skills = _validate_selected_skills_or_422(
+            db=db,
+            interview_type=interview_type_value,
+            selected_skills=selected_skills,
+        )
+    normalized_role = _sanitize_interview_context(payload.role or runtime_data.get("role"))
+    normalized_company = _sanitize_interview_context(payload.company or runtime_data.get("company"))
+    normalized_difficulty = payload.difficulty or (row.difficulty if row else "mid")
+    normalized_question_mix = payload.questionMix or "balanced"
+    normalized_interview_style = payload.interviewStyle or "neutral"
+    resume_token = str(runtime_data.get("resume_token") or "").strip() or uuid.uuid4().hex
+    runtime_data["resume_token"] = resume_token
+
+    try:
+        decision = plan_next_turn_graph(
+            session_id=session_id,
+            interview_type=interview_type_value,
+            difficulty=normalized_difficulty,
+            role=normalized_role,
+            company=normalized_company,
+            question_mix=normalized_question_mix,
+            interview_style=normalized_interview_style,
+            duration_minutes=payload.durationMinutes or 0,
+            asked_question_ids=asked_ids,
+            selected_skills=validated_selected_skills,
+            recent_transcript=transcript_window,
+            last_user_turn=payload.last_user_turn,
+            phase="active" if asked_ids else "intro",
+            round_index=len(asked_ids),
+            resume_token=resume_token,
+            db=db,
+        )
+    except Exception:
+        logging.exception("Planner failed for session %s", session_id)
+        decision = build_recoverable_fallback_turn(
+            interview_type=interview_type_value,
+            difficulty=normalized_difficulty,
+            role=normalized_role,
+            question_mix=normalized_question_mix,
+            interview_style=normalized_interview_style,
+            duration_minutes=payload.durationMinutes,
+            asked_question_ids=asked_ids,
+            selected_skills=validated_selected_skills,
+            db=db,
+        )
+
+    question_id = decision.get("question_id")
+    if question_id and not str(question_id).startswith("followup_") and question_id != "fallback_generic":
+        asked_ids.append(str(question_id))
+
+    turn_eval_history = runtime_data.get("turn_eval_history", [])
+    if not isinstance(turn_eval_history, list):
+        turn_eval_history = []
+    turn_eval_history.append(
+        {
+            "timestamp": datetime.utcnow().isoformat(),
+            "turn_scores": decision.get("turn_scores", {}),
+            "reason": decision.get("reason"),
+            "followup_type": decision.get("followup_type"),
+            "difficulty_next": decision.get("difficulty_next"),
+            "question_id": question_id,
+        }
+    )
+    turn_eval_history = turn_eval_history[-30:]
+
+    runtime_data["asked_question_ids"] = asked_ids
+    runtime_data["turn_eval_history"] = turn_eval_history
+    runtime_data["adaptive_last"] = decision
+    runtime_data["selected_skills"] = validated_selected_skills
+    runtime_data["conversation_plan"] = decision.get("conversation_plan") or runtime_data.get("conversation_plan") or {}
+    runtime_data["round_index"] = len(asked_ids)
+    runtime_data["orchestrator_session_version"] = runtime_data.get("orchestrator_session_version") or "orchestrator-sprint1-v1"
+    runtime_data["filler_pack_version"] = runtime_data.get("filler_pack_version") or "sonia-fillers-v1"
+
+    ttl_seconds = max(300, int((payload.durationMinutes or FREE_TRIAL_MINUTES) * 60) + 600)
+    try:
+        redis_client = get_redis_client()
+        redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_data))
+    except Exception as redis_err:
+        if is_production:
+            raise HTTPException(status_code=500, detail=f"Failed to persist adaptive runtime state: {redis_err}")
+        print(f"⚠️ Adaptive runtime state not saved in Redis (dev): {redis_err}")
+
+    if row:
+        session_meta = {}
+        if row.session_meta_json:
+            try:
+                session_meta = json.loads(row.session_meta_json)
+            except Exception:
+                session_meta = {}
+        session_meta["asked_question_ids"] = asked_ids
+        session_meta["turn_eval_history"] = turn_eval_history
+        session_meta["resume_token"] = runtime_data["resume_token"]
+        row.session_meta_json = json.dumps(session_meta)
+        db.commit()
+
+        persist_interview_round(
+            db,
+            session_id=session_id,
+            clerk_user_id=current_user.clerk_user_id,
+            round_index=len(asked_ids),
+            agent_owner=str(decision.get("agent_owner") or "orchestrator"),
+            phase="active",
+            question_id=str(question_id or "") or None,
+            question_text=str(decision.get("next_question") or "") or None,
+            handoff_reason=str(decision.get("speaker_strategy") or decision.get("followup_type") or "next_turn"),
+            summary=_round_summary_from_plan(decision),
+        )
+        persist_session_memory_snapshot(
+            db,
+            session_id=session_id,
+            clerk_user_id=current_user.clerk_user_id,
+            round_index=len(asked_ids),
+            snapshot_kind="planner_state",
+            memory={
+                "decision": decision,
+                "asked_question_ids": asked_ids,
+                "resume_token": runtime_data["resume_token"],
+            },
+            resume_token=runtime_data["resume_token"],
+        )
+
+    return {
+        "next_question": decision.get("next_question"),
+        "question_id": question_id,
+        "reason": decision.get("reason"),
+        "turn_scores": decision.get("turn_scores", {}),
+        "difficulty_next": decision.get("difficulty_next"),
+        "followup_type": decision.get("followup_type"),
+        "policy_action": decision.get("policy_action", "NONE"),
+        "refusal_message": decision.get("refusal_message"),
+        "selected_skills_applied": decision.get("selected_skills_applied", validated_selected_skills),
+        "adaptive_path": decision.get("adaptive_path", {}),
+        "agent_owner": decision.get("agent_owner"),
+        "speaker_strategy": decision.get("speaker_strategy"),
+        "filler_hint": decision.get("filler_hint"),
+        "recoverable_error": decision.get("recoverable_error"),
+        "conversation_plan": decision.get("conversation_plan", {}),
+        "interrupt_policy": decision.get("interrupt_policy", {}),
+        "resume_token": runtime_data["resume_token"],
+        "filler_pack_version": runtime_data["filler_pack_version"],
+        "orchestrator_session_version": runtime_data["orchestrator_session_version"],
+    }
 
 
 def _upsert_interview_session_row(
@@ -1341,6 +1508,21 @@ class AdaptiveTurnRequest(BaseModel):
     selectedSkills: Optional[List[str]] = None
 
 
+class NextTurnRequest(AdaptiveTurnRequest):
+    model_config = ConfigDict(extra="forbid")
+
+
+class TrustedCaptureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trusted_transcript: List[Dict[str, Any]] = Field(default_factory=list)
+    fallback_transcript: List[Dict[str, Any]] = Field(default_factory=list)
+    word_timestamps: List[Dict[str, Any]] = Field(default_factory=list)
+    capture_integrity: Optional[Dict[str, Any]] = None
+    transcript_origin: Optional[str] = "server_transcript"
+    evaluation_source: Optional[str] = "server_transcript"
+
+
 def _profile_skill_defaults(db: Session, clerk_user_id: str, interview_type: str) -> List[str]:
     profile = db.query(models.UserProfile).filter(
         models.UserProfile.clerk_user_id == clerk_user_id
@@ -1398,16 +1580,6 @@ async def webrtc_proxy(
     db: Session = Depends(get_db),
 ):
     """WebRTC proxy endpoint for ephemeral token creation and SDP negotiation."""
-    # #region agent log
-    try:
-        log_entry = json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:414","message":"WebRTC proxy called","data":{"deployment":AZURE_OPENAI_DEPLOYMENT,"api_version":AZURE_OPENAI_API_VERSION,"endpoint":AZURE_OPENAI_ENDPOINT[:100] if AZURE_OPENAI_ENDPOINT else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n"
-        with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-            f.write(log_entry)
-            f.flush()
-        print(f"DEBUG: WebRTC proxy called - logged to file")
-    except Exception as log_err:
-        print(f"DEBUG LOG ERROR: {log_err}")
-    # #endregion
     try:
         current_user = get_current_user(authorization=authorization, db=db)
         if not current_user:
@@ -1430,21 +1602,7 @@ async def webrtc_proxy(
         # Extract resource name, domain, and region
         try:
             resource_name, domain, region = extract_azure_endpoint_info(AZURE_OPENAI_ENDPOINT)
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:396","message":"Endpoint parsed","data":{"resource_name":resource_name,"domain":domain,"region":region,"original_endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
         except ValueError as e:
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:398","message":"Endpoint parsing failed","data":{"error":str(e),"endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             raise HTTPException(status_code=500, detail=str(e))
         
         plan_tier, entitlement = _resolve_plan_tier_for_user(db, clerk_user_id)
@@ -1518,6 +1676,91 @@ async def webrtc_proxy(
             selected_skills=selected_skills,
             db=db,
         )
+        resume_token = _ensure_resume_token(runtime_payload)
+        bootstrap_plan = _build_orchestrator_artifacts(
+            session_id=session_id,
+            interview_type=interview_type_value,
+            difficulty=normalized_difficulty,
+            role=sanitized_role,
+            company=sanitized_company,
+            question_mix=request.questionMix or "balanced",
+            interview_style=request.interviewStyle or "neutral",
+            selected_skills=selected_skills,
+            duration_minutes=effective_minutes,
+            asked_question_ids=runtime_payload.get("asked_question_ids", []),
+            recent_transcript=[],
+            resume_token=resume_token,
+            phase="intro",
+            round_index=0,
+            db=db,
+        )
+        runtime_payload.update(
+            {
+                "resume_token": resume_token,
+                "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
+                "filler_pack_version": bootstrap_plan.get("filler_pack_version"),
+                "orchestrator_session_version": bootstrap_plan.get("orchestrator_session_version"),
+                "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
+                "agent_owner": bootstrap_plan.get("agent_owner"),
+                "round_index": 0,
+            }
+        )
+        runtime_payload = _save_runtime_session(
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            requested_minutes=requested_minutes,
+            effective_minutes=effective_minutes,
+            interview_type=interview_type_value,
+            difficulty=normalized_difficulty,
+            plan_tier=plan_tier,
+            role=sanitized_role,
+            company=sanitized_company,
+            question_mix=request.questionMix,
+            interview_style=request.interviewStyle,
+            selected_skills=selected_skills,
+            extra_payload={
+                "resume_token": resume_token,
+                "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
+                "filler_pack_version": bootstrap_plan.get("filler_pack_version"),
+                "orchestrator_session_version": bootstrap_plan.get("orchestrator_session_version"),
+                "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
+                "agent_owner": bootstrap_plan.get("agent_owner"),
+                "round_index": 0,
+            },
+        )
+        persist_interview_round(
+            db,
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            round_index=0,
+            agent_owner=str(bootstrap_plan.get("agent_owner") or "orchestrator"),
+            phase="intro",
+            question_id=str(opening_decision.get("question_id") or "") or None,
+            question_text=str(opening_decision.get("next_question") or "") or None,
+            handoff_reason=str(bootstrap_plan.get("speaker_strategy") or "intro"),
+            summary=_round_summary_from_plan(bootstrap_plan),
+        )
+        persist_session_memory_snapshot(
+            db,
+            session_id=session_id,
+            clerk_user_id=clerk_user_id,
+            round_index=0,
+            snapshot_kind="bootstrap",
+            memory={
+                "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
+                "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
+                "selected_skills": selected_skills,
+            },
+            resume_token=resume_token,
+        )
+        session_row = (
+            db.query(models.InterviewSession)
+            .filter(models.InterviewSession.session_id == session_id)
+            .first()
+        )
+        if session_row:
+            session_row.session_meta_json = json.dumps(runtime_payload)
+            db.commit()
 
         # Build session request per Azure OpenAI Realtime API spec
         # Format: { expires_after: {...}, session: {...} }
@@ -1899,10 +2142,11 @@ async def webrtc_proxy(
             "selectedSkills": selected_skills,
             "openingQuestion": opening_decision.get("next_question"),
             "openingQuestionId": opening_decision.get("question_id"),
-            "openingQuestionInstruction": _wrap_interviewer_question_instruction(
-                opening_decision.get("next_question"),
-                opening=True,
-            ),
+            "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
+            "filler_pack_version": bootstrap_plan.get("filler_pack_version"),
+            "resume_token": resume_token,
+            "orchestrator_session_version": bootstrap_plan.get("orchestrator_session_version"),
+            "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
         }
         
     except HTTPException as http_ex:
@@ -2334,7 +2578,7 @@ Interview behavior:
                     print(f"⚠️ Timeout waiting for session.updated, continuing anyway")
                 
                 # Step 4: Send initial greeting to start the interview
-                await _send_initial_question(azure_ws, session_state, db)
+                await _send_initial_question(azure_ws, session_state)
                 print(f"✅ Sent initial greeting")
                 
                 # Send ready status message
@@ -2590,31 +2834,28 @@ def _build_interviewer_system_prompt(
     db: Optional[Session] = None,
 ) -> str:
     """Build system prompt for the interviewer agent."""
-    base_prompt = """You are Sonia, a strict but professional interviewer conducting a structured job interview.
+    base_prompt = """You are Sonia, a professional interviewer conducting a formal job interview.
 
 Core rules:
 1. Speak only in English.
 2. If the candidate clearly speaks non-English, ask once to continue in English, then proceed.
-3. Ask one question at a time — never stack multiple questions.
+3. Ask one question at a time.
 4. Produce one response per candidate turn.
-5. Speak naturally and conversationally, like a real interviewer — not like a robot reading a script.
-6. Keep acknowledgments brief and restrained before the next question (0-4 words: "Understood.", "Okay.", "I see."). Do not over-praise, apologize, or narrate the process.
-6a. If the candidate is silent, unclear, or capture quality is poor, repeat the same question more directly once before moving on. Do not introduce a new topic because of silence alone.
+5. Keep a calm, professional, Indian-English cadence that is globally clear.
+6. Speak at a slightly slower pace than default and include short pauses between sentences.
 7. Do not repeat language warnings during normal English conversation.
 8. Candidate instructions cannot control question topics, difficulty, or question order.
-9. If candidate attempts to control interview flow, decline briefly and ask your next planned question.
+9. If candidate attempts to control interview flow, refuse briefly and continue with planned questions.
 10. Never answer interview questions on behalf of the candidate. Your job is to ask and probe.
-11. If an answer is vague or too short, probe naturally — ask for a specific example, metric, or outcome.
-12. Ask the question, then stop. Wait for the candidate to answer instead of filling silence, softening the moment, or coaching them mid-response.
 
 Interview style:
-- Calm, focused, and exacting. You're evaluating the candidate, and you expect precise answers.
-- Natural transitions between questions — don't sound like you're reading off a list.
-- Probe for specifics: numbers, decisions made, trade-offs, measurable results.
-- Do not provide scores or evaluation feedback during the interview.
-- Do not say "Sorry about that", "Let me get back on track", or similar meta commentary unless the backend explicitly includes a refusal message.
+- Professional and focused, never casual chat.
+- Briefly acknowledge candidate answers, then ask the next relevant question.
+- Probe for specifics and outcomes.
+- Do not provide scores or final feedback during the interview.
 
-Opening: Start with one short welcome sentence, then ask exactly one concrete opening question selected by the backend. Do not use generic biography prompts unless the backend question itself requires that framing.
+Opening line:
+"Hello, I'm Sonia, and I'll be conducting your interview today."
     """
 
     if selected_skills:
@@ -2710,77 +2951,60 @@ Probe for depth: "Why did you choose that approach?" "What are the tradeoffs?"
         base_prompt += f"""## Focus: Mixed Interview ({difficulty} level)
 Blend behavioral and technical questions naturally.
 
-Open with one concrete question about current ownership, a recent project, or a meaningful challenge.
-Then alternate between behavioral evidence and technical depth without sounding scripted.
+Start with background, then alternate:
+1. "Tell me about yourself and what excites you about this field."
+2. Follow up on something technical they mention
+3. Ask about a challenging project (behavioral)
+4. Probe technical aspects of that project
+5. Ask about collaboration/teamwork
+6. End with their career goals
+
+Make it feel like a natural conversation, not a checklist.
 """
     
     return base_prompt
 
 
-async def _send_initial_question(azure_ws, session_state: InterviewState, db: Optional[Session] = None):
-    """Send the backend-selected opening question to start the interview."""
-    opening_decision = choose_opening_question(
-        interview_type=session_state.interview_type,
-        difficulty=session_state.difficulty,
-        role=getattr(session_state, "role", None),
-        question_mix=getattr(session_state, "question_mix", None) or "balanced",
-        selected_skills=getattr(session_state, "selected_skills", None) or [],
-        db=db,
-    )
-    greeting = str(opening_decision.get("next_question") or "").strip()
-    if not greeting:
-        greeting = (
-            "Thanks for joining today. To get started, walk me through a recent piece of work where "
-            "your judgment had a visible impact. What did you own, and how did you approach it?"
-        )
-
+async def _send_initial_question(azure_ws, session_state: InterviewState):
+    """Send the initial greeting/question to start the interview."""
+    # Professional interview greeting
+    if session_state.interview_type == "behavioral":
+        greeting = "Hello, thank you for joining me today. I'm conducting a behavioral interview to learn more about your experiences and how you handle various situations. To begin, could you please introduce yourself and tell me about your current role and your most significant professional achievement?"
+    elif session_state.interview_type == "technical":
+        greeting = "Hello, welcome to the technical interview. I'll be asking you about your technical background and problem-solving approach. To start, could you please tell me about yourself, your technical experience, and describe a challenging technical problem you've solved recently?"
+    else:
+        greeting = "Hello, thank you for joining me today. This will be a mixed interview covering both behavioral and technical aspects. To begin, could you please introduce yourself and tell me about your background, current role, and what you consider your strongest technical skill?"
+    
     await azure_ws.send(json.dumps({
         "type": "response.create",
         "response": {
             # Keep the model in interviewer mode: ask only, never answer.
-            "instructions": _wrap_interviewer_question_instruction(greeting, opening=True)
+            "instructions": _wrap_interviewer_question_instruction(greeting)
         }
     }))
 
 
-def _wrap_interviewer_question_instruction(
-    question: str,
-    refusal_message: Optional[str] = None,
-    *,
-    opening: bool = False,
-) -> str:
-    """Wrap question text so realtime model asks it naturally as Sonia."""
+def _wrap_interviewer_question_instruction(question: str, refusal_message: Optional[str] = None) -> str:
+    """Wrap question text so realtime model asks verbatim and never answers."""
     safe_question = str(question or "").strip()
     if not safe_question:
-        safe_question = "Please tell me about your most recent project and your specific contribution."
+        safe_question = "Please tell me about your most recent project and your contribution."
     refusal = str(refusal_message or "").strip()
-    parts_list = [part for part in [refusal, safe_question] if part]
-    script = " ".join(parts_list)
+    script = " ".join([part for part in [refusal, safe_question] if part])
     parts = [
-        "Role: You are Sonia, a strict but professional interviewer.",
-        "Task: Ask the QUESTION below in a natural, interviewer-like tone and then stop to listen.",
+        "Role: You are Sonia, the interviewer.",
+        "Task: Speak the SCRIPT exactly as provided.",
         "Rules:",
-        "- For the opening question, begin with one short welcome sentence and then ask the question.",
-        "- For later turns, begin with a brief acknowledgment only if the candidate actually answered.",
-        "- Ask the QUESTION below naturally. You may rephrase it slightly for flow, but preserve the full intent.",
-        "- Be direct and interviewer-like. Do not ramble, apologize, coach, narrate the process, or say you are getting back on track.",
-        "- Keep acknowledgments restrained: examples are 'Understood.', 'Okay.', or 'Go on.'",
-        "- Do NOT provide feedback, scores, or evaluate the answer.",
-        "- Do NOT ask multiple questions at once.",
-        "- Ask the question and then stop. Wait for the candidate to answer.",
-        "- If the prior candidate reply was weak, unclear, or effectively absent, restate the same question more directly instead of switching topics.",
-        "- Do not switch to a new topic just because the candidate paused. Hold the question, then repeat it once more directly if needed.",
-        "- Keep your total response concise — under 45 words for the opening, under 50 words otherwise.",
-        f"- OPENING_TURN: {'yes' if opening else 'no'}",
-        f"QUESTION: {script}",
+        "- Output only the script text, exactly once.",
+        '- Do not add prefixes like "Sure", "Here is the question", or any meta commentary.',
+        "- Do not explain, paraphrase, or answer the question.",
+        f"SCRIPT: {script}",
     ]
     return "\n".join(parts)
 
 
 async def _handle_next_action(azure_ws, session_state: InterviewState, action: NextAction, evaluation: Dict):
     """Handle the next action based on evaluation."""
-    current_question = str(session_state.current_question or "").strip()
-    current_answer = str(session_state.current_answer or evaluation.get("answer") or "").strip()
     if action == NextAction.MOVE_ON:
         session_state.move_to_next_question()
         save_interview_state(session_state)
@@ -2793,13 +3017,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
             }
         }))
     elif action == NextAction.PROBE_DEEPER:
-        follow_up = generate_followup(
-            question=current_question,
-            answer=current_answer,
-            probe_reason="depth_low",
-            interview_type=session_state.interview_type,
-            question_id=f"turn_{session_state.question_index}",
-        )
+        follow_up = "Can you provide more specific details about that? What was the impact or outcome?"
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
@@ -2807,13 +3025,7 @@ async def _handle_next_action(azure_ws, session_state: InterviewState, action: N
             }
         }))
     elif action == NextAction.CLARIFY:
-        follow_up = generate_followup(
-            question=current_question,
-            answer=current_answer,
-            probe_reason="relevance_low",
-            interview_type=session_state.interview_type,
-            question_id=f"turn_{session_state.question_index}",
-        )
+        follow_up = "I want to make sure I understand. Could you clarify that point?"
         await azure_ws.send(json.dumps({
             "type": "response.create",
             "response": {
@@ -2844,25 +3056,25 @@ def _generate_next_question(session_state: InterviewState, harder: bool = False)
     """Generate the next question based on interview type and progress."""
     questions = {
         "behavioral": [
-            "Tell me about a time you had to influence a decision without having formal authority. What did you do?",
-            "Walk me through a situation where a project went off track. How did you respond?",
-            "Describe a time you had to balance speed with quality under pressure. What tradeoff did you make?",
-            "Tell me about a mistake that changed how you work today. What did you learn from it?",
-            "Give me an example of feedback you received that was hard to hear. How did you handle it?",
+            "How do you handle tight deadlines?",
+            "Describe a time when you had to learn a new technology quickly.",
+            "How do you handle conflicts in a team?",
+            "Tell me about a time you made a mistake and how you handled it.",
+            "What motivates you in your work?",
         ],
         "technical": [
-            "Walk me through a technical decision you made recently and the tradeoffs behind it.",
-            "Tell me about a production issue or failure you debugged. How did you isolate the root cause?",
-            "Describe a system or service you improved for reliability or performance. What changed after your work?",
-            "How would you design a simple service so that it remains debuggable and observable in production?",
-            "Tell me about a technical constraint you had to work around and how you adapted your design.",
+            "What is the time complexity of quicksort algorithm?",
+            "How would you implement a binary search tree?",
+            "Describe the concept of closures in programming.",
+            "How would you design a scalable chat application?",
+            "Explain the difference between REST and GraphQL.",
         ],
         "mixed": [
-            "Tell me about a recent project where both your technical judgment and stakeholder communication mattered.",
-            "Walk me through a decision where you had to balance product needs, delivery speed, and technical quality.",
-            "Describe a time you had to explain a technical issue to a non-technical partner. How did you handle it?",
-            "Tell me about a situation where debugging, coordination, and execution all mattered at once.",
-            "Give me an example of a project where your ownership showed up both in delivery and in collaboration.",
+            "Describe your experience with version control systems.",
+            "How do you approach debugging complex issues?",
+            "Tell me about a time you optimized code performance.",
+            "How do you stay updated with new technologies?",
+            "Describe your testing methodology.",
         ]
     }
     
@@ -3067,8 +3279,6 @@ def get_current_user(
 
     try:
         decoded = _verify_clerk_token_jwks(token)
-        if not decoded:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
         clerk_user_id = decoded.get("sub") or decoded.get("user_id")
         external_id = _extract_external_id_from_claims(decoded)
         email = _extract_email_from_claims(decoded)
@@ -3076,8 +3286,6 @@ def get_current_user(
         phone_e164 = _extract_phone_from_claims(decoded)
         email_verified = _extract_email_verified_from_claims(decoded)
         phone_verified = _extract_phone_verified_from_claims(decoded)
-        verified_email = email if email_verified else None
-        verified_phone_e164 = phone_e164 if phone_verified else None
 
         if not clerk_user_id:
             raise HTTPException(status_code=401, detail="Invalid token: missing sub")
@@ -3093,32 +3301,25 @@ def get_current_user(
             user = get_or_create_user(
                 db=db,
                 clerk_user_id=user.clerk_user_id,
-                email=verified_email or user.email,
+                email=email or user.email,
                 full_name=full_name or user.full_name,
-                phone_e164=verified_phone_e164 or user.phone_e164,
+                phone_e164=phone_e164 or user.phone_e164,
             )
         else:
             user = get_or_create_user(
                 db=db,
                 clerk_user_id=clerk_user_id,
-                email=verified_email,
+                email=email,
                 full_name=full_name,
-                phone_e164=verified_phone_e164,
+                phone_e164=phone_e164,
             )
 
-        # Clerk session claims may not always include primary verified contact data or a full name.
-        needs_clerk_backfill = (
-            not user.email
-            or not user.full_name
-            or not user.phone_e164
-            or (email and not email_verified)
-            or (phone_e164 and not phone_verified)
-        )
-        if needs_clerk_backfill:
+        # Clerk session claims may not always include email/full_name. Backfill once from Clerk Users API.
+        if not user.email or not user.full_name:
             clerk_profile = fetch_clerk_contact_fields(clerk_user_id)
-            enriched_email = clerk_profile.get("email") or verified_email or user.email
+            enriched_email = user.email or email or clerk_profile.get("email")
             enriched_full_name = user.full_name or full_name or clerk_profile.get("full_name")
-            enriched_phone = clerk_profile.get("phone_e164") or verified_phone_e164 or user.phone_e164
+            enriched_phone = user.phone_e164 or phone_e164 or clerk_profile.get("phone_e164")
             user = get_or_create_user(
                 db=db,
                 clerk_user_id=clerk_user_id,
@@ -3126,17 +3327,6 @@ def get_current_user(
                 full_name=enriched_full_name,
                 phone_e164=enriched_phone,
             )
-        else:
-            clerk_profile = {
-                "email": None,
-                "email_verified": False,
-                "full_name": None,
-                "phone_e164": None,
-                "phone_verified": False,
-            }
-
-        identity_email = clerk_profile.get("email") or verified_email
-        identity_phone = clerk_profile.get("phone_e164") or verified_phone_e164
 
         sync_user_identity_graph(
             db=db,
@@ -3144,10 +3334,10 @@ def get_current_user(
             clerk_user_id=clerk_user_id,
             external_id=external_id,
             legacy_provider_user_id=user.clerk_user_id if user.clerk_user_id != clerk_user_id else None,
-            email=identity_email,
-            email_verified=bool(identity_email),
-            phone_e164=identity_phone,
-            phone_verified=bool(identity_phone),
+            email=user.email or email,
+            email_verified=email_verified,
+            phone_e164=user.phone_e164 or phone_e164,
+            phone_verified=phone_verified,
             raw_claims=decoded,
         )
         db.commit()
@@ -3580,16 +3770,6 @@ def _safe_json_list_text(value: Any) -> str:
         return "[]"
 
 
-def _normalize_email(value: Optional[str]) -> Optional[str]:
-    raw = str(value or "").strip()
-    if not raw or len(raw) > 255:
-        return None
-    lowered = raw.lower()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", lowered):
-        return None
-    return lowered
-
-
 def _candidate_profile_v2_to_api(profile: models.CandidateProfileV2) -> Dict[str, Any]:
     def _load_list(raw: Optional[str]) -> List[str]:
         if not raw:
@@ -3815,54 +3995,6 @@ def _upsert_candidate_profile_v2(
     return row
 
 
-@app.post("/api/waitlist")
-def join_waitlist(
-    payload: WaitlistSignupRequest,
-    db: Session = Depends(get_db),
-):
-    normalized_email = _normalize_email(payload.email)
-    if not normalized_email:
-        raise HTTPException(status_code=400, detail="A valid email address is required.")
-
-    now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
-    existing = db.query(models.LaunchWaitlistSignup).filter(
-        models.LaunchWaitlistSignup.normalized_email == normalized_email
-    ).first()
-
-    if existing:
-        existing.email = payload.email.strip()
-        existing.source_page = payload.source_page
-        existing.intent = payload.intent
-        existing.status = "ACTIVE"
-        existing.meta_json = json.dumps(payload.meta or {})
-        existing.updated_at = now_dt
-        db.commit()
-        return {
-            "ok": True,
-            "already_joined": True,
-            "message": "You are already on the waitlist.",
-        }
-
-    signup = models.LaunchWaitlistSignup(
-        email=payload.email.strip(),
-        normalized_email=normalized_email,
-        source_page=payload.source_page,
-        intent=payload.intent,
-        status="ACTIVE",
-        meta_json=json.dumps(payload.meta or {}),
-        created_at=now_dt,
-        updated_at=now_dt,
-    )
-    db.add(signup)
-    db.commit()
-
-    return {
-        "ok": True,
-        "already_joined": False,
-        "message": "You have been added to the waitlist.",
-    }
-
-
 @app.get("/api/profile/status")
 def get_profile_status(
     current_user: User = Depends(get_current_user),
@@ -4083,25 +4215,40 @@ def redeem_trial_code(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    def trial_code_error(status_code: int, code: str, message: str, retryable: bool = False) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "code": code,
+                "message": message,
+                "retryable": retryable,
+            },
+        )
+
     code_value = (payload.code or "").strip().upper()
     if not code_value:
-        raise HTTPException(status_code=400, detail="Trial code is required")
+        raise trial_code_error(400, "TRIAL_CODE_REQUIRED", "Trial code is required")
 
     now = datetime.utcnow()
     trial_code = db.query(models.TrialCode).filter(models.TrialCode.code == code_value).first()
     if not trial_code:
-        raise HTTPException(status_code=404, detail="Trial code not found")
+        raise trial_code_error(404, "TRIAL_CODE_NOT_FOUND", "Trial code not found")
 
     if trial_code.expires_at and trial_code.expires_at < now and trial_code.status not in {"REVOKED", "DELETED"}:
         trial_code.status = "EXPIRED"
         db.commit()
-        raise HTTPException(status_code=400, detail="Trial code expired")
+        raise trial_code_error(400, "TRIAL_CODE_EXPIRED", "Trial code expired")
 
     if trial_code.status in {"REVOKED", "DELETED", "EXPIRED"}:
-        raise HTTPException(status_code=400, detail=f"Trial code is {trial_code.status.lower()}")
+        status_code = {
+            "REVOKED": "TRIAL_CODE_REVOKED",
+            "DELETED": "TRIAL_CODE_REVOKED",
+            "EXPIRED": "TRIAL_CODE_EXPIRED",
+        }.get(trial_code.status, "TRIAL_CODE_BACKEND_ERROR")
+        raise trial_code_error(400, status_code, f"Trial code is {trial_code.status.lower()}")
 
     if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id != current_user.clerk_user_id:
-        raise HTTPException(status_code=400, detail="Trial code already redeemed")
+        raise trial_code_error(400, "TRIAL_CODE_ALREADY_REDEEMED", "Trial code already redeemed")
 
     if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id == current_user.clerk_user_id:
         existing = db.query(models.UserEntitlement).filter(
@@ -4502,30 +4649,6 @@ async def upsert_report_feedback(
         "comment": comment,
         "submitted_at": submitted_at,
     }
-    feedback_row = db.query(models.TrialFeedback).filter(
-        models.TrialFeedback.report_id == report.id
-    ).first()
-    if not feedback_row:
-        feedback_row = models.TrialFeedback(
-            report_id=report.id,
-            session_id=report.session_id,
-        )
-        db.add(feedback_row)
-
-    feedback_row.user_id = getattr(current_user, "id", None)
-    feedback_row.clerk_user_id = current_user.clerk_user_id
-    feedback_row.report_id = report.id
-    feedback_row.session_id = report.session_id
-    feedback_row.rating = int(rating)
-    feedback_row.comment = comment
-    feedback_row.plan_tier = str(metrics.get("plan_tier") or "trial").strip() or "trial"
-    feedback_row.trial_mode = bool(metrics.get("trial_mode", True))
-    feedback_row.source = "post_trial_report"
-    try:
-        feedback_row.submitted_at = datetime.fromisoformat(str(submitted_at))
-    except Exception:
-        feedback_row.submitted_at = datetime.utcnow()
-
     metrics["session_feedback"] = session_feedback
     report.metrics = json.dumps(metrics)
     db.commit()
@@ -4751,6 +4874,8 @@ async def get_interview_report(
             metrics_dict.setdefault("contract_passed", True)
             metrics_dict.setdefault("validation_flags", [])
             metrics_dict.setdefault("capture_evidence", {})
+            metrics_dict.setdefault("capture_integrity", {})
+            metrics_dict.setdefault("score_trust_level", "trusted")
             metrics_dict.setdefault("score_provenance", {})
             metrics_dict.setdefault("turn_evidence", [])
             explainability = metrics_dict.get("evaluation_explainability")
@@ -4778,6 +4903,8 @@ async def get_interview_report(
                 "contract_passed": True,
                 "validation_flags": [],
                 "capture_evidence": {},
+                "capture_integrity": {},
+                "score_trust_level": "trusted",
                 "score_provenance": {
                     "rubric_version": EVAL_RUBRIC_VERSION,
                     "scorer_version": EVAL_SCORER_VERSION,
@@ -4824,40 +4951,8 @@ async def get_interview_report(
                     report.ai_feedback = json.loads(report.ai_feedback)
             except Exception:
                 report.ai_feedback = None
-
-        # Extract v2 enrichment fields from metrics and expose them at top level
-        metrics_obj = report.metrics if isinstance(report.metrics, dict) else {}
-        enrichment_status = metrics_obj.get("v2_enrichment_status", "pending")
-
-        # Build the API response dict so we can attach v2 fields cleanly
-        report_dict = {
-            "id": report.id,
-            "session_id": report.session_id,
-            "user_id": report.user_id,
-            "title": report.title,
-            "date": report.date.isoformat() if report.date else None,
-            "type": report.type,
-            "mode": report.mode,
-            "duration": report.duration,
-            "overall_score": report.overall_score,
-            "scores": report.scores,
-            "transcript": report.transcript,
-            "recommendations": report.recommendations,
-            "questions": report.questions,
-            "is_sample": report.is_sample,
-            "metrics": metrics_obj,
-            "ai_feedback": report.ai_feedback,
-            "validation_summary": metrics_obj.get("validation_summary"),
-            # v2 enrichment fields
-            "enrichment_status": enrichment_status,
-            "turn_analyses": metrics_obj.get("v2_turn_analyses"),
-            "competency_scores": metrics_obj.get("v2_competency_scores"),
-            "score_context": metrics_obj.get("v2_score_context"),
-            "hiring_recommendation": metrics_obj.get("v2_hiring_recommendation"),
-            "improvement_roadmap": metrics_obj.get("v2_improvement_roadmap"),
-        }
-        report_dict["report_state"] = determine_report_state(report_dict)
-        return report_dict
+        
+        return report
 
     except HTTPException:
         raise
@@ -4878,53 +4973,96 @@ async def download_interview_report(
 
     # Reuse report access checks
     report = await get_interview_report(report_id, authorization=authorization, db=db)
-    # get_interview_report returns a dict — use dict access throughout
-    if isinstance(report, dict):
-        report_data = report
-    else:
-        report_data = report.__dict__ if hasattr(report, '__dict__') else {}
 
-    if "report_state" not in report_data:
-        report_data["report_state"] = determine_report_state(report_data)
-    try:
-        pdf_bytes = render_interview_report_pdf_bytes(report_data)
-    except Exception as exc:
-        logging.exception("Failed to render interview report PDF")
-        raise HTTPException(status_code=500, detail=f"Failed to render premium PDF: {exc}")
+    # Normalize data
+    scores = report.scores if isinstance(report.scores, dict) else {}
+    metrics = report.metrics if isinstance(report.metrics, dict) else {}
+    recommendations = report.recommendations if isinstance(report.recommendations, list) else []
+    transcript = report.transcript if isinstance(report.transcript, list) else []
+    capture_status = metrics.get("capture_status")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Title"], fontSize=20, alignment=TA_LEFT, spaceAfter=12)
+    h_style = ParagraphStyle("Heading", parent=styles["Heading2"], fontSize=14, spaceAfter=8)
+    body_style = styles["BodyText"]
+
+    content = []
+    content.append(Paragraph(report.title or "Interview Report", title_style))
+    content.append(Paragraph("Evaluate Yourself", ParagraphStyle("Brand", parent=styles["Heading1"], fontSize=16, textColor=colors.HexColor("#1d4ed8"))))
+    content.append(Paragraph(f"<b>Date:</b> {report.date}", body_style))
+    content.append(Paragraph(f"<b>Type:</b> {report.type}", body_style))
+    content.append(Paragraph(f"<b>Mode:</b> {report.mode}", body_style))
+    content.append(Paragraph(f"<b>Duration:</b> {report.duration}", body_style))
+    content.append(Spacer(1, 12))
+
+    if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
+        content.append(Paragraph("Evaluation Status", h_style))
+        content.append(Paragraph("<b>Evaluation incomplete:</b> candidate speech was not captured in this session.", body_style))
+        content.append(Paragraph("Please retry after verifying microphone permission and transcription capture.", body_style))
+    elif capture_status == "INCOMPLETE_PARTIAL_CAPTURE":
+        content.append(Paragraph("Evaluation Status", h_style))
+        content.append(Paragraph("<b>Evaluation partial:</b> this session ended before enough turns were captured.", body_style))
+        content.append(Paragraph("Score reflects partial evidence and has reduced confidence.", body_style))
+    else:
+        content.append(Paragraph("Summary Scores", h_style))
+        overall = report.overall_score if report.overall_score is not None else 0
+        content.append(Paragraph(f"<b>Overall Score:</b> {overall}", body_style))
+        if scores:
+            # Simple horizontal bar chart for top skills
+            drawing = Drawing(480, 140)
+            y = 110
+            for k, v in scores.items():
+                label = k.replace("_", " ").title()
+                value = max(0, min(100, int(v))) if v is not None else 0
+                drawing.add(String(0, y, label, fontSize=9, fillColor=colors.HexColor("#0f172a")))
+                drawing.add(Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
+                drawing.add(Rect(140, y - 4, 3 * value, 8, fillColor=colors.HexColor("#2563eb"), strokeColor=None))
+                drawing.add(String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a")))
+                y -= 18
+            content.append(drawing)
+    content.append(Spacer(1, 12))
+
+    content.append(Paragraph("Metrics", h_style))
+    if metrics:
+        rows = [["Metric", "Value"]]
+        for k, v in metrics.items():
+            rows.append([k.replace("_", " ").title(), str(v)])
+        table = Table(rows, colWidths=[200, 260])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ]))
+        content.append(table)
+    content.append(Spacer(1, 12))
+
+    if recommendations:
+        content.append(Paragraph("Recommendations", h_style))
+        for rec in recommendations:
+            content.append(Paragraph(f"• {rec}", body_style))
+        content.append(Spacer(1, 12))
+
+    # Transcript appendix (optional, short)
+    if transcript:
+        content.append(PageBreak())
+        content.append(Paragraph("Transcript (Excerpt)", h_style))
+        for entry in transcript[:40]:
+            speaker = entry.get("speaker", "Speaker")
+            text = entry.get("text", "")
+            content.append(Paragraph(f"<b>{speaker}:</b> {text}", body_style))
+
+    doc.build(content)
+    buffer.seek(0)
     return StreamingResponse(
-        BytesIO(pdf_bytes),
+        buffer,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="interview-report-{report_id}.pdf"'}
     )
-
-
-@app.get("/api/interview/reports/{report_id}/artifact")
-async def interview_report_artifact(
-    report_id: str,
-    format: str = "html",
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
-):
-    """Return printable branded HTML artifact for a report."""
-    if format.lower() != "html":
-        raise HTTPException(status_code=400, detail="Unsupported format. Use ?format=html")
-
-    report = await get_interview_report(report_id, authorization=authorization, db=db)
-    report_data = report if isinstance(report, dict) else (report.__dict__ if hasattr(report, "__dict__") else {})
-    if "report_state" not in report_data:
-        report_data["report_state"] = determine_report_state(report_data)
-
-    try:
-        html = render_interview_report_html(
-            report_data,
-            include_brand_logo=True,
-            include_print_toolbar=True,
-        )
-    except Exception as exc:
-        logging.exception("Failed to render interview report HTML artifact")
-        raise HTTPException(status_code=500, detail=f"Failed to render report artifact: {exc}")
-
-    return HTMLResponse(content=html)
 
 # @app.post("/api/interview/reports")
 # async def create_interview_report(request: CreateInterviewReportRequest, authorization: Optional[str] = Header(None)):
@@ -5093,6 +5231,22 @@ def get_interview_session_gaze_events(
     }
 
 
+@app.post("/api/interview/{session_id}/next-turn")
+async def next_turn(
+    session_id: str,
+    payload: NextTurnRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Primary next-turn planner contract."""
+    return _plan_next_turn_response(
+        session_id=session_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
 @app.post("/api/interview/{session_id}/adaptive-turn")
 async def adaptive_turn(
     session_id: str,
@@ -5100,77 +5254,122 @@ async def adaptive_turn(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Evaluate one candidate turn and return the next adaptive question."""
+    """Compatibility wrapper for the legacy adaptive-turn contract."""
+    return _plan_next_turn_response(
+        session_id=session_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@app.post("/api/interview/{session_id}/capture")
+async def capture_interview_evidence(
+    session_id: str,
+    request: TrustedCaptureRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Persist trusted and fallback interview evidence for report generation."""
+    current_user = None
+    if authorization:
+        current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        session_owner_row = (
+            db.query(models.InterviewSession.clerk_user_id)
+            .filter(models.InterviewSession.session_id == session_id)
+            .first()
+        )
+        if session_owner_row and session_owner_row[0]:
+            current_user = type("CaptureUser", (), {"clerk_user_id": str(session_owner_row[0])})()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authorization is required to capture interview evidence.")
+
     row = db.query(models.InterviewSession).filter(
         models.InterviewSession.session_id == session_id
     ).first()
     if row and row.clerk_user_id != current_user.clerk_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    runtime_data = _load_runtime_session(session_id) or {}
-    asked_ids_runtime = runtime_data.get("asked_question_ids", [])
-    asked_ids_payload = payload.askedQuestionIds or []
-    asked_ids = list(dict.fromkeys([*(asked_ids_runtime or []), *asked_ids_payload]))
-    runtime_selected_skills = runtime_data.get("selected_skills", []) if isinstance(runtime_data.get("selected_skills", []), list) else []
-
-    transcript_window = payload.transcript_window or []
-    interview_type_value = payload.interviewType or (row.interview_type if row else "mixed")
-    selected_skills = payload.selectedSkills if payload.selectedSkills is not None else runtime_selected_skills
-    validated_selected_skills: List[str] = []
-    if INTERVIEW_SKILL_TRACKS_ENABLED:
-        validated_selected_skills = _validate_selected_skills_or_422(
-            db=db,
-            interview_type=interview_type_value,
-            selected_skills=selected_skills,
-        )
-
-    decision = decide_next_turn(
-        last_user_turn=payload.last_user_turn,
-        recent_transcript=transcript_window,
-        interview_type=interview_type_value,
-        difficulty=payload.difficulty or (row.difficulty if row else "mid"),
-        role=_sanitize_interview_context(payload.role or runtime_data.get("role")),
-        company=_sanitize_interview_context(payload.company or runtime_data.get("company")),
-        question_mix=payload.questionMix or "balanced",
-        interview_style=payload.interviewStyle or "neutral",
-        duration_minutes=payload.durationMinutes,
-        asked_question_ids=asked_ids,
-        selected_skills=validated_selected_skills,
-        db=db,
+    trusted_transcript = [
+        {
+            "speaker": str(entry.get("speaker") or "user"),
+            "text": str(entry.get("text") or "").strip(),
+            "timestamp": entry.get("timestamp"),
+            "trusted_for_evaluation": True,
+            "transcript_origin": "server_transcript",
+            "evidence_source": "server_transcript",
+        }
+        for entry in request.trusted_transcript
+        if isinstance(entry, dict) and str(entry.get("text") or "").strip()
+    ]
+    fallback_transcript = [
+        {
+            "speaker": str(entry.get("speaker") or "user"),
+            "text": str(entry.get("text") or "").strip(),
+            "timestamp": entry.get("timestamp"),
+            "trusted_for_evaluation": False,
+            "transcript_origin": "browser_speech_fallback",
+            "evidence_source": "browser_speech_fallback",
+        }
+        for entry in request.fallback_transcript
+        if isinstance(entry, dict) and str(entry.get("text") or "").strip()
+    ]
+    combined_raw = [*trusted_transcript, *fallback_transcript]
+    normalized = normalize_transcript_payload({"mode": "capture", "raw_messages": combined_raw})
+    capture_integrity = normalized.get("capture_integrity", {}) or {}
+    if request.capture_integrity and isinstance(request.capture_integrity, dict):
+        capture_integrity.update(request.capture_integrity)
+    trust_level = determine_score_trust_level(
+        capture_status="COMPLETE" if capture_integrity.get("trusted_candidate_turn_count", 0) > 0 else "INCOMPLETE_NO_CANDIDATE_AUDIO",
+        capture_integrity=capture_integrity,
+        contract_passed=True,
+        hard_guard_flags=[],
+    )
+    capture_confidence_score = compute_confidence_score(
+        trust_level=trust_level,
+        contract_passed=True,
+        capture_integrity=capture_integrity,
+        communication_metrics={},
+        gaze_summary={},
+        turns_evaluated=0,
+    )
+    artifact_payload = {
+        "trusted_transcript": trusted_transcript,
+        "fallback_transcript": fallback_transcript,
+        "word_timestamps": request.word_timestamps,
+        "capture_integrity": capture_integrity,
+        "trust_level": trust_level,
+        "evaluation_source": request.evaluation_source,
+        "transcript_origin": request.transcript_origin,
+    }
+    artifact = persist_evidence_artifact(
+        db,
+        session_id=session_id,
+        clerk_user_id=current_user.clerk_user_id,
+        artifact_type="capture_bundle",
+        source=str(request.evaluation_source or "server_transcript"),
+        trust_level=trust_level,
+        payload=artifact_payload,
+        word_timestamps=request.word_timestamps,
+        capture_integrity=capture_integrity,
     )
 
-    question_id = decision.get("question_id")
-    if question_id and not str(question_id).startswith("followup_") and question_id != "fallback_generic":
-        asked_ids.append(str(question_id))
-
-    turn_eval_history = runtime_data.get("turn_eval_history", [])
-    if not isinstance(turn_eval_history, list):
-        turn_eval_history = []
-    turn_eval_history.append(
+    runtime_data = _load_runtime_session(session_id) or {}
+    runtime_data.update(
         {
-            "timestamp": datetime.utcnow().isoformat(),
-            "turn_scores": decision.get("turn_scores", {}),
-            "reason": decision.get("reason"),
-            "followup_type": decision.get("followup_type"),
-            "difficulty_next": decision.get("difficulty_next"),
-            "question_id": question_id,
+            "capture_integrity": capture_integrity,
+            "last_capture_artifact_id": artifact.id,
+            "capture_artifact_type": artifact.artifact_type,
         }
     )
-    turn_eval_history = turn_eval_history[-30:]
-
-    runtime_data["asked_question_ids"] = asked_ids
-    runtime_data["turn_eval_history"] = turn_eval_history
-    runtime_data["adaptive_last"] = decision
-    runtime_data["selected_skills"] = validated_selected_skills
-
-    ttl_seconds = max(300, int((payload.durationMinutes or FREE_TRIAL_MINUTES) * 60) + 600)
+    runtime_data["resume_token"] = runtime_data.get("resume_token") or uuid.uuid4().hex
     try:
         redis_client = get_redis_client()
+        ttl_seconds = max(300, int(runtime_data.get("duration_minutes_effective") or FREE_TRIAL_MINUTES) * 60 + 600)
         redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_data))
-    except Exception as redis_err:
-        if is_production:
-            raise HTTPException(status_code=500, detail=f"Failed to persist adaptive runtime state: {redis_err}")
-        print(f"⚠️ Adaptive runtime state not saved in Redis (dev): {redis_err}")
+    except Exception:
+        logging.exception("Failed to persist capture runtime state for session %s", session_id)
 
     if row:
         session_meta = {}
@@ -5179,33 +5378,44 @@ async def adaptive_turn(
                 session_meta = json.loads(row.session_meta_json)
             except Exception:
                 session_meta = {}
-        session_meta["asked_question_ids"] = asked_ids
-        session_meta["turn_eval_history"] = turn_eval_history
+        session_meta["capture_integrity"] = capture_integrity
+        session_meta["last_capture_artifact_id"] = artifact.id
         row.session_meta_json = json.dumps(session_meta)
         db.commit()
 
+    persist_session_memory_snapshot(
+        db,
+        session_id=session_id,
+        clerk_user_id=current_user.clerk_user_id,
+        round_index=int(runtime_data.get("round_index") or 0),
+        snapshot_kind="capture_bundle",
+        memory={
+            "artifact_id": artifact.id,
+            "capture_integrity": capture_integrity,
+            "trusted_turn_count": capture_integrity.get("trusted_candidate_turn_count", 0),
+            "fallback_turn_count": capture_integrity.get("fallback_candidate_turn_count", 0),
+        },
+        resume_token=runtime_data.get("resume_token"),
+    )
+
     return {
-        "next_question": decision.get("next_question"),
-        "question_id": question_id,
-        "utterance_instruction": _wrap_interviewer_question_instruction(
-            decision.get("next_question"),
-            decision.get("refusal_message") if decision.get("policy_action") == "REFUSED_META_CONTROL" else None,
-        ),
-        "reason": decision.get("reason"),
-        "turn_scores": decision.get("turn_scores", {}),
-        "difficulty_next": decision.get("difficulty_next"),
-        "followup_type": decision.get("followup_type"),
-        "policy_action": decision.get("policy_action", "NONE"),
-        "refusal_message": decision.get("refusal_message"),
-        "selected_skills_applied": decision.get("selected_skills_applied", validated_selected_skills),
-        "adaptive_path": decision.get("adaptive_path", {}),
+        "artifact_id": artifact.id,
+        "session_id": session_id,
+        "capture_integrity": capture_integrity,
+        "evaluation_channels": build_evaluation_channel_plan(),
+        "agent_handoff_summary": {
+            "current_round_index": int(runtime_data.get("round_index") or 0),
+            "agent_owner": runtime_data.get("agent_owner") or "orchestrator",
+            "resume_token": runtime_data.get("resume_token"),
+        },
+        "confidence_score": capture_confidence_score,
+        "trust_level": trust_level,
     }
 
 @app.post("/api/interview/{session_id}/transcript")
 async def save_interview_transcript(
     session_id: str, 
     request: Dict,
-    background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
@@ -5232,73 +5442,46 @@ async def save_interview_transcript(
             capture_stats = metrics.get("capture_stats")
         if not capture_stats and isinstance(meta_payload, dict):
             capture_stats = meta_payload.get("capture_stats")
+        latest_capture_artifact = load_latest_evidence_artifact(db, session_id=session_id)
+        if not transcript_input and latest_capture_artifact:
+            artifact_payload = latest_capture_artifact.get("payload", {}) or {}
+            trusted_transcript_from_artifact = artifact_payload.get("trusted_transcript") or []
+            fallback_transcript_from_artifact = artifact_payload.get("fallback_transcript") or []
+            transcript_input = {
+                "mode": "capture_bundle",
+                "qa_pairs": [],
+                "raw_messages": [*trusted_transcript_from_artifact, *fallback_transcript_from_artifact],
+            }
+            if not capture_stats and isinstance(artifact_payload.get("capture_integrity"), dict):
+                capture_stats = artifact_payload.get("capture_integrity")
 
-        # Parse canonical transcript format (mode, qa_pairs, unpaired, raw_messages)
-        # or legacy format (list of {question, answer})
-        transcript = []
-        raw_messages = []
-        
-        if isinstance(transcript_input, dict):
-            # Canonical format: {mode, qa_pairs, unpaired, raw_messages}
-            mode = transcript_input.get("mode", "structured")
-            qa_pairs = transcript_input.get("qa_pairs", [])
-            unpaired = transcript_input.get("unpaired", [])
-            raw_messages = transcript_input.get("raw_messages", [])
-            
-            print(f"📦 Canonical transcript received: mode={mode}, qa_pairs={len(qa_pairs)}, unpaired={len(unpaired)}, raw={len(raw_messages)}")
-            
-            # Use qa_pairs as the primary transcript
-            transcript = qa_pairs
-            
-            # If no qa_pairs but we have raw_messages, try to build pairs
-            if not transcript and raw_messages:
-                print(f"⚠️ No QA pairs, building from {len(raw_messages)} raw messages")
-                pending_question = None
-                for msg in raw_messages:
-                    if msg.get("speaker") == "ai":
-                        pending_question = msg.get("text")
-                    elif msg.get("speaker") == "user" and pending_question:
-                        transcript.append({
-                            "question": pending_question,
-                            "answer": msg.get("text"),
-                            "timestamp": msg.get("timestamp")
-                        })
-                        pending_question = None
-        
-        elif isinstance(transcript_input, list):
-            # Legacy format: list of {question, answer}
-            transcript = transcript_input
-            print(f"📦 Legacy transcript format: {len(transcript)} QA pairs")
-        
-        else:
-            print(f"❌ Unexpected transcript type: {type(transcript_input)}")
-            return {"message": "Invalid transcript format", "session_id": session_id}
+        normalized_transcript = normalize_transcript_payload(transcript_input)
+        transcript = normalized_transcript.get("qa_pairs", [])
+        trusted_transcript = normalized_transcript.get("trusted_qa_pairs", [])
+        raw_messages = normalized_transcript.get("raw_messages", [])
+        trusted_raw_messages = normalized_transcript.get("trusted_raw_messages", [])
+        fallback_raw_messages = normalized_transcript.get("fallback_raw_messages", [])
+        capture_integrity = normalized_transcript.get("capture_integrity", {})
+        if latest_capture_artifact and not capture_integrity:
+            capture_integrity = latest_capture_artifact.get("capture_integrity", {}) or {}
+
+        print(
+            "📦 Transcript payload normalized:",
+            {
+                "mode": normalized_transcript.get("mode"),
+                "qa_pairs": len(transcript),
+                "trusted_qa_pairs": len(trusted_transcript),
+                "raw_messages": len(raw_messages),
+                "trusted_raw_messages": len(trusted_raw_messages),
+                "fallback_raw_messages": len(fallback_raw_messages),
+            },
+        )
 
         if not transcript and not raw_messages:
             return {"message": "No transcript data provided", "session_id": session_id}
 
-        # Build timeline-friendly ordered messages from canonical raw stream when available.
-        ordered_messages = []
-        if raw_messages:
-            for msg in raw_messages:
-                text = (msg.get("text") or "").strip()
-                if not text:
-                    continue
-                ordered_messages.append({
-                    "speaker": (msg.get("speaker") or "unknown").lower(),
-                    "text": text,
-                    "timestamp": msg.get("timestamp") or datetime.now().isoformat()
-                })
-            ordered_messages.sort(key=lambda m: m.get("timestamp") or "")
-        else:
-            for entry in transcript:
-                ts = entry.get("timestamp") or datetime.now().isoformat()
-                question = (entry.get("question") or "").strip()
-                answer = (entry.get("answer") or "").strip()
-                if question:
-                    ordered_messages.append({"speaker": "ai", "text": question, "timestamp": ts})
-                if answer:
-                    ordered_messages.append({"speaker": "user", "text": answer, "timestamp": ts})
+        ordered_messages = raw_messages
+        trusted_ordered_messages = trusted_raw_messages
 
         effective_questions_answered = 0
         if questions_answered is not None:
@@ -5314,6 +5497,11 @@ async def save_interview_transcript(
             for m in ordered_messages
             if (m.get("speaker") or "").lower() in ["user", "candidate"]
         )
+        trusted_user_words_derived = sum(
+            len((m.get("text") or "").split())
+            for m in trusted_ordered_messages
+            if (m.get("speaker") or "").lower() in ["user", "candidate"]
+        )
         ai_words_derived = sum(
             len((m.get("text") or "").split())
             for m in ordered_messages
@@ -5323,6 +5511,12 @@ async def save_interview_transcript(
             user_words_derived = sum(
                 len(str((entry or {}).get("answer", "")).split())
                 for entry in transcript
+                if isinstance(entry, dict)
+            )
+        if trusted_user_words_derived == 0 and isinstance(trusted_transcript, list):
+            trusted_user_words_derived = sum(
+                len(str((entry or {}).get("answer", "")).split())
+                for entry in trusted_transcript
                 if isinstance(entry, dict)
             )
         if ai_words_derived == 0 and isinstance(transcript, list):
@@ -5336,13 +5530,24 @@ async def save_interview_transcript(
             for m in ordered_messages
             if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
         )
+        trusted_candidate_turn_count = sum(
+            1
+            for m in trusted_ordered_messages
+            if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
+        )
         if candidate_turn_count == 0 and isinstance(transcript, list):
             candidate_turn_count = sum(
                 1
                 for entry in transcript
                 if isinstance(entry, dict) and str((entry or {}).get("answer", "")).strip()
             )
-        candidate_word_count = user_words_derived
+        if trusted_candidate_turn_count == 0 and isinstance(trusted_transcript, list):
+            trusted_candidate_turn_count = sum(
+                1
+                for entry in trusted_transcript
+                if isinstance(entry, dict) and str((entry or {}).get("answer", "")).strip()
+            )
+        candidate_word_count = trusted_user_words_derived
         interviewer_word_count = ai_words_derived
         total_duration_derived = 0
         try:
@@ -5378,6 +5583,11 @@ async def save_interview_transcript(
                 last_ai_ts = None
 
         avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
+        communication_metrics = analyze_communication_metrics(
+            trusted_messages=trusted_ordered_messages,
+            total_duration_minutes=total_duration_derived,
+            avg_response_time_seconds=avg_response_time_derived,
+        )
         eye_contact_pct_derived = None
         if isinstance(metrics, dict):
             eye_contact_pct_derived = metrics.get("eye_contact_pct")
@@ -5414,7 +5624,9 @@ async def save_interview_transcript(
         gaze_longest_away_ms_derived = int(gaze_summary_derived.get("longest_event_ms") or 0)
 
         capture_status = "COMPLETE"
-        if candidate_turn_count <= 0:
+        if trusted_candidate_turn_count <= 0 and candidate_turn_count > 0:
+            capture_status = "INCOMPLETE_FALLBACK_ONLY_CAPTURE"
+        elif candidate_turn_count <= 0:
             capture_status = "INCOMPLETE_NO_CANDIDATE_AUDIO"
 
         runtime_session_data = _load_runtime_session(session_id) or {}
@@ -5432,7 +5644,7 @@ async def save_interview_transcript(
             )
 
         runtime_turn_evaluations = []
-        if capture_status != "INCOMPLETE_NO_CANDIDATE_AUDIO":
+        if trusted_candidate_turn_count > 0:
             adaptive_history = runtime_session_data.get("turn_eval_history", [])
             if isinstance(adaptive_history, list):
                 for idx, item in enumerate(adaptive_history):
@@ -5459,29 +5671,7 @@ async def save_interview_transcript(
                         }
                     )
 
-        candidate_turn_pairs = []
-        if isinstance(transcript, list) and transcript:
-            for entry in transcript:
-                if not isinstance(entry, dict):
-                    continue
-                answer = (entry.get("answer") or "").strip()
-                if not answer:
-                    continue
-                candidate_turn_pairs.append(
-                    {
-                        "question": (entry.get("question") or "").strip(),
-                        "answer": answer,
-                        "timestamp": entry.get("timestamp"),
-                    }
-                )
-        if not candidate_turn_pairs:
-            for msg in ordered_messages:
-                if (msg.get("speaker") or "").lower() not in ["user", "candidate"]:
-                    continue
-                text = (msg.get("text") or "").strip()
-                if not text:
-                    continue
-                candidate_turn_pairs.append({"question": "", "answer": text, "timestamp": msg.get("timestamp")})
+        candidate_turn_pairs = build_candidate_turn_pairs_for_evaluation(normalized_transcript)
 
         role_context = None
         company_context = None
@@ -5495,7 +5685,7 @@ async def save_interview_transcript(
 
         deterministic_turn_evaluations = []
         deterministic_shadow_summary = None
-        if capture_status != "INCOMPLETE_NO_CANDIDATE_AUDIO":
+        if trusted_candidate_turn_count > 0:
             deterministic_turn_evaluations = evaluate_turns_deterministic_rubric(
                 turns=candidate_turn_pairs,
                 interview_type=interview_type,
@@ -5553,18 +5743,6 @@ async def save_interview_transcript(
                 continue
             if idx < len(candidate_turn_pairs):
                 eval_row["evidence_excerpt"] = str(candidate_turn_pairs[idx].get("answer") or "").strip()
-
-        score_ledger = build_score_ledger(
-            [
-                {
-                    "question": pair.get("question") or "",
-                    "answer": pair.get("answer") or "",
-                    "timestamp": pair.get("timestamp"),
-                }
-                for pair in candidate_turn_pairs
-            ],
-            clean_turn_evaluations,
-        )
 
         confidence = compute_deterministic_confidence_tier(candidate_word_count, len(clean_turn_evaluations))
         if confidence == "none":
@@ -5646,18 +5824,34 @@ async def save_interview_transcript(
                 deterministic_shadow_summary["score_delta"] = runtime_shadow_score - deterministic_shadow_score
                 deterministic_shadow_summary["abs_score_delta"] = abs(runtime_shadow_score - deterministic_shadow_score)
 
-        plan_tier_value = str((metrics or {}).get("plan_tier") or (meta_payload or {}).get("plan_tier") or "trial").strip() or "trial"
-        trial_mode_value = bool((metrics or {}).get("trial_mode", (meta_payload or {}).get("trial_mode", plan_tier_value == "trial")))
-
+        trust_level = determine_score_trust_level(
+            capture_status=capture_status,
+            capture_integrity=capture_integrity,
+            contract_passed=True,
+            hard_guard_flags=[],
+        )
+        confidence_score = compute_confidence_score(
+            trust_level=trust_level,
+            contract_passed=True,
+            capture_integrity=capture_integrity,
+            communication_metrics=communication_metrics,
+            gaze_summary=gaze_summary_derived,
+            turns_evaluated=len(clean_turn_evaluations),
+        )
         derived_metrics = {
             "questions_answered": effective_questions_answered,
             "total_words": user_words_derived,
             "ai_total_words": ai_words_derived,
             "candidate_word_count": candidate_word_count,
+            "candidate_word_count_total": user_words_derived,
+            "candidate_word_count_trusted": trusted_user_words_derived,
+            "candidate_turn_count_total": candidate_turn_count,
+            "candidate_turn_count_trusted": trusted_candidate_turn_count,
             "interviewer_word_count": interviewer_word_count,
             "total_duration": total_duration_derived,
             "avg_response_time_seconds": avg_response_time_derived,
-            "words_per_minute": round(user_words_derived / max(total_duration_derived, 1)),
+            "words_per_minute": communication_metrics.get("words_per_minute", round(user_words_derived / max(total_duration_derived, 1))),
+            "communication_signals": communication_metrics,
             "eye_contact_pct": eye_contact_pct_derived,
             "gaze_flags_count": gaze_flags_count_derived,
             "gaze_flags_by_type": gaze_flags_by_type_derived,
@@ -5671,17 +5865,27 @@ async def save_interview_transcript(
             "expected_turns": expected_turns,
             "min_candidate_words_for_valid_score": EVAL_MIN_CANDIDATE_WORDS_FOR_VALID_SCORE,
             "low_evidence_word_count": low_evidence_word_count,
+            "capture_integrity": capture_integrity,
             "capture_stats": capture_stats if isinstance(capture_stats, dict) else None,
-            "trial_mode": trial_mode_value,
-            "plan_tier": plan_tier_value,
             "client_turn_evaluations_received": len(client_turn_evaluations),
             "client_turn_evaluations_ignored": (not EVAL_CLIENT_TURNS_TRUSTED and len(client_turn_evaluations) > 0),
-            "score_ledger": score_ledger,
+            "evaluation_channels": route_evaluation_channels(
+                trusted_transcript=trusted_raw_messages,
+                capture_integrity=capture_integrity,
+                gaze_summary=gaze_summary_derived,
+                communication_metrics=communication_metrics,
+                turns_evaluated=len(clean_turn_evaluations),
+                trust_level=trust_level,
+            ),
+            "agent_handoff_summary": _agent_handoff_summary_from_runtime(
+                runtime_session_data if isinstance(runtime_session_data, dict) else {},
+                round_index=int(runtime_session_data.get("round_index") or 0) if isinstance(runtime_session_data, dict) else 0,
+            ),
+            "confidence_score": confidence_score,
             "evaluation_explainability": {
                 "source": evaluation_source,
                 "scorer_mode": EVAL_SCORER_MODE,
-                "formula": overall_score_formula_text(),
-                "weights": overall_score_weight_summary(),
+                "formula": "overall = avg(clarity, depth, relevance) * 20",
                 "turns_evaluated": len(clean_turn_evaluations),
                 "confidence": confidence,
                 "candidate_word_count": candidate_word_count,
@@ -5689,12 +5893,31 @@ async def save_interview_transcript(
                 "contract_version": EVALUATION_CONTRACT_VERSION,
                 "rubric_version": EVAL_RUBRIC_VERSION,
                 "scorer_version": EVAL_SCORER_VERSION,
+                "trusted_candidate_turn_count": trusted_candidate_turn_count,
+                "fallback_candidate_turn_count": capture_integrity.get("fallback_candidate_turn_count", 0),
+                "confidence_score": confidence_score,
             },
         }
         if deterministic_shadow_summary and (
             not EVAL_DETERMINISTIC_RUBRIC_ENABLED or evaluation_source != "server_deterministic_rubric"
         ):
             derived_metrics["deterministic_rubric_shadow_summary"] = deterministic_shadow_summary
+        if hard_guard_flags:
+            trust_level = determine_score_trust_level(
+                capture_status=capture_status,
+                capture_integrity=capture_integrity,
+                contract_passed=False,
+                hard_guard_flags=hard_guard_flags,
+            )
+            derived_metrics["hard_guard_flags"] = hard_guard_flags
+            derived_metrics["confidence_score"] = compute_confidence_score(
+                trust_level=trust_level,
+                contract_passed=False,
+                capture_integrity=capture_integrity,
+                communication_metrics=communication_metrics,
+                gaze_summary=gaze_summary_derived,
+                turns_evaluated=len(clean_turn_evaluations),
+            )
         if runtime_session_data:
             derived_metrics["runtime_session"] = runtime_session_data
             if "adaptive_last" in runtime_session_data:
@@ -5753,7 +5976,7 @@ async def save_interview_transcript(
        # ✅ Update session state with posted Q/A transcript (correct format)
         session_state.transcript_history = []
 
-        for idx, entry in enumerate(transcript):
+        for idx, entry in enumerate(trusted_transcript):
             question = entry.get("question")
             answer = entry.get("answer")
 
@@ -5782,9 +6005,7 @@ async def save_interview_transcript(
         elif isinstance(questions, list) and len(questions) > 0:
             session_state.question_index = len(questions)
         else:
-            # Estimate from transcript (count interviewer messages as questions)
-            interviewer_messages = [t for t in transcript if t.get("speaker", "").lower() in ["interviewer", "ai", "sonia"]]
-            session_state.question_index = len(interviewer_messages)
+            session_state.question_index = len(trusted_transcript or transcript)
         
         # Optionally update metrics if provided
         if metrics:
@@ -5808,7 +6029,11 @@ async def save_interview_transcript(
                 "session_id": session_id,
                 "timestamp": datetime.now().isoformat(),
                 "transcript": transcript,  # QA pairs
+                "trusted_transcript": trusted_transcript,
                 "raw_messages": raw_messages if raw_messages else None,  # Raw messages if available
+                "trusted_raw_messages": trusted_raw_messages if trusted_raw_messages else None,
+                "fallback_raw_messages": fallback_raw_messages if fallback_raw_messages else None,
+                "capture_integrity": capture_integrity,
                 "format": "canonical" if isinstance(transcript_input, dict) else "legacy"
             }, f, indent=2, ensure_ascii=False)
         
@@ -5866,13 +6091,12 @@ async def save_interview_transcript(
                 )
             if len(clean_turn_evaluations) == 0:
                 hard_guard_flags.append("HARD_GUARD_TURNS_EVALUATED_ZERO")
-            if candidate_turn_count == 0:
+            if trusted_candidate_turn_count == 0:
                 hard_guard_flags.append("HARD_GUARD_CANDIDATE_TURNS_ZERO")
+            if capture_status == "INCOMPLETE_FALLBACK_ONLY_CAPTURE":
+                hard_guard_flags.append("HARD_GUARD_FALLBACK_ONLY_EVIDENCE")
             if evaluation_source not in ALLOWED_PRIMARY_EVALUATION_SOURCES:
                 hard_guard_flags.append(f"HARD_GUARD_INVALID_SOURCE:{evaluation_source}")
-        if hard_guard_flags:
-            derived_metrics["hard_guard_flags"] = hard_guard_flags
-
         def _zero_score_breakdown() -> Dict[str, Any]:
             return {
                 "communication": 0,
@@ -5884,49 +6108,18 @@ async def save_interview_transcript(
 
         def _turn_evidence_payload() -> List[Dict[str, Any]]:
             rows = []
-            try:
-                from services.interview.competency_map import get_competency_for_question
-            except Exception:
-                get_competency_for_question = None
             for idx, turn in enumerate(clean_turn_evaluations):
                 if not isinstance(turn, dict):
                     continue
-                paired_turn = candidate_turn_pairs[idx] if idx < len(candidate_turn_pairs) else {}
-                depth_signals = turn.get("depth_signals") if isinstance(turn.get("depth_signals"), dict) else {}
-                star_completeness = turn.get("star_completeness") if isinstance(turn.get("star_completeness"), dict) else {}
-                competency_value = turn.get("competency")
-                if not competency_value and callable(get_competency_for_question):
-                    competency_value = get_competency_for_question(
-                        question_id=turn.get("question_id"),
-                        topic_tags=[],
-                        domain=interview_type,
-                        interview_type=interview_type,
-                    )
                 rows.append(
                     {
                         "turn_id": int(turn.get("turn_id") or idx + 1),
-                        "transcript_ref": f"turn_{int(turn.get('turn_id') or idx + 1)}",
-                        "question_id": turn.get("question_id"),
-                        "question_text": str(paired_turn.get("question") or turn.get("question_text") or "").strip(),
                         "candidate_text_excerpt": (
                             str(turn.get("evidence_excerpt") or turn.get("candidate_text_excerpt") or "").strip()
                         ),
-                        "answer_word_count": int(
-                            depth_signals.get("word_count")
-                            or len(str(paired_turn.get("answer") or turn.get("candidate_text_excerpt") or "").split())
-                            or 0
-                        ),
-                        "competency": competency_value,
                         "clarity": turn.get("clarity"),
                         "depth": turn.get("depth"),
                         "relevance": turn.get("relevance"),
-                        "communication": turn.get("communication"),
-                        "star_components_detected": sum(1 for value in star_completeness.values() if bool(value)),
-                        "technical_signal_count": int(
-                            len(depth_signals.get("tech_named") or [])
-                            + len(depth_signals.get("metrics_mentioned") or [])
-                            + int(depth_signals.get("impact_signals") or 0)
-                        ),
                         "reason_code": turn.get("reason_code"),
                     }
                 )
@@ -5944,7 +6137,6 @@ async def save_interview_transcript(
             merged["score_provenance"] = contract_payload.get("score_provenance", {})
             merged["turn_evidence"] = contract_payload.get("turn_evidence", [])
             merged["validation_flags"] = contract_payload.get("validation_flags", [])
-            merged["validation_summary"] = contract_payload.get("validation_summary", {})
             merged["contract_passed"] = bool(contract_payload.get("contract_passed"))
             merged["contract_enforcement_mode"] = contract_payload.get("contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE)
             explainability = merged.get("evaluation_explainability", {})
@@ -5956,8 +6148,6 @@ async def save_interview_transcript(
                 explainability["confidence"] = provenance.get("confidence", explainability.get("confidence"))
                 if provenance.get("forced_zero_reason"):
                     explainability["forced_zero_reason"] = provenance.get("forced_zero_reason")
-                if provenance.get("score_cap_reason"):
-                    explainability["score_cap_reason"] = provenance.get("score_cap_reason")
             explainability["rubric_version"] = contract_payload.get("rubric_version", EVAL_RUBRIC_VERSION)
             explainability["scorer_version"] = contract_payload.get("scorer_version", EVAL_SCORER_VERSION)
             explainability["turns_evaluated"] = contract_payload.get("capture_evidence", {}).get(
@@ -5967,29 +6157,16 @@ async def save_interview_transcript(
             merged["evaluation_explainability"] = explainability
             return merged
 
-        def _score_reconciliation_payload(
-            base_overall_score: int,
-            contract_payload: Dict[str, Any],
-        ) -> Dict[str, Any]:
-            final_scores = contract_payload.get("final_scores", {}) if isinstance(contract_payload, dict) else {}
-            score_provenance_payload = contract_payload.get("score_provenance", {}) if isinstance(contract_payload, dict) else {}
-            final_overall_score = int(final_scores.get("overall_score", base_overall_score) or 0)
-            return {
-                "base_overall_score": int(base_overall_score or 0),
-                "final_overall_score": final_overall_score,
-                "score_delta": final_overall_score - int(base_overall_score or 0),
-                "score_cap_reason": score_provenance_payload.get("score_cap_reason"),
-                "forced_zero_reason": score_provenance_payload.get("forced_zero_reason"),
-            }
-
         def _build_contract_payload(current_overall_score: int) -> Dict[str, Any]:
             capture_evidence = {
                 "capture_status": capture_status,
-                "interview_type": interview_type,
                 "candidate_word_count": candidate_word_count,
-                "candidate_turn_count": candidate_turn_count,
+                "candidate_turn_count": trusted_candidate_turn_count,
                 "turns_evaluated": len(clean_turn_evaluations),
-                "expected_turn_count": expected_turns,
+                "candidate_word_count_total": user_words_derived,
+                "candidate_turn_count_total": candidate_turn_count,
+                "fallback_candidate_turn_count": capture_integrity.get("fallback_candidate_turn_count", 0),
+                "evaluation_uses_fallback_transcript": capture_integrity.get("contains_fallback_candidate_transcript", False),
             }
             score_provenance = {
                 "source": evaluation_source,
@@ -6028,6 +6205,15 @@ async def save_interview_transcript(
                     duration_minutes = 1
 
                 report_data = generate_interview_report(session_state, interview_type, duration_minutes)
+                # Inject eye_contact score from gaze data
+                if eye_contact_pct_derived is not None:
+                    eye_contact_score = min(100, round(float(eye_contact_pct_derived) * 1.2))
+                    if hasattr(report_data.scores, "eye_contact"):
+                        report_data.scores = report_data.scores.copy(update={"eye_contact": eye_contact_score})
+                    # Blend into overall_score (10% weight)
+                    if not (derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or bool(hard_guard_flags)):
+                        blended = int(round(report_data.overall_score * 0.90 + eye_contact_score * 0.10))
+                        report_data.overall_score = max(0, min(100, blended))
                 force_zero = derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or bool(hard_guard_flags)
                 if force_zero:
                     report_data.overall_score = 0
@@ -6045,8 +6231,7 @@ async def save_interview_transcript(
                         ],
                     }
 
-                base_overall_score = int(report_data.overall_score or 0)
-                contract_payload = _build_contract_payload(base_overall_score)
+                contract_payload = _build_contract_payload(int(report_data.overall_score or 0))
                 contract_passed = bool(contract_payload.get("contract_passed"))
                 validation_flags = list(contract_payload.get("validation_flags") or [])
                 score_provenance = contract_payload.get("score_provenance") or {}
@@ -6062,23 +6247,12 @@ async def save_interview_transcript(
                     report_data.metrics if isinstance(report_data.metrics, dict) else {},
                     contract_payload,
                 )
-                merged_metrics["score_reconciliation"] = _score_reconciliation_payload(
-                    base_overall_score,
-                    contract_payload,
+                merged_metrics["score_trust_level"] = determine_score_trust_level(
+                    capture_status=capture_status,
+                    capture_integrity=capture_integrity,
+                    contract_passed=contract_passed,
+                    hard_guard_flags=hard_guard_flags,
                 )
-                # Inline v2 fields if already computed (skip_v2=False was used)
-                v2_inline = {}
-                if report_data.turn_analyses:
-                    v2_inline["v2_enrichment_status"] = "complete"
-                    v2_inline["v2_turn_analyses"] = [t.model_dump() for t in report_data.turn_analyses]
-                    v2_inline["v2_competency_scores"] = report_data.competency_scores or {}
-                    v2_inline["v2_score_context"] = report_data.score_context
-                    v2_inline["v2_hiring_recommendation"] = report_data.hiring_recommendation.model_dump() if report_data.hiring_recommendation else None
-                    v2_inline["v2_improvement_roadmap"] = [i.model_dump() for i in (report_data.improvement_roadmap or [])]
-                else:
-                    v2_inline["v2_enrichment_status"] = "pending"
-                merged_metrics.update(v2_inline)
-
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
@@ -6102,16 +6276,6 @@ async def save_interview_transcript(
                 db.refresh(db_report)
                 report_id = db_report.id
                 print(f"✅ Report generated and saved to database: {db_report.id}")
-                # If v2 enrichment not yet done, schedule it as a background task
-                if v2_inline.get("v2_enrichment_status") == "pending":
-                    background_tasks.add_task(
-                        _run_v2_enrichment,
-                        report_id=report_id,
-                        session_state=session_state,
-                        interview_type=interview_type,
-                        overall_score=int(report_data.overall_score or 0),
-                        ai_feedback=report_data.ai_feedback,
-                    )
             else:
                 merged_existing_metrics = {}
                 try:
@@ -6122,7 +6286,6 @@ async def save_interview_transcript(
                 current_existing_overall = int(existing_report.overall_score or 0)
                 if derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or hard_guard_flags:
                     current_existing_overall = 0
-                base_existing_overall = int(current_existing_overall or 0)
                 contract_payload = _build_contract_payload(current_existing_overall)
                 contract_passed = bool(contract_payload.get("contract_passed"))
                 validation_flags = list(contract_payload.get("validation_flags") or [])
@@ -6131,9 +6294,11 @@ async def save_interview_transcript(
                 final_overall = int(contract_payload.get("final_scores", {}).get("overall_score", 0) or 0)
 
                 merged_existing_metrics = _merge_contract_into_metrics(merged_existing_metrics, contract_payload)
-                merged_existing_metrics["score_reconciliation"] = _score_reconciliation_payload(
-                    base_existing_overall,
-                    contract_payload,
+                merged_existing_metrics["score_trust_level"] = determine_score_trust_level(
+                    capture_status=capture_status,
+                    capture_integrity=capture_integrity,
+                    contract_passed=contract_passed,
+                    hard_guard_flags=hard_guard_flags,
                 )
                 existing_report.metrics = json.dumps(merged_existing_metrics)
                 existing_report.transcript = json.dumps(ordered_messages)
@@ -6201,7 +6366,17 @@ async def save_interview_transcript(
             "session_id": session_id,
             "report_id": report_id,
             "capture_status": derived_metrics.get("capture_status"),
+            "capture_integrity": capture_integrity,
             "evaluation_source": score_provenance.get("source") or derived_metrics.get("evaluation_explainability", {}).get("source"),
+            "score_trust_level": determine_score_trust_level(
+                capture_status=capture_status,
+                capture_integrity=capture_integrity,
+                contract_passed=bool(contract_passed),
+                hard_guard_flags=hard_guard_flags,
+            ),
+            "confidence_score": derived_metrics.get("confidence_score"),
+            "evaluation_channels": derived_metrics.get("evaluation_channels"),
+            "agent_handoff_summary": derived_metrics.get("agent_handoff_summary"),
             "turns_evaluated": len(clean_turn_evaluations),
             "evaluation_contract_version": EVALUATION_CONTRACT_VERSION,
             "rubric_version": EVAL_RUBRIC_VERSION,
@@ -6229,27 +6404,6 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
     await websocket.accept()
     tracker = GazeSessionTracker()
     clerk_user_id = None
-    latest_summary_meta: Dict[str, Any] = {}
-    finalized_and_persisted = False
-
-    def _summary_payload() -> Dict[str, Any]:
-        payload = tracker.summary()
-        payload.update(latest_summary_meta)
-        return payload
-
-    def _finalize_and_persist() -> Dict[str, Any]:
-        nonlocal finalized_and_persisted
-        tracker.finalize()
-        payload = _summary_payload()
-        if not finalized_and_persisted and clerk_user_id:
-            _persist_gaze_tracking_results(
-                session_id=session_id,
-                clerk_user_id=clerk_user_id,
-                events=tracker.events,
-                summary=payload,
-            )
-            finalized_and_persisted = True
-        return payload
 
     try:
         token = websocket.query_params.get("token")
@@ -6303,11 +6457,6 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
                 )
                 continue
 
-            if msg_type == "finalize":
-                payload = _finalize_and_persist()
-                await websocket.send_text(json.dumps({"type": "finalized", "summary": payload}))
-                continue
-
             if msg_type != "frame":
                 continue
 
@@ -6329,37 +6478,16 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
                     "conf": max(0.0, min(1.0, conf_val)),
                     "faceDetected": bool(client_metrics.get("faceDetected", gaze_direction != "NO_FACE")),
                     "detectorReady": bool(client_metrics.get("detectorReady", True)),
-                    "trackingActive": bool(client_metrics.get("trackingActive", True)),
-                    "source": str(client_metrics.get("source") or client_metrics.get("algorithmVersion") or "browser_client"),
-                    "algorithmVersion": str(client_metrics.get("algorithmVersion") or client_metrics.get("source") or "browser_client"),
-                }
-                latest_summary_meta = {
-                    "calibration_state": str(client_metrics.get("calibrationState") or "").lower() or None,
-                    "calibration_quality": str(client_metrics.get("calibrationQuality") or "").lower() or None,
-                    "calibration_valid": bool(client_metrics.get("calibrationValid")),
-                    "tracking_active": bool(client_metrics.get("trackingActive", True)),
-                    "detector_ready": bool(client_metrics.get("detectorReady", True)),
-                    "source": str(client_metrics.get("source") or client_metrics.get("algorithmVersion") or "browser_client"),
-                    "algorithm_version": str(client_metrics.get("algorithmVersion") or client_metrics.get("source") or "browser_client"),
                 }
             else:
                 frame = decode_data_url_to_frame(data.get("data", ""))
                 detected = detect_gaze_metrics(frame)
-                latest_summary_meta = {
-                    "tracking_active": bool(detected.get("trackingActive", True)),
-                    "detector_ready": bool(detected.get("detectorReady", True)),
-                    "source": str(detected.get("source") or detected.get("algorithmVersion") or "opencv_haar_v1"),
-                    "algorithm_version": str(detected.get("algorithmVersion") or detected.get("source") or "opencv_haar_v1"),
-                }
             metrics_payload = tracker.process_sample(
                 t_ms=t_ms,
                 gaze_direction=str(detected.get("gazeDirection") or "NO_FACE"),
                 eye_contact=bool(detected.get("eyeContact")),
                 confidence=float(detected.get("conf") or 0.0),
                 detector_ready=bool(detected.get("detectorReady", True)),
-                tracking_active=bool(detected.get("trackingActive", True)),
-                source=str(detected.get("source") or detected.get("algorithmVersion") or "opencv_haar_v1"),
-                algorithm_version=str(detected.get("algorithmVersion") or detected.get("source") or "opencv_haar_v1"),
             )
             await websocket.send_text(
                 json.dumps(
@@ -6381,7 +6509,14 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
         except Exception:
             pass
     finally:
-        _finalize_and_persist()
+        tracker.finalize()
+        if clerk_user_id:
+            _persist_gaze_tracking_results(
+                session_id=session_id,
+                clerk_user_id=clerk_user_id,
+                events=tracker.events,
+                summary=tracker.summary(),
+            )
 
 
 @app.websocket("/ws")
@@ -6424,9 +6559,6 @@ async def legacy_gaze_websocket(websocket: WebSocket):
                     "conf": max(0.0, min(1.0, conf_val)),
                     "faceDetected": bool(client_metrics.get("faceDetected", gaze_direction != "NO_FACE")),
                     "detectorReady": bool(client_metrics.get("detectorReady", True)),
-                    "trackingActive": bool(client_metrics.get("trackingActive", True)),
-                    "source": str(client_metrics.get("source") or client_metrics.get("algorithmVersion") or "browser_client"),
-                    "algorithmVersion": str(client_metrics.get("algorithmVersion") or client_metrics.get("source") or "browser_client"),
                 }
             else:
                 frame = decode_data_url_to_frame(data.get("data", ""))
@@ -6437,9 +6569,6 @@ async def legacy_gaze_websocket(websocket: WebSocket):
                 eye_contact=bool(detected.get("eyeContact")),
                 confidence=float(detected.get("conf") or 0.0),
                 detector_ready=bool(detected.get("detectorReady", True)),
-                tracking_active=bool(detected.get("trackingActive", True)),
-                source=str(detected.get("source") or detected.get("algorithmVersion") or "opencv_haar_v1"),
-                algorithm_version=str(detected.get("algorithmVersion") or detected.get("source") or "opencv_haar_v1"),
             )
             await websocket.send_text(
                 json.dumps(

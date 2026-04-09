@@ -1,8 +1,5 @@
 export function classifyOnboardingGuardError(error, detectors) {
-  const {
-    isAuthRequiredError,
-    isBackendUnavailableError,
-  } = detectors;
+  const { isAuthRequiredError, isBackendUnavailableError } = detectors;
 
   if (isAuthRequiredError(error)) {
     return "auth_required";

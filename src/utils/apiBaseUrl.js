@@ -14,13 +14,6 @@ export function getApiBaseUrl() {
       const currentHost = typeof window !== "undefined" ? window.location.hostname : "";
       if (currentHost && !isLoopbackHost(currentHost)) {
         // In hosted environments never call loopback; use same-origin API.
-        if (typeof window !== "undefined") {
-          // Helps diagnose CORS/loopback issues when cloud app still has local API URL configured.
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[API_BASE] Ignoring loopback API URL (${configured}) because current origin is hosted (${window.location.origin}). Falling back to same-origin API.`,
-          );
-        }
         return "";
       }
     }

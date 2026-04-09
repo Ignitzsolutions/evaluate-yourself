@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import ReportPage from "../ReportPage";
@@ -33,17 +33,14 @@ describe("ReportPage", () => {
   beforeEach(() => {
     authFetch.mockReset();
     mockGetToken.mockClear();
-    window.open = jest.fn(() => ({ closed: false }));
-    window.URL.createObjectURL = jest.fn(() => "blob:report");
-    window.URL.revokeObjectURL = jest.fn();
   });
 
-  it("shows invalid-session banner and hides AI feedback section", async () => {
+  it("shows incomplete capture banner and hides AI feedback section", async () => {
     authFetch.mockImplementation(async (url) => {
       if (String(url).includes("/gaze-events")) {
         return {
           ok: true,
-          json: async () => ({ events: [], summary: null }),
+          json: async () => ({ events: [], summary: {} }),
         };
       }
       return {
@@ -67,7 +64,10 @@ describe("ReportPage", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/report/session_1"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        initialEntries={["/report/session_1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <Routes>
           <Route path="/report/:sessionId" element={<ReportPage />} />
         </Routes>
@@ -75,360 +75,110 @@ describe("ReportPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/Session invalid for scored evaluation/i)).toBeInTheDocument();
+      expect(screen.getByText(/Evaluation incomplete/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/AI Interview Feedback/i)).not.toBeInTheDocument();
   });
 
-  it("renders invalid paid-session state with remediation and observational gaze copy", async () => {
+  it("shows a mixed-evidence warning when fallback transcript was excluded from trusted scoring", async () => {
     authFetch.mockImplementation(async (url) => {
       if (String(url).includes("/gaze-events")) {
         return {
           ok: true,
-          json: async () => ({ events: [], summary: { total_events: 0, eye_contact_pct: null } }),
+          json: async () => ({ events: [], summary: {} }),
         };
       }
       return {
         ok: true,
         json: async () => ({
           id: "r2",
-          report_state: "invalid_no_candidate_audio_report",
-          overall_score: 0,
           metrics: {
-            capture_status: "INCOMPLETE_NO_CANDIDATE_AUDIO",
-            total_duration: 1,
-            total_words: 0,
-            questions_answered: 0,
-            contract_passed: true,
-            validation_summary: { validity_score: 12, validity_label: "low" },
+            capture_status: "COMPLETE",
+            score_trust_level: "mixed_evidence",
+            capture_integrity: {
+              trusted_candidate_turn_count: 1,
+              fallback_candidate_turn_count: 1,
+            },
+            total_duration: 2,
+            total_words: 42,
+            questions_answered: 2,
           },
           transcript: [
-            { speaker: "ai", text: "Tell me about yourself", timestamp: "2026-03-11T00:00:00Z" },
+            { speaker: "ai", text: "Tell me about a recent challenge", timestamp: "2026-02-14T00:00:00Z" },
+            { speaker: "user", text: "Trusted answer", timestamp: "2026-02-14T00:00:10Z" },
           ],
-          ai_feedback: {
-            areas_for_improvement: [
-              "Verify microphone permissions.",
-              "Confirm candidate speech appears in the live transcript.",
-            ],
-          },
-          hiring_recommendation: {
-            label: "Hire",
-            signal: "hire",
-          },
+          ai_feedback: null,
         }),
       };
     });
 
     render(
-      <MemoryRouter initialEntries={["/report/session_2"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        initialEntries={["/report/session_2"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <Routes>
           <Route path="/report/:sessionId" element={<ReportPage />} />
         </Routes>
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Session invalid for scored evaluation/i)).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /Remediation Steps/i })).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/Observational only/i)).toBeInTheDocument();
-    });
-    expect(screen.queryByText(/^Hiring Recommendation$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Top Strengths/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Mixed transcript evidence detected/i)).toBeInTheDocument();
+    expect(screen.getByText("mixed_evidence")).toBeInTheDocument();
+    expect(screen.getByText(/Fallback candidate turns:/i)).toBeInTheDocument();
   });
 
-  it("renders score proof section when score ledger is present", async () => {
+  it("renders communication signals and confidence score from trusted transcript analytics", async () => {
     authFetch.mockImplementation(async (url) => {
       if (String(url).includes("/gaze-events")) {
         return {
           ok: true,
-          json: async () => ({ events: [], summary: { total_events: 1, eye_contact_pct: 78 } }),
+          json: async () => ({ events: [], summary: { eye_contact_pct: 87, total_events: 1 } }),
         };
       }
       return {
         ok: true,
         json: async () => ({
           id: "r3",
-          report_state: "valid_scored_report",
-          overall_score: 81,
+          overall_score: 84,
           metrics: {
             capture_status: "COMPLETE",
-            total_duration: 12,
-            total_words: 180,
+            score_trust_level: "trusted",
+            confidence_score: 88,
+            communication_signals: {
+              pacing_band: "ideal",
+              filler_word_count: 2,
+              filler_words_per_100: 1.8,
+              quality_flags: ["MODERATE_FILLER_DENSITY"],
+            },
+            total_duration: 3,
+            total_words: 120,
             questions_answered: 3,
-            plan_tier: "paid",
-            trial_mode: false,
-            evaluation_explainability: {
-              formula: "overall = ((clarity × 0.25) + (communication × 0.20) + (depth × 0.30) + (relevance × 0.25)) × 20",
-              weights: { clarity: 0.25, communication: 0.2, depth: 0.3, relevance: 0.25 },
-            },
-            score_ledger: [
-              {
-                turn_id: 1,
-                transcript_ref: "turn_1",
-                question_text: "Walk me through a recent technical decision you owned.",
-                included_in_score: true,
-                weighted_points: 84,
-                answer_word_count: 52,
-                evidence_quote: "I reduced duplicate processing by 30 percent.",
-                dimension_scores: { clarity: 4, communication: 4, depth: 5, relevance: 4 },
-              },
-            ],
-            validation_summary: { validity_score: 88, validity_label: "high", trust_signals: ["Three turns were evaluated."] },
           },
           transcript: [
-            { speaker: "ai", text: "Question", timestamp: "2026-03-11T00:00:00Z" },
-            { speaker: "user", text: "Answer", timestamp: "2026-03-11T00:00:05Z" },
+            { speaker: "ai", text: "Question", timestamp: "2026-02-14T00:00:00Z" },
+            { speaker: "user", text: "Answer", timestamp: "2026-02-14T00:00:08Z" },
           ],
+          ai_feedback: null,
         }),
       };
     });
 
     render(
-      <MemoryRouter initialEntries={["/report/session_3"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        initialEntries={["/report/session_3"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <Routes>
           <Route path="/report/:sessionId" element={<ReportPage />} />
         </Routes>
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /Scoring Evidence Ledger/i })).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText((content) => /communication\s+20%/i.test(content))).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/Included • 84\/100/i)).toBeInTheDocument();
-    });
-  });
-
-  it("reflects saved post-trial feedback from report metrics", async () => {
-    authFetch.mockImplementation(async (url, token, options = {}) => {
-      if (String(url).includes("/gaze-events")) {
-        return {
-          ok: true,
-          json: async () => ({ events: [], summary: null }),
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          id: "r4",
-          report_state: "valid_scored_report",
-          overall_score: 70,
-          metrics: {
-            capture_status: "COMPLETE",
-            total_duration: 5,
-            total_words: 120,
-            questions_answered: 2,
-            session_feedback: {
-              rating: 4,
-              comment: "Useful session",
-              submitted_at: "2026-03-11T00:00:10Z",
-            },
-          },
-          transcript: [
-            { speaker: "ai", text: "Question", timestamp: "2026-03-11T00:00:00Z" },
-            { speaker: "user", text: "Answer", timestamp: "2026-03-11T00:00:05Z" },
-          ],
-        }),
-      };
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/report/session_4"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/Feedback submitted before ending session: 4\/5/i)).toBeInTheDocument();
-    });
-  });
-
-  it("shows trial upgrade messaging and hides detailed evidence sections for trial reports", async () => {
-    authFetch.mockImplementation(async (url) => {
-      if (String(url).includes("/gaze-events")) {
-        return {
-          ok: true,
-          json: async () => ({ events: [], summary: { calibration_valid: false, calibration_state: "calibrating" } }),
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          id: "r5",
-          report_state: "valid_scored_report",
-          overall_score: 63,
-          metrics: {
-            capture_status: "COMPLETE",
-            total_duration: 5,
-            total_words: 110,
-            questions_answered: 2,
-            plan_tier: "trial",
-            trial_mode: true,
-            score_ledger: [
-              { turn_id: 1, transcript_ref: "turn_1", question_text: "Question", included_in_score: true },
-            ],
-          },
-          ai_feedback: {
-            overall_summary: "Clear baseline with room to sharpen examples.",
-            strengths: ["Good structure"],
-            areas_for_improvement: ["Add measurable outcomes"],
-          },
-          improvement_roadmap: [
-            {
-              competency: "communication",
-              finding: "Answers need stronger evidence.",
-              suggested_action: "Close each answer with outcome and ownership.",
-            },
-          ],
-          transcript: [
-            { speaker: "ai", text: "Question", timestamp: "2026-03-11T00:00:00Z" },
-            { speaker: "user", text: "Answer", timestamp: "2026-03-11T00:00:05Z" },
-          ],
-        }),
-      };
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/report/session_5"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getAllByText(/Trial interview report/i).length).toBeGreaterThan(0);
-    });
-
-    expect(screen.getAllByText(/Upgrade for full-length interviews/i).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: /Scoring Evidence Ledger/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /Hiring Recommendation/i })).not.toBeInTheDocument();
-  });
-
-  it("opens the printable HTML artifact as the primary export path", async () => {
-    authFetch.mockImplementation(async (url) => {
-      if (String(url).includes("/gaze-events")) {
-        return {
-          ok: true,
-          json: async () => ({ events: [], summary: null }),
-        };
-      }
-      if (String(url).includes("/artifact?format=html")) {
-        return {
-          ok: true,
-          text: async () => "<html><body>Printable report</body></html>",
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          id: "r6",
-          report_state: "valid_scored_report",
-          overall_score: 70,
-          metrics: {
-            capture_status: "COMPLETE",
-            total_duration: 5,
-            total_words: 120,
-            questions_answered: 2,
-            plan_tier: "paid",
-            trial_mode: false,
-          },
-          transcript: [
-            { speaker: "ai", text: "Question", timestamp: "2026-03-11T00:00:00Z" },
-            { speaker: "user", text: "Answer", timestamp: "2026-03-11T00:00:05Z" },
-          ],
-        }),
-      };
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/report/session_6"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Open Printable Report/i })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /Open Printable Report/i }));
-
-    await waitFor(() => {
-      expect(
-        authFetch.mock.calls.some(([url]) => String(url).includes("/artifact?format=html")),
-      ).toBe(true);
-    });
-    expect(window.open).toHaveBeenCalled();
-  });
-
-  it("shows a user-visible error when the printable artifact cannot be opened", async () => {
-    authFetch.mockImplementation(async (url) => {
-      if (String(url).includes("/gaze-events")) {
-        return {
-          ok: true,
-          json: async () => ({ events: [], summary: null }),
-        };
-      }
-      if (String(url).includes("/artifact?format=html")) {
-        return {
-          ok: false,
-          status: 503,
-          text: async () => "artifact unavailable",
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          id: "r7",
-          report_state: "valid_scored_report",
-          overall_score: 68,
-          metrics: {
-            capture_status: "COMPLETE",
-            total_duration: 5,
-            total_words: 90,
-            questions_answered: 2,
-            plan_tier: "paid",
-            trial_mode: false,
-          },
-          transcript: [
-            { speaker: "ai", text: "Question", timestamp: "2026-03-11T00:00:00Z" },
-            { speaker: "user", text: "Answer", timestamp: "2026-03-11T00:00:05Z" },
-          ],
-        }),
-      };
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/report/session_7"]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Open Printable Report/i })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /Open Printable Report/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Unable to open printable report \(503\)/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByText(/Communication Signals/i)).toBeInTheDocument();
+    expect(screen.getByText("88")).toBeInTheDocument();
+    expect(screen.getByText("ideal")).toBeInTheDocument();
+    expect(screen.getByText("MODERATE_FILLER_DENSITY")).toBeInTheDocument();
   });
 });

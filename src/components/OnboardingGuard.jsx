@@ -3,7 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import BackendUnavailableState from "./BackendUnavailableState";
-import { authFetch, buildAuthRequiredError, getApiErrorMessage, isAuthRequiredError, isBackendUnavailableError } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, buildAuthRequiredError, getApiErrorMessage, isAuthRequiredError, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 import { classifyOnboardingGuardError } from "../utils/onboardingGuardState";
@@ -35,8 +35,9 @@ export default function OnboardingGuard({ children }) {
           if (resp.status === 401 || resp.status === 403) {
             throw buildAuthRequiredError("Your session has expired. Please sign in again.");
           }
-          const text = await resp.text();
-          throw new Error(text || "Failed to verify profile status.");
+          throw await buildApiErrorFromResponse(resp, {
+            defaultMessage: "Failed to verify profile status.",
+          });
         }
         const data = await resp.json();
         if (mounted) {

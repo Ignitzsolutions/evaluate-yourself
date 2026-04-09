@@ -4,11 +4,19 @@ import { ClerkProvider } from "@clerk/clerk-react";
 import "./index.css";
 import App from "./App";
 
+const STALE_CLERK_PUBLISHABLE_KEY = "pk_test_ZW5nYWdpbmctZ2F6ZWxsZS01Mi5jbGVyay5hY2NvdW50cy5kZXYk";
+const FALLBACK_CLERK_PUBLISHABLE_KEY = "pk_test_cmVndWxhci1nYXRvci00LmNsZXJrLmFjY291bnRzLmRldiQ";
+
 // CRA build uses REACT_APP_* vars. We also accept NEXT_PUBLIC_* as a fallback to reduce config mistakes.
-const clerkPubKey = (
+const configuredClerkPubKey = (
   process.env.REACT_APP_CLERK_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
   ""
+).trim();
+const clerkPubKey = (
+  configuredClerkPubKey === STALE_CLERK_PUBLISHABLE_KEY
+    ? FALLBACK_CLERK_PUBLISHABLE_KEY
+    : configuredClerkPubKey
 ).trim();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));

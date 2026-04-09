@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { CircularProgress, Box } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
 import BackendUnavailableState from "./BackendUnavailableState";
-import { authFetch, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 
@@ -41,16 +41,15 @@ export default function AdminRoute({ children }) {
         }
         const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
         if (!resp.ok) {
-          if (mounted) {
-            setState({
-              loading: false,
-              allowed: false,
-              requireLogin: !devBypass && resp.status === 401,
-              errorKind: resp.status >= 500 ? "server_error" : "",
-              errorMessage: resp.status >= 500 ? "Admin verification failed. Check the backend and try again." : "",
-            });
+          if (!devBypass && resp.status === 401) {
+            if (mounted) {
+              setState({ loading: false, allowed: false, requireLogin: true, errorKind: "", errorMessage: "" });
+            }
+            return;
           }
-          return;
+          throw await buildApiErrorFromResponse(resp, {
+            defaultMessage: "Admin verification failed. Check the backend and try again.",
+          });
         }
         const data = await resp.json();
         if (mounted) {
@@ -68,7 +67,7 @@ export default function AdminRoute({ children }) {
             loading: false,
             allowed: false,
             requireLogin: false,
-            errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : "generic",
+            errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : error?.status >= 500 ? "server_error" : "generic",
             errorMessage: getApiErrorMessage(error, {
               backendLabel: "admin access service",
               defaultMessage: "Unable to verify admin access.",

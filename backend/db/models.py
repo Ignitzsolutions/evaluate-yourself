@@ -114,38 +114,6 @@ class InterviewReport(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class LaunchWaitlistSignup(Base):
-    __tablename__ = "launch_waitlist_signups"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    email = Column(String, nullable=False)
-    normalized_email = Column(String, unique=True, index=True, nullable=False)
-    source_page = Column(String, nullable=False, default="landing")
-    intent = Column(String, nullable=False, default="free_trial")
-    status = Column(String, nullable=False, default="ACTIVE")
-    meta_json = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
-class TrialFeedback(Base):
-    __tablename__ = "trial_feedback"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, index=True, nullable=True)
-    clerk_user_id = Column(String, index=True, nullable=True)
-    report_id = Column(String, unique=True, index=True, nullable=False)
-    session_id = Column(String, index=True, nullable=True)
-    rating = Column(Integer, nullable=False)
-    comment = Column(Text, nullable=True)
-    plan_tier = Column(String, nullable=True)
-    trial_mode = Column(Boolean, nullable=False, default=True)
-    source = Column(String, nullable=False, default="post_trial_report")
-    submitted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
 class InterviewGazeEvent(Base):
     __tablename__ = "interview_gaze_events"
 
@@ -163,16 +131,66 @@ class InterviewGazeEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class InterviewRound(Base):
+    __tablename__ = "interview_rounds"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    round_index = Column(Integer, nullable=False, default=0)
+    phase = Column(String, nullable=False, default="intro")
+    agent_owner = Column(String, nullable=False, default="orchestrator")
+    status = Column(String, nullable=False, default="ACTIVE")
+    question_id = Column(String, nullable=True)
+    question_text = Column(Text, nullable=True)
+    handoff_reason = Column(String, nullable=True)
+    summary_json = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class SessionMemorySnapshot(Base):
+    __tablename__ = "session_memory_snapshots"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    round_index = Column(Integer, nullable=False, default=0)
+    snapshot_kind = Column(String, nullable=False, default="carry_forward")
+    resume_token = Column(String, nullable=True, index=True)
+    memory_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class EvidenceArtifact(Base):
+    __tablename__ = "evidence_artifacts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, index=True, nullable=False)
+    artifact_type = Column(String, index=True, nullable=False, default="capture_bundle")
+    source = Column(String, nullable=False, default="client_capture")
+    trust_level = Column(String, nullable=False, default="trusted")
+    artifact_status = Column(String, nullable=False, default="READY")
+    payload_json = Column(Text, nullable=False, default="{}")
+    word_timestamps_json = Column(Text, nullable=False, default="[]")
+    capture_integrity_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class TrialCode(Base):
     __tablename__ = "trial_codes"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     code = Column(String, unique=True, index=True, nullable=False)
-    display_name = Column(String, nullable=True)
     code_suffix = Column(String, index=True, nullable=True)
     status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE|REDEEMED|REVOKED|EXPIRED|DELETED
     duration_minutes = Column(Integer, nullable=False, default=5)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     created_by_clerk_user_id = Column(String, nullable=False)
     redeemed_by_clerk_user_id = Column(String, nullable=True, index=True)
     redeemed_at = Column(DateTime(timezone=True), nullable=True)
