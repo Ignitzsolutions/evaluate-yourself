@@ -18,7 +18,6 @@ try:
     from backend.agents.hr_agent import plan_hr_turn
     from backend.agents.technical_lead import plan_technical_turn
     from backend.agents.judge_router import build_evaluation_channel_plan
-    from backend.agents.report_aggregator import aggregate_evaluation_channels
     from backend.agents.state import OrchestratorState
     from backend.db import models
     from backend.mcp_servers.resume_context_server import get_candidate_context
@@ -27,7 +26,6 @@ except Exception:  # pragma: no cover
     from agents.hr_agent import plan_hr_turn  # type: ignore
     from agents.technical_lead import plan_technical_turn  # type: ignore
     from agents.judge_router import build_evaluation_channel_plan  # type: ignore
-    from agents.report_aggregator import aggregate_evaluation_channels  # type: ignore
     from agents.state import OrchestratorState  # type: ignore
     from db import models  # type: ignore
     from mcp_servers.resume_context_server import get_candidate_context  # type: ignore
