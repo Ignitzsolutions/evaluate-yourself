@@ -1,4 +1,4 @@
-import { authFetch, getApiErrorMessage, isBackendUnavailableError } from "../apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../apiClient";
 
 describe("apiClient network error handling", () => {
   const originalFetch = global.fetch;
@@ -52,5 +52,30 @@ describe("apiClient network error handling", () => {
         backendLabel: "profile service",
       }),
     ).toBe("The profile service is temporarily unavailable. Please retry.");
+  });
+
+  test("parses structured backend errors into typed UI errors", async () => {
+    const response = {
+      status: 400,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          detail: {
+            code: "TRIAL_CODE_EXPIRED",
+            message: "Trial code expired",
+            retryable: false,
+          },
+        }),
+      ),
+    };
+
+    const error = await buildApiErrorFromResponse(response, {
+      defaultMessage: "Fallback message",
+    });
+
+    expect(error.status).toBe(400);
+    expect(error.code).toBe("TRIAL_CODE_EXPIRED");
+    expect(error.userMessage).toBe("Trial code expired");
+    expect(error.retryable).toBe(false);
+    expect(getApiErrorMessage(error)).toBe("Trial code expired");
   });
 });

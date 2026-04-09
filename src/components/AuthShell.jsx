@@ -38,9 +38,7 @@ export default function AuthShell({
           )}
         </div>
 
-        <div className="clerk-form-wrap">
-          {children}
-        </div>
+        <div className="clerk-form-wrap">{children}</div>
       </section>
     </div>
   );

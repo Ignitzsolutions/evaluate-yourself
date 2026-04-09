@@ -70,6 +70,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _normalize_utc_naive(value: Optional[datetime]) -> Optional[datetime]:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _require_bootstrap() -> None:
     if not _get_current_user_func or not _is_admin_func:
         raise HTTPException(status_code=500, detail="Admin router not initialized")
@@ -191,6 +199,24 @@ def _ensure_trial_code_schema(db: Session) -> None:
         )
 
 
+def _table_names_safe(db: Session) -> set[str]:
+    try:
+        bind = db.get_bind()
+        if bind is None:
+            return set()
+        return {str(name) for name in inspect(bind).get_table_names()}
+    except Exception:
+        return set()
+
+
+def _optional_table_flags(db: Session) -> Dict[str, bool]:
+    table_names = _table_names_safe(db)
+    return {
+        "launch_waitlist_signups": "launch_waitlist_signups" in table_names,
+        "trial_feedback": "trial_feedback" in table_names,
+    }
+
+
 def _normalize_trial_code_suffix(raw_suffix: Optional[str]) -> Optional[str]:
     if raw_suffix is None:
         return None
@@ -217,14 +243,15 @@ def _normalize_trial_code_display_name(raw_name: Optional[str]) -> Optional[str]
 
 
 def _login_recency(last_login_at: Optional[datetime], now: Optional[datetime] = None) -> str:
-    if not isinstance(last_login_at, datetime):
+    normalized_last_login_at = _normalize_utc_naive(last_login_at)
+    if normalized_last_login_at is None:
         return "stale"
-    current = now or _utcnow()
-    if last_login_at >= current - timedelta(hours=24):
+    current = _normalize_utc_naive(now) or _utcnow()
+    if normalized_last_login_at >= current - timedelta(hours=24):
         return "today"
-    if last_login_at >= current - timedelta(days=7):
+    if normalized_last_login_at >= current - timedelta(days=7):
         return "7d"
-    if last_login_at >= current - timedelta(days=30):
+    if normalized_last_login_at >= current - timedelta(days=30):
         return "30d"
     return "stale"
 
@@ -448,11 +475,17 @@ def admin_summary(
         models.UserEntitlement.is_active == True,  # noqa: E712
         or_(models.UserEntitlement.expires_at.is_(None), models.UserEntitlement.expires_at >= now),
     ).count()
-    waitlist_signups = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
-        models.LaunchWaitlistSignup.status == "ACTIVE"
-    ).scalar() or 0
-    feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
-    feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
+    optional_tables = _optional_table_flags(db)
+    waitlist_signups = 0
+    if optional_tables["launch_waitlist_signups"]:
+        waitlist_signups = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
+            models.LaunchWaitlistSignup.status == "ACTIVE"
+        ).scalar() or 0
+    feedback_total = 0
+    feedback_avg_rating = 0
+    if optional_tables["trial_feedback"]:
+        feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
+        feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
     total_sessions = db.query(models.InterviewSession).count()
     total_reports = db.query(models.InterviewReport).count()
     avg_score = db.query(func.avg(models.InterviewReport.overall_score)).scalar() or 0
@@ -1006,22 +1039,30 @@ def admin_dashboard_overview(
         or_(models.UserEntitlement.expires_at.is_(None), models.UserEntitlement.expires_at >= now),
     ).scalar() or 0
     gaze_events_total = db.query(func.count(models.InterviewGazeEvent.id)).scalar() or 0
-    waitlist_total = db.query(func.count(models.LaunchWaitlistSignup.id)).scalar() or 0
-    waitlist_24h = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
-        models.LaunchWaitlistSignup.created_at >= window_24h
-    ).scalar() or 0
+    optional_tables = _optional_table_flags(db)
+    waitlist_total = 0
+    waitlist_24h = 0
     waitlist_source_counter: Counter = Counter()
-    for row in db.query(
-        models.LaunchWaitlistSignup.source_page,
-        func.count(models.LaunchWaitlistSignup.id),
-    ).group_by(models.LaunchWaitlistSignup.source_page).all():
-        waitlist_source_counter[_normalize_distribution_key(row[0])] = int(row[1] or 0)
+    if optional_tables["launch_waitlist_signups"]:
+        waitlist_total = db.query(func.count(models.LaunchWaitlistSignup.id)).scalar() or 0
+        waitlist_24h = db.query(func.count(models.LaunchWaitlistSignup.id)).filter(
+            models.LaunchWaitlistSignup.created_at >= window_24h
+        ).scalar() or 0
+        for row in db.query(
+            models.LaunchWaitlistSignup.source_page,
+            func.count(models.LaunchWaitlistSignup.id),
+        ).group_by(models.LaunchWaitlistSignup.source_page).all():
+            waitlist_source_counter[_normalize_distribution_key(row[0])] = int(row[1] or 0)
 
-    feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
-    feedback_7d = db.query(func.count(models.TrialFeedback.id)).filter(
-        models.TrialFeedback.submitted_at >= window_7d
-    ).scalar() or 0
-    feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
+    feedback_total = 0
+    feedback_7d = 0
+    feedback_avg_rating = 0
+    if optional_tables["trial_feedback"]:
+        feedback_total = db.query(func.count(models.TrialFeedback.id)).scalar() or 0
+        feedback_7d = db.query(func.count(models.TrialFeedback.id)).filter(
+            models.TrialFeedback.submitted_at >= window_7d
+        ).scalar() or 0
+        feedback_avg_rating = db.query(func.avg(models.TrialFeedback.rating)).scalar() or 0
 
     registered_total = db.query(func.count(models.User.id)).filter(
         models.User.is_deleted == False,  # noqa: E712
@@ -1108,11 +1149,12 @@ def admin_dashboard_overview(
         if row and row[0]
     }
     for user in all_users:
+        normalized_last_login_at = _normalize_utc_naive(user.last_login_at)
         if user.clerk_user_id not in has_profile_ids:
             missing_profile_count += 1
         if not user.email and not user.phone_e164:
             missing_contact_count += 1
-        if not user.last_login_at or user.last_login_at < window_30d:
+        if normalized_last_login_at is None or normalized_last_login_at < window_30d:
             stale_login_count += 1
         if report_counts_by_user.get(str(user.clerk_user_id), 0) <= 0:
             no_reports_count += 1
@@ -1170,9 +1212,11 @@ def admin_dashboard_overview(
             }
         )
 
-    recent_waitlist_rows = db.query(models.LaunchWaitlistSignup).order_by(
-        models.LaunchWaitlistSignup.created_at.desc()
-    ).limit(8).all()
+    recent_waitlist_rows = []
+    if optional_tables["launch_waitlist_signups"]:
+        recent_waitlist_rows = db.query(models.LaunchWaitlistSignup).order_by(
+            models.LaunchWaitlistSignup.created_at.desc()
+        ).limit(8).all()
     recent_waitlist = [
         {
             "id": row.id,
@@ -1185,9 +1229,11 @@ def admin_dashboard_overview(
         for row in recent_waitlist_rows
     ]
 
-    recent_feedback_rows = db.query(models.TrialFeedback).order_by(
-        models.TrialFeedback.submitted_at.desc()
-    ).limit(8).all()
+    recent_feedback_rows = []
+    if optional_tables["trial_feedback"]:
+        recent_feedback_rows = db.query(models.TrialFeedback).order_by(
+            models.TrialFeedback.submitted_at.desc()
+        ).limit(8).all()
     recent_feedback = [
         {
             "id": row.id,
@@ -1736,9 +1782,7 @@ def evaluation_quality_summary(
     db: Session = Depends(get_db),
 ):
     def _as_dt(value: Optional[datetime]) -> Optional[datetime]:
-        if isinstance(value, datetime):
-            return value
-        return None
+        return _normalize_utc_naive(value)
 
     def _percentile(values: List[int], pct: float) -> Optional[float]:
         if not values:

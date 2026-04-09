@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
 import BackendUnavailableState from "../components/BackendUnavailableState";
-import { authFetch, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 
@@ -43,15 +43,15 @@ export default function AdminEntryPage() {
 
         const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
         if (!resp.ok) {
-          if (mounted) {
-            setState({
-              checking: false,
-              target: "/admin/login",
-              errorKind: resp.status >= 500 ? "server_error" : "",
-              errorMessage: resp.status >= 500 ? "Admin verification failed. Check the backend and try again." : "",
-            });
+          if (!devBypass && resp.status === 401) {
+            if (mounted) {
+              setState({ checking: false, target: "/admin/login", errorKind: "", errorMessage: "" });
+            }
+            return;
           }
-          return;
+          throw await buildApiErrorFromResponse(resp, {
+            defaultMessage: "Admin verification failed. Check the backend and try again.",
+          });
         }
 
         const data = await resp.json();
@@ -67,7 +67,7 @@ export default function AdminEntryPage() {
         setState({
           checking: false,
           target: "/admin/login",
-          errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : "generic",
+          errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : error?.status >= 500 ? "server_error" : "generic",
           errorMessage: getApiErrorMessage(error, {
             backendLabel: "admin access service",
             defaultMessage: "Unable to verify admin access.",

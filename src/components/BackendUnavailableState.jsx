@@ -2,31 +2,52 @@ import React from "react";
 import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 
 export default function BackendUnavailableState({
-  title = "Backend Unavailable",
-  message = "The backend service is temporarily unavailable. Please retry.",
+  title = "Service Unavailable",
+  message = "The backend is currently unavailable. Please try again.",
   onRetry,
-  retryLabel = "Retry",
 }) {
   return (
-    <Box sx={{ minHeight: "40vh", display: "grid", placeItems: "center", p: 3 }}>
-      <Stack spacing={2} sx={{ width: "100%", maxWidth: 560 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-            {title}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            The frontend is running, but the API could not be reached.
-          </Typography>
-        </Box>
-        <Alert severity="error">{message}</Alert>
-        {typeof onRetry === "function" && (
+    <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center", p: 3 }}>
+      <Box
+        sx={{
+          width: "100%",
+          maxWidth: 560,
+          border: "1px solid",
+          borderColor: "divider",
+          bgcolor: "background.paper",
+          borderRadius: 2,
+          boxShadow: 1,
+          p: { xs: 3, sm: 4 },
+        }}
+      >
+        <Stack spacing={2.5}>
           <Box>
-            <Button variant="contained" onClick={onRetry}>
-              {retryLabel}
-            </Button>
+            <Typography variant="overline" sx={{ color: "text.secondary", letterSpacing: 1.6 }}>
+              Backend Status
+            </Typography>
+            <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5 }}>
+              {title}
+            </Typography>
           </Box>
-        )}
-      </Stack>
+
+          <Alert severity="warning" variant="outlined">
+            {message}
+          </Alert>
+
+          <Typography variant="body2" color="text.secondary">
+            Check whether the API server is running, reachable from this environment, and using the
+            expected base URL. Then retry the request.
+          </Typography>
+
+          {typeof onRetry === "function" ? (
+            <Box>
+              <Button variant="contained" onClick={onRetry}>
+                Retry
+              </Button>
+            </Box>
+          ) : null}
+        </Stack>
+      </Box>
     </Box>
   );
 }

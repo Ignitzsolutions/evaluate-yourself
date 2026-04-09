@@ -3,9 +3,6 @@ import { useAuth } from "@clerk/clerk-react";
 import { authFetch } from "../utils/apiClient";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -29,7 +26,6 @@ import {
   Assessment,
   Chat,
   Download,
-  ExpandMore,
   PlayArrow,
   QuestionAnswer,
   Speed,
@@ -41,10 +37,6 @@ import {
   Legend,
   Line,
   LineChart,
-  PolarAngleAxis,
-  PolarGrid,
-  Radar,
-  RadarChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -72,37 +64,6 @@ function normalizeSpeaker(speaker = "") {
   return s;
 }
 
-function formatGazeFlagLabel(flag = "") {
-  const normalized = String(flag || "").trim().toUpperCase();
-  const mapping = {
-    OFF_SCREEN: "Looking Away",
-    LOOKING_DOWN: "Looking Down",
-    LOOKING_UP: "Looking Up",
-    FACE_NOT_VISIBLE: "Face Not Visible",
-  };
-  return mapping[normalized] || String(flag || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-const reportSurfaceSx = {
-  border: "1px solid rgba(15, 23, 42, 0.08)",
-  borderRadius: 4,
-  background: "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,247,240,0.98) 100%)",
-  boxShadow: "0 22px 60px rgba(15, 23, 42, 0.08)",
-};
-
-const reportPanelSx = {
-  border: "1px solid rgba(15, 23, 42, 0.08)",
-  borderRadius: 3,
-  backgroundColor: "rgba(255,255,255,0.92)",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.05)",
-};
-
-const reportMetricCardSx = {
-  ...reportPanelSx,
-  height: "100%",
-  background: "linear-gradient(180deg, #ffffff 0%, #f8f5ef 100%)",
-};
-
 export default function ReportPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -113,8 +74,6 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const [downloadError, setDownloadError] = useState("");
-  const [enrichmentPending, setEnrichmentPending] = useState(false);
 
   const [experienceRating, setExperienceRating] = useState(0);
   const [feedback, setFeedback] = useState("");
@@ -128,7 +87,6 @@ export default function ReportPage() {
 
   const fetchReport = useCallback(async () => {
     if (!sessionId) {
-      setError("No report session was provided.");
       setLoading(false);
       return;
     }
@@ -148,7 +106,6 @@ export default function ReportPage() {
 
       const data = await response.json();
       setReport(data);
-      setEnrichmentPending(data?.enrichment_status === "pending");
 
       const sessionKey = data?.session_id || sessionId;
       if (sessionKey) {
@@ -179,26 +136,6 @@ export default function ReportPage() {
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
-
-  // Poll for v2 enrichment completion when status is pending
-  useEffect(() => {
-    if (!enrichmentPending || !sessionId) return;
-    const poll = async () => {
-      try {
-        const token = await getToken();
-        const res = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {});
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.enrichment_status !== "pending") {
-            setReport(data);
-            setEnrichmentPending(false);
-          }
-        }
-      } catch (_) { /* silent */ }
-    };
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
-  }, [enrichmentPending, sessionId, getToken]);
 
   const metrics = useMemo(() => {
     if (!report?.metrics) return {};
@@ -311,14 +248,9 @@ export default function ReportPage() {
   const eyeContactPct = typeof metrics.eye_contact_pct === "number"
     ? metrics.eye_contact_pct
     : (typeof gazeSummary?.eye_contact_pct === "number" ? gazeSummary.eye_contact_pct : null);
-  const effectiveGazeSummary = metrics.gaze_summary && typeof metrics.gaze_summary === "object"
-    ? metrics.gaze_summary
-    : (gazeSummary && typeof gazeSummary === "object" ? gazeSummary : null);
-  const gazeFlagsByType = useMemo(() => (
-    metrics.gaze_flags_by_type && typeof metrics.gaze_flags_by_type === "object"
-      ? metrics.gaze_flags_by_type
-      : (gazeSummary?.events_by_type || {})
-  ), [gazeSummary?.events_by_type, metrics.gaze_flags_by_type]);
+  const gazeFlagsByType = metrics.gaze_flags_by_type && typeof metrics.gaze_flags_by_type === "object"
+    ? metrics.gaze_flags_by_type
+    : (gazeSummary?.events_by_type || {});
   const gazeFlagsCount = typeof metrics.gaze_flags_count === "number"
     ? metrics.gaze_flags_count
     : (typeof gazeSummary?.total_events === "number" ? gazeSummary.total_events : gazeEvents.length);
@@ -328,10 +260,6 @@ export default function ReportPage() {
   const captureStatus = typeof metrics.capture_status === "string" ? metrics.capture_status : "COMPLETE";
   const isIncompleteCapture = captureStatus === "INCOMPLETE_NO_CANDIDATE_AUDIO";
   const isPartialCapture = captureStatus === "INCOMPLETE_PARTIAL_CAPTURE";
-  const avgWordsPerTurn = report?.turn_analyses?.length > 0
-    ? Math.round((metrics.candidate_word_count || 0) / report.turn_analyses.length)
-    : 0;
-  const isLowCaptureQuality = (metrics.candidate_word_count || 0) < 80 || avgWordsPerTurn < 12;
 
   // Parse score breakdown from report
   const scores = useMemo(() => {
@@ -346,40 +274,50 @@ export default function ReportPage() {
       eye_contact: typeof s.eye_contact === "number" ? s.eye_contact : null,
     };
   }, [report?.scores]);
+  const turnEvaluations = Array.isArray(metrics.turn_evaluations) ? metrics.turn_evaluations : [];
+  const turnEvalSummary = metrics.turn_eval_summary && typeof metrics.turn_eval_summary === "object"
+    ? metrics.turn_eval_summary
+    : null;
   const evaluationExplainability = metrics.evaluation_explainability && typeof metrics.evaluation_explainability === "object"
     ? metrics.evaluation_explainability
     : null;
+  const contractVersion = typeof metrics.evaluation_contract_version === "string"
+    ? metrics.evaluation_contract_version
+    : "v1";
   const contractPassed = typeof metrics.contract_passed === "boolean"
     ? metrics.contract_passed
     : true;
   const validationFlags = Array.isArray(metrics.validation_flags) ? metrics.validation_flags : [];
+  const captureEvidence = metrics.capture_evidence && typeof metrics.capture_evidence === "object"
+    ? metrics.capture_evidence
+    : {};
+  const captureIntegrity = metrics.capture_integrity && typeof metrics.capture_integrity === "object"
+    ? metrics.capture_integrity
+    : {};
   const scoreProvenance = metrics.score_provenance && typeof metrics.score_provenance === "object"
     ? metrics.score_provenance
     : {};
-  const scoreLedger = Array.isArray(metrics.score_ledger) ? metrics.score_ledger : [];
-  const scoreReconciliation = metrics.score_reconciliation && typeof metrics.score_reconciliation === "object"
-    ? metrics.score_reconciliation
-    : null;
-  const validationSummary = report?.validation_summary && typeof report.validation_summary === "object"
-    ? report.validation_summary
-    : (metrics.validation_summary && typeof metrics.validation_summary === "object" ? metrics.validation_summary : null);
-  const reportState = typeof report?.report_state === "string"
-    ? report.report_state
-    : (isIncompleteCapture ? "invalid_no_candidate_audio_report" : isPartialCapture ? "partial_low_confidence_report" : "valid_scored_report");
-  const planTier = typeof metrics.plan_tier === "string" && metrics.plan_tier.trim()
-    ? metrics.plan_tier.trim().toLowerCase()
-    : "trial";
-  const isTrialPlan = Boolean(metrics.trial_mode) || planTier === "trial";
-  const isInvalidReport = reportState === "invalid_no_candidate_audio_report";
-  const isPartialLowConfidenceReport = reportState === "partial_low_confidence_report";
-  const showDetailedEvaluationSections = !isInvalidReport && !isTrialPlan;
+  const scoreTrustLevel = typeof metrics.score_trust_level === "string"
+    ? metrics.score_trust_level
+    : "trusted";
+  const rubricVersion = metrics.rubric_version || scoreProvenance.rubric_version || evaluationExplainability?.rubric_version || "unknown";
+  const scorerVersion = metrics.scorer_version || scoreProvenance.scorer_version || evaluationExplainability?.scorer_version || "unknown";
+  const turnEvidence = Array.isArray(metrics.turn_evidence) ? metrics.turn_evidence : [];
   const contractWarningFromState = location.state?.contractWarning;
   const forcedZeroReason = scoreProvenance.forced_zero_reason || evaluationExplainability?.forced_zero_reason || null;
   const shouldShowForcedZero = Number(report?.overall_score || 0) === 0 && (
-    Boolean(forcedZeroReason) || !contractPassed || isInvalidReport
+    Boolean(forcedZeroReason) || !contractPassed || isIncompleteCapture
   );
   const sessionFeedback = metrics.session_feedback && typeof metrics.session_feedback === "object"
     ? metrics.session_feedback
+    : null;
+  const communicationSignals = metrics.communication_signals && typeof metrics.communication_signals === "object"
+    ? metrics.communication_signals
+    : (metrics.evaluation_channels?.english_communication && typeof metrics.evaluation_channels.english_communication === "object"
+      ? metrics.evaluation_channels.english_communication
+      : {});
+  const confidenceScore = typeof metrics.confidence_score === "number"
+    ? metrics.confidence_score
     : null;
 
   useEffect(() => {
@@ -411,134 +349,6 @@ export default function ReportPage() {
     if (!ms || Number.isNaN(ms)) return "0.0s";
     return `${(Number(ms) / 1000).toFixed(1)}s`;
   };
-
-  const benchmarkLabel = useMemo(() => {
-    if (isInvalidReport) return "Unavailable";
-    if (isPartialLowConfidenceReport) return "Provisional";
-    if (isTrialPlan) return "Trial";
-    const overall = Number(report?.overall_score || 0);
-    if (overall >= 85) return "Elite";
-    if (overall >= 75) return "Strong";
-    if (overall >= 60) return "Competitive";
-    if (overall >= 45) return "Developing";
-    return "At Risk";
-  }, [isInvalidReport, isPartialLowConfidenceReport, isTrialPlan, report?.overall_score]);
-
-  const benchmarkNarrative = useMemo(() => {
-    if (isInvalidReport) {
-      return "This session is invalid for a scored evaluation because candidate evidence was not captured. The report is limited to operational diagnostics and remediation steps.";
-    }
-    if (isPartialLowConfidenceReport) {
-      return "This assessment is provisional. The session captured only partial or low-confidence evidence, so any score should be treated as directional rather than decision-grade.";
-    }
-    if (isTrialPlan) {
-      return "This was a short trial interview. Use it to understand baseline strengths, the biggest risks, and the next few fixes. Upgrade for full-length interviews and deeper evidence-led evaluation.";
-    }
-    const overall = Number(report?.overall_score || 0);
-    if (shouldShowForcedZero) {
-      return "The score is intentionally suppressed because the captured evidence did not meet the standard required for a reliable interview assessment.";
-    }
-    if (overall >= 85) return "This performance sits in the top band: clear, credible, and backed by evidence that would stand up in a serious hiring conversation.";
-    if (overall >= 75) return "This was a strong interview with a hire-ready profile, though a few answers still leave room for sharper execution.";
-    if (overall >= 60) return "The interview was competitive, but the evidence was uneven. A stronger close on impact and ownership would materially improve the signal.";
-    if (overall >= 45) return "There were some credible moments, but the interview did not sustain enough high-quality evidence to feel consistently convincing.";
-    return "The current performance is below a dependable hire-ready threshold and needs targeted rebuilding before a high-stakes interview.";
-  }, [isInvalidReport, isPartialLowConfidenceReport, isTrialPlan, report?.overall_score, shouldShowForcedZero]);
-
-  const executiveStrengths = useMemo(() => {
-    const items = [];
-    const pushUnique = (value) => {
-      const text = String(value || "").trim();
-      if (!text || items.includes(text)) return;
-      items.push(text);
-    };
-
-    (report?.hiring_recommendation?.green_flags || []).forEach(pushUnique);
-    (report?.ai_feedback?.strengths || []).forEach(pushUnique);
-
-    if (report?.competency_scores && typeof report.competency_scores === "object") {
-      Object.entries(report.competency_scores)
-        .filter(([, score]) => typeof score === "number")
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 2)
-        .forEach(([key, score]) => {
-          pushUnique(`${String(key).replace(/_/g, " ")} scored ${score}/100 and stands out as a repeatable strength.`);
-        });
-    }
-
-    return items.slice(0, 3);
-  }, [report]);
-
-  const executiveRisks = useMemo(() => {
-    const items = [];
-    const pushUnique = (value) => {
-      const text = String(value || "").trim();
-      if (!text || items.includes(text)) return;
-      items.push(text);
-    };
-
-    (validationSummary?.top_risks || []).forEach(pushUnique);
-    (report?.hiring_recommendation?.red_flags || []).forEach(pushUnique);
-    (report?.improvement_roadmap || []).slice(0, 3).forEach((item) => pushUnique(item.finding));
-
-    return items.slice(0, 3);
-  }, [report, validationSummary]);
-  const gazeBehaviorSummary = useMemo(() => {
-    const flags = gazeFlagsByType && typeof gazeFlagsByType === "object" ? gazeFlagsByType : {};
-    const lines = [];
-    if (Number(flags.LOOKING_DOWN || 0) > 0) {
-      lines.push(`Looking down was detected ${flags.LOOKING_DOWN} time(s).`);
-    }
-    if (Number(flags.OFF_SCREEN || 0) > 0) {
-      lines.push(`Looking away from screen was detected ${flags.OFF_SCREEN} time(s).`);
-    }
-    if (Number(flags.FACE_NOT_VISIBLE || 0) > 0) {
-      lines.push(`Face loss was detected ${flags.FACE_NOT_VISIBLE} time(s).`);
-    }
-    if (eyeContactPct != null) {
-      lines.push(`Observed on-screen eye contact measured ${Number(eyeContactPct).toFixed(1)}%.`);
-    }
-    return lines;
-  }, [gazeFlagsByType, eyeContactPct]);
-
-  const premiumActionPlan = useMemo(() => {
-    const roadmap = Array.isArray(report?.improvement_roadmap) ? report.improvement_roadmap : [];
-    return roadmap.slice(0, 3).map((item, idx) => ({
-      ...item,
-      priorityLabel: idx === 0 ? "Immediate" : idx === 1 ? "Next" : "Then",
-      impactLabel: idx === 0 ? "High impact" : idx === 1 ? "Medium impact" : "Targeted improvement",
-    }));
-  }, [report?.improvement_roadmap]);
-  const remediationSteps = useMemo(() => {
-    if (Array.isArray(report?.ai_feedback?.areas_for_improvement) && report.ai_feedback.areas_for_improvement.length > 0) {
-      return report.ai_feedback.areas_for_improvement.slice(0, 4);
-    }
-    if (Array.isArray(report?.recommendations) && report.recommendations.length > 0) {
-      return report.recommendations.slice(0, 4);
-    }
-    return [
-      "Verify microphone permissions and the active input device.",
-      "Confirm candidate speech appears in the live transcript before continuing.",
-      "Re-run the interview only after audio capture and transcript visibility are stable.",
-    ];
-  }, [report]);
-  const gazeReliable = Boolean(effectiveGazeSummary?.calibration_valid) && String(effectiveGazeSummary?.calibration_state || "").toLowerCase() === "complete";
-  const gazeReliabilityNote = gazeReliable
-    ? null
-    : "Gaze observations were captured, but calibration quality was not strong enough to turn them into prescriptive coaching for this session.";
-  const showPremiumEvaluationSections = !isInvalidReport;
-  const showRecommendationBadge = showDetailedEvaluationSections && !isPartialLowConfidenceReport && report?.hiring_recommendation;
-  const scoreWeightChips = useMemo(() => {
-    if (!evaluationExplainability?.weights || typeof evaluationExplainability.weights !== "object") {
-      return [];
-    }
-    return Object.entries(evaluationExplainability.weights)
-      .filter(([, value]) => typeof value === "number")
-      .map(([key, value]) => ({
-        key,
-        label: `${String(key).replace(/_/g, " ")} ${Math.round(value * 100)}%`,
-      }));
-  }, [evaluationExplainability?.weights]);
 
   const persistSessionFeedback = useCallback(async () => {
     if (!report?.id) return;
@@ -598,24 +408,23 @@ export default function ReportPage() {
   const handleDownload = async () => {
     if (!sessionId) return;
     setDownloadLoading(true);
-    setDownloadError("");
     try {
       const token = await getToken();
-      const resp = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}/artifact?format=html`, token);
+      const resp = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}/download?format=pdf`, token);
       if (!resp.ok) {
-        throw new Error(`Unable to open printable report (${resp.status})`);
+        throw new Error(`Download failed: ${resp.status}`);
       }
-      const html = await resp.text();
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const blob = await resp.blob();
       const url = window.URL.createObjectURL(blob);
-      const opened = window.open(url, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        window.URL.revokeObjectURL(url);
-        throw new Error("Popup blocked while opening the printable report.");
-      }
-      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `interview-report-${sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (e) {
-      setDownloadError(e.message || "Unable to open the printable report.");
+      console.error("Download failed:", e);
     } finally {
       setDownloadLoading(false);
     }
@@ -641,33 +450,19 @@ export default function ReportPage() {
   }
 
   return (
-    <Box
-      sx={{
-        p: { xs: 2, md: 4 },
-        pb: { xs: 4, md: 6 },
-        maxWidth: 1240,
-        mx: "auto",
-        background:
-          "radial-gradient(circle at top left, rgba(214, 176, 108, 0.10), transparent 32%), linear-gradient(180deg, #f7f3eb 0%, #fdfcf9 28%, #ffffff 100%)",
-      }}
-    >
+    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1200, mx: "auto" }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" }, mb: 3, flexWrap: "wrap", gap: 1.5 }}>
         <Box>
-          <Typography variant="overline" sx={{ letterSpacing: 2.4, color: "text.secondary", fontWeight: 700 }}>
-            {isTrialPlan ? "Trial Interview Report" : "Ignitz Interview Dossier"}
-          </Typography>
-          <Typography variant="h4" sx={{ fontWeight: 800, fontSize: { xs: "1.95rem", md: "2.4rem" } }}>
-            Interview Assessment
+          <Typography variant="h4" sx={{ fontWeight: 700, fontSize: { xs: "1.75rem", md: "2.125rem" } }}>
+            Interview Analysis
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {isTrialPlan
-              ? "Short-form interview feedback with clear next steps. Upgrade for deeper evidence-led analysis and full-length interviews."
-              : "Decision-grade evaluation with evidence quality, scoring proof, and targeted coaching priorities."}
+            Session telemetry captured during the live interview.
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
           <Button variant="outlined" startIcon={<Download />} onClick={handleDownload} disabled={downloadLoading}>
-            {downloadLoading ? "Preparing..." : "Open Printable Report"}
+            {downloadLoading ? "Preparing..." : "Download PDF"}
           </Button>
           <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/")}>
             Back to Home
@@ -675,105 +470,60 @@ export default function ReportPage() {
         </Box>
       </Box>
 
-      {downloadError && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {downloadError}
-        </Alert>
-      )}
-
-      {isInvalidReport && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Session invalid for scored evaluation.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Candidate speech was not captured with enough evidence to score this session. Use the remediation steps below, then re-run the interview.
-          </Typography>
-        </Alert>
-      )}
-      {isPartialLowConfidenceReport && (
+      {isIncompleteCapture && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Evaluation provisional: low-confidence session.
+            Evaluation incomplete: candidate speech was not captured.
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            This report reflects partial or low-confidence evidence only. Treat it as directional, not decision-grade.
+            Retry interview after checking microphone permission and live transcription capture.
           </Typography>
         </Alert>
       )}
-      {showPremiumEvaluationSections && !isPartialLowConfidenceReport && (
+      {captureStatus === "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Evaluation incomplete: only browser fallback transcript was captured for the candidate.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            The interview transcript remains visible for review, but fallback-only candidate transcript is excluded from trusted scoring.
+          </Typography>
+        </Alert>
+      )}
+      {isPartialCapture && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Evaluation partial: this session ended early.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Score reflects partial interview evidence only; confidence is reduced.
+          </Typography>
+        </Alert>
+      )}
+      {!isIncompleteCapture && !isPartialCapture && captureStatus !== "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
         <Alert severity="success" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             Evaluation complete: candidate responses were captured and analyzed.
           </Typography>
         </Alert>
       )}
-
-      {isTrialPlan && !isInvalidReport && (
-        <Alert severity="info" sx={{ mb: 3 }}>
+      {scoreTrustLevel === "mixed_evidence" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Trial interview report
+            Mixed transcript evidence detected.
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            This report covers the baseline score, summary, main strengths, main risks, and a short action plan. Upgrade for full-length interviews, richer evidence-led feedback, and the complete report ledger.
+            Browser fallback transcript kept the interview moving, but scoring used only trusted server-captured candidate turns.
           </Typography>
         </Alert>
       )}
-
-      {/* ── Enrichment pending banner ────────────────────────────────────── */}
-      {enrichmentPending && (
-        <Alert severity="info" icon={<CircularProgress size={16} />} sx={{ mb: 3 }}>
+      {scoreTrustLevel === "coaching_only" && !isIncompleteCapture && captureStatus !== "INCOMPLETE_FALLBACK_ONLY_CAPTURE" && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Generating detailed analysis… this takes a few seconds.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Hiring recommendation, per-question breakdown, and improvement roadmap will appear shortly.
+            This score should be treated as coaching-quality guidance, not a fully trusted evaluation.
           </Typography>
         </Alert>
       )}
-
-      {/* ── Hiring Recommendation Badge ─────────────────────────────────── */}
-      {showRecommendationBadge && (() => {
-        const hr = report.hiring_recommendation;
-        const colorMap = { strong_hire: "success", hire: "success", borderline: "warning", no_hire: "error" };
-        const bgMap = { strong_hire: "#e8f5e9", hire: "#f1f8e9", borderline: "#fff8e1", no_hire: "#ffebee" };
-        const color = colorMap[hr.signal] || "default";
-        const bg = bgMap[hr.signal] || "#f5f5f5";
-        return (
-          <Card sx={{ mb: 3, border: "2px solid", borderColor: `${color}.main`, backgroundColor: bg }}>
-            <CardContent>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1.5, flexWrap: "wrap" }}>
-                <Typography variant="h5" sx={{ fontWeight: 800 }}>Hiring Recommendation</Typography>
-                <Chip
-                  label={hr.label}
-                  color={color}
-                  size="medium"
-                  sx={{ fontWeight: 700, fontSize: "1rem", px: 1 }}
-                />
-              </Box>
-              <Box sx={{ display: "grid", gap: 0.75 }}>
-                {(hr.rationale_bullets || []).map((b, i) => (
-                  <Typography key={i} variant="body2" color="text.secondary">• {b}</Typography>
-                ))}
-              </Box>
-              {(hr.green_flags || []).length > 0 && (
-                <Box sx={{ mt: 1.5, display: "flex", gap: 1, flexWrap: "wrap" }}>
-                  {hr.green_flags.map((f, i) => (
-                    <Chip key={i} size="small" label={`✓ ${f.slice(0, 60)}`} color="success" variant="outlined" />
-                  ))}
-                </Box>
-              )}
-              {(hr.red_flags || []).length > 0 && (
-                <Box sx={{ mt: 1, display: "flex", gap: 1, flexWrap: "wrap" }}>
-                  {hr.red_flags.map((f, i) => (
-                    <Chip key={i} size="small" label={`⚠ ${f.slice(0, 60)}`} color="error" variant="outlined" />
-                  ))}
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       {sessionFeedback && (
         <Alert severity="success" sx={{ mb: 3 }}>
@@ -796,331 +546,170 @@ export default function ReportPage() {
         </Alert>
       )}
 
-      {shouldShowForcedZero && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <Typography variant="body2">
-            Score forced to 0 due to missing or invalid evidence.
-          </Typography>
-        </Alert>
-      )}
-      {!contractPassed && validationFlags.length > 0 && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Validation flags
-          </Typography>
-          {validationFlags.map((flag, idx) => (
-            <Typography key={`${flag}-${idx}`} variant="body2" color="text.secondary">
-              • {flag}
-            </Typography>
-          ))}
-        </Alert>
-      )}
-
-      <Card sx={{ ...reportSurfaceSx, mb: 3, overflow: "hidden" }}>
+      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
-          <Grid container spacing={2.5} alignItems="stretch">
-            <Grid item xs={12} md={7}>
-              <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
-                Executive Assessment
-              </Typography>
-              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mb: 1.5 }}>
-                <Chip
-                  label={`Benchmark: ${benchmarkLabel}`}
-                  color={isInvalidReport ? "default" : Number(report?.overall_score || 0) >= 75 ? "success" : Number(report?.overall_score || 0) >= 60 ? "warning" : "error"}
-                />
-                {showRecommendationBadge && report?.hiring_recommendation?.label && (
-                  <Chip label={report.hiring_recommendation.label} variant="outlined" color="primary" />
-                )}
-                {validationSummary?.validity_label && (
-                  <Chip
-                    label={`Validity: ${String(validationSummary.validity_label).replace(/^./, (c) => c.toUpperCase())}`}
-                    variant="outlined"
-                    color={validationSummary.validity_label === "high" ? "success" : validationSummary.validity_label === "moderate" ? "warning" : "error"}
-                  />
-                )}
-              </Box>
-              <Typography variant="body1" sx={{ mb: 1.5 }}>
-                {benchmarkNarrative}
-              </Typography>
-              {report?.score_context && showDetailedEvaluationSections && (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  {report.score_context}
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Validation & Provenance
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Contract checks verify whether captured evidence is sufficient for a valid score.
+          </Typography>
+          {(captureIntegrity.trusted_candidate_turn_count > 0 || captureIntegrity.fallback_candidate_turn_count > 0) && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Trusted candidate turns: <strong>{captureIntegrity.trusted_candidate_turn_count ?? 0}</strong>
+              {" · "}
+              Fallback candidate turns: <strong>{captureIntegrity.fallback_candidate_turn_count ?? 0}</strong>
+              {" · "}
+              Score trust: <strong>{scoreTrustLevel}</strong>
+            </Typography>
+          )}
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Contract Status</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {contractPassed ? "Passed" : "Failed"}
                 </Typography>
-              )}
-              {report?.ai_feedback?.overall_summary && (
-                <Alert severity="info" icon={false} sx={{ py: 0.75 }}>
-                  <Typography variant="body2">{report.ai_feedback.overall_summary}</Typography>
-                </Alert>
-              )}
-              {isInvalidReport && (
-                <Alert severity="error" icon={false} sx={{ py: 0.75 }}>
-                  <Typography variant="body2">
-                    Insufficient candidate evidence was captured. No benchmark comparison or hiring recommendation should be inferred from this artifact.
-                  </Typography>
-                </Alert>
-              )}
+              </CardContent></Card>
             </Grid>
-            <Grid item xs={12} md={5}>
-              <Card variant="outlined" sx={{ ...reportPanelSx, height: "100%", background: "linear-gradient(180deg, #101828 0%, #172131 100%)", color: "#f8fafc" }}>
-                <CardContent>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.25 }}>
-                    Score Validity
-                  </Typography>
-                  <Box sx={{ display: "grid", gap: 1 }}>
-                    <Box>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: "rgba(248,250,252,0.88)" }}>Validity Score</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: "#ffffff" }}>
-                          {validationSummary?.validity_score ?? "--"}/100
-                        </Typography>
-                      </Box>
-                      <LinearProgress
-                        variant="determinate"
-                        value={validationSummary?.validity_score ?? 0}
-                        sx={{
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor: "action.hover",
-                          "& .MuiLinearProgress-bar": {
-                            borderRadius: 4,
-                            backgroundColor:
-                              validationSummary?.validity_label === "high"
-                                ? "#2e7d32"
-                                : validationSummary?.validity_label === "moderate"
-                                  ? "#ed6c02"
-                                  : "#d32f2f",
-                          },
-                        }}
-                      />
-                    </Box>
-                    <Typography variant="body2" sx={{ color: "rgba(248,250,252,0.72)" }}>
-                      Source: {String(scoreProvenance.source || evaluationExplainability?.source || "unknown").replace(/_/g, " ")}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(248,250,252,0.72)" }}>
-                      Confidence: {String(scoreProvenance.confidence || evaluationExplainability?.confidence || "unknown").replace(/^./, (c) => c.toUpperCase())}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(248,250,252,0.72)" }}>
-                      Capture status: {captureStatus.replace(/_/g, " ")}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: "rgba(248,250,252,0.72)" }}>
-                      Evaluated turns: {validationSummary?.evidence_stats?.turns_evaluated ?? metrics?.turn_eval_summary?.turn_count ?? 0}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Source</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {scoreProvenance.source || evaluationExplainability?.source || "unknown"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Confidence</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {scoreProvenance.confidence || evaluationExplainability?.confidence || "unknown"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Turns Evaluated</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {captureEvidence.turns_evaluated ?? evaluationExplainability?.turns_evaluated ?? turnEvaluations.length}
+                </Typography>
+              </CardContent></Card>
             </Grid>
           </Grid>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Contract Version: <strong>{contractVersion}</strong> · Candidate Words: <strong>{captureEvidence.candidate_word_count ?? metrics.candidate_word_count ?? 0}</strong> · Candidate Turns: <strong>{captureEvidence.candidate_turn_count ?? metrics.candidate_turn_count ?? 0}</strong>
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Rubric: <strong>{rubricVersion}</strong> · Scorer: <strong>{scorerVersion}</strong>
+          </Typography>
+          {shouldShowForcedZero && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                Score forced to 0 due to missing or invalid evidence.
+              </Typography>
+            </Alert>
+          )}
+          {!contractPassed && validationFlags.length > 0 && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Validation flags
+              </Typography>
+              {validationFlags.map((flag, idx) => (
+                <Typography key={`${flag}-${idx}`} variant="body2" color="text.secondary">
+                  • {flag}
+                </Typography>
+              ))}
+            </Alert>
+          )}
+          {turnEvidence.length > 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Evidence-backed turns persisted: <strong>{turnEvidence.length}</strong>
+            </Typography>
+          )}
         </CardContent>
       </Card>
 
-      {showPremiumEvaluationSections && (executiveStrengths.length > 0 || executiveRisks.length > 0) && (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={12} md={6}>
-            <Card sx={{ ...reportPanelSx, height: "100%" }}>
-              <CardContent>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-                  Top Strengths
-                </Typography>
-                {executiveStrengths.length > 0 ? executiveStrengths.map((item, idx) => (
-                  <Typography key={`${item}-${idx}`} variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    • {item}
-                  </Typography>
-                )) : (
-                  <Typography variant="body2" color="text.secondary">
-                    No clear strengths were extracted from this session.
-                  </Typography>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Card sx={{ ...reportPanelSx, height: "100%" }}>
-              <CardContent>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-                  Top Risks
-                </Typography>
-                {executiveRisks.length > 0 ? executiveRisks.map((item, idx) => (
-                  <Typography key={`${item}-${idx}`} variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    • {item}
-                  </Typography>
-                )) : (
-                  <Typography variant="body2" color="text.secondary">
-                    No major risks were detected in the captured evidence.
-                  </Typography>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-      )}
-
-      {showDetailedEvaluationSections && validationSummary?.trust_signals?.length > 0 && (
-        <Card sx={{ ...reportPanelSx, mb: 3, background: "linear-gradient(180deg, #fffaf0 0%, #ffffff 100%)" }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-              Why This Score Is Trustworthy
-            </Typography>
-            {validationSummary.trust_signals.map((signal, idx) => (
-              <Typography key={`${signal}-${idx}`} variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                • {signal}
-              </Typography>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {showDetailedEvaluationSections && (evaluationExplainability?.formula || scoreLedger.length > 0) && (
-        <Card sx={{ ...reportSurfaceSx, mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-              Scoring Evidence Ledger
-            </Typography>
-            {evaluationExplainability?.formula && (
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                {evaluationExplainability.formula}
-              </Typography>
-            )}
-            {scoreWeightChips.length > 0 && (
-              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mb: 2 }}>
-                {scoreWeightChips.map((item) => (
-                  <Chip key={item.key} size="small" label={item.label} variant="outlined" />
-                ))}
-              </Box>
-            )}
-            {scoreLedger.length > 0 ? (
-              <Box sx={{ display: "grid", gap: 1.5 }}>
-                {scoreReconciliation && (
-                  <Alert severity={scoreReconciliation.score_delta === 0 ? "info" : "warning"} sx={{ mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      Base score {scoreReconciliation.base_overall_score}/100
-                      {" → "}
-                      final score {scoreReconciliation.final_overall_score}/100
-                    </Typography>
-                    {(scoreReconciliation.score_cap_reason || scoreReconciliation.forced_zero_reason) && (
-                      <Typography variant="body2" color="text.secondary">
-                        Adjustment reason: {String(scoreReconciliation.forced_zero_reason || scoreReconciliation.score_cap_reason).replace(/_/g, " ")}
-                      </Typography>
-                    )}
-                  </Alert>
-                )}
-                {scoreLedger.map((row) => (
-                  <Card
-                    key={row.transcript_ref || row.turn_id}
-                    variant="outlined"
-                    sx={{
-                      ...reportPanelSx,
-                      background: row.included_in_score
-                        ? "linear-gradient(180deg, #ffffff 0%, #f8fbf8 100%)"
-                        : "linear-gradient(180deg, #ffffff 0%, #fbf7f2 100%)",
-                    }}
-                  >
-                    <CardContent>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, flexWrap: "wrap", mb: 1 }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                          {row.transcript_ref_label || `Turn ${row.turn_id}`}
-                        </Typography>
-                        <Chip
-                          size="small"
-                          color={row.included_in_score ? "success" : "default"}
-                          variant={row.included_in_score ? "filled" : "outlined"}
-                          label={row.included_in_score ? `Included • ${row.weighted_points}/100` : `Excluded • ${String(row.exclusion_reason || "not evaluated").replace(/_/g, " ")}`}
-                        />
-                      </Box>
-                      <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.75 }}>
-                        {row.question_text || "Question unavailable"}
-                      </Typography>
-                      {row.answer_excerpt && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
-                          Candidate excerpt: {row.answer_excerpt}
-                        </Typography>
-                      )}
-                      {row.evidence_quote && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          “{row.evidence_quote}”
-                        </Typography>
-                      )}
-                      {row.exclusion_detail && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          {row.exclusion_detail}
-                        </Typography>
-                      )}
-                      <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                        {row.dimension_scores && Object.entries(row.dimension_scores).map(([key, value]) => (
-                          <Chip
-                            key={`${row.turn_id}-${key}`}
-                            size="small"
-                            variant="outlined"
-                            label={`${String(key).replace(/_/g, " ")}: ${typeof value === "number" ? value.toFixed(1) : "n/a"}`}
-                          />
-                        ))}
-                        <Chip size="small" variant="outlined" label={`Words: ${row.answer_word_count || 0}`} />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                ))}
-              </Box>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No scored-turn ledger was available for this session.
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {isInvalidReport && (
-        <Card sx={{ ...reportPanelSx, mb: 3, borderColor: "error.light", backgroundColor: "#fff8f7" }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 600, mb: 1.5 }}>
-              Remediation Steps
-            </Typography>
-            {remediationSteps.map((step, idx) => (
-              <Typography key={`${step}-${idx}`} variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                {idx + 1}. {step}
-              </Typography>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      <Card sx={{ ...reportPanelSx, mb: 3 }}>
+      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Gaze and Presence
+            Communication Signals
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Observational only. Gaze telemetry is excluded from the final score for launch.
+            Pacing and filler metrics are derived from trusted candidate transcript only.
           </Typography>
-          {gazeReliabilityNote ? (
-            <Alert severity="info" icon={false} sx={{ mb: 2, py: 0.75 }}>
-              <Typography variant="body2">{gazeReliabilityNote}</Typography>
-            </Alert>
-          ) : null}
-          {gazeReliable && gazeBehaviorSummary.length > 0 && (
-            <Box sx={{ mb: 2 }}>
-              {gazeBehaviorSummary.map((line, idx) => (
-                <Typography key={`${line}-${idx}`} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  • {line}
+
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Confidence Score</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {confidenceScore != null ? confidenceScore : "—"}
                 </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Pacing Band</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700, textTransform: "capitalize" }}>
+                  {communicationSignals.pacing_band || "unknown"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Filler Words</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {communicationSignals.filler_word_count ?? "—"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card variant="outlined"><CardContent>
+                <Typography variant="caption" color="text.secondary">Fillers / 100 Words</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {communicationSignals.filler_words_per_100 ?? "—"}
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+          </Grid>
+
+          {Array.isArray(communicationSignals.quality_flags) && communicationSignals.quality_flags.length > 0 ? (
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+              {communicationSignals.quality_flags.map((flag) => (
+                <Chip key={flag} size="small" label={flag} color="warning" variant="outlined" />
               ))}
             </Box>
+          ) : (
+            <Alert severity="success">No pacing or filler-risk flags were raised from the trusted transcript.</Alert>
           )}
+        </CardContent>
+      </Card>
+
+      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Gaze Flags Timeline
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Timestamped monitoring flags captured during the interview session.
+          </Typography>
 
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Typography variant="caption" color="text.secondary">Flags Captured</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{gazeFlagsCount}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Typography variant="caption" color="text.secondary">Longest Event</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{formatDurationMs(gazeLongestAwayMs)}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Typography variant="caption" color="text.secondary">Eye Contact</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
                   {eyeContactPct != null ? `${Number(eyeContactPct).toFixed(1)}%` : "Not Captured"}
@@ -1132,16 +721,41 @@ export default function ReportPage() {
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mb: 2 }}>
             {Object.entries(gazeFlagsByType).length > 0 ? (
               Object.entries(gazeFlagsByType).map(([key, value]) => (
-                <Chip key={key} size="small" label={`${formatGazeFlagLabel(key)}: ${value}`} variant="outlined" />
+                <Chip key={key} size="small" label={`${key}: ${value}`} variant="outlined" />
               ))
             ) : (
               <Chip size="small" label="No gaze flags captured" color="success" variant="outlined" />
             )}
           </Box>
+
+          {gazeEvents.length > 0 ? (
+            <Box sx={{ display: "grid", gap: 1 }}>
+              {gazeEvents.slice(0, 25).map((event) => (
+                <Card key={event.id} variant="outlined">
+                  <CardContent sx={{ py: 1.5 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {event.event_type} · {formatDurationMs(event.duration_ms)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {event.description}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {event.started_at ? new Date(event.started_at).toLocaleTimeString() : "-"}
+                      {" → "}
+                      {event.ended_at ? new Date(event.ended_at).toLocaleTimeString() : "-"}
+                      {event.confidence != null ? ` · confidence ${event.confidence}%` : ""}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              ))}
+            </Box>
+          ) : (
+            <Alert severity="info">No gaze flag events were persisted for this session.</Alert>
+          )}
         </CardContent>
       </Card>
 
-      <Card sx={{ ...reportPanelSx, mb: 3 }}>
+      <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
@@ -1152,35 +766,35 @@ export default function ReportPage() {
 
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <AccessTime color="primary" />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{totalDuration} min</Typography>
                 <Typography variant="caption" color="text.secondary">Duration</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <QuestionAnswer color="error" />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{questionsAnswered}</Typography>
                 <Typography variant="caption" color="text.secondary">Questions Answered</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Chat color="success" />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{totalWords}</Typography>
                 <Typography variant="caption" color="text.secondary">Total Words</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Speed sx={{ color: "warning.main" }} />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{wordsPerMinute}</Typography>
                 <Typography variant="caption" color="text.secondary">Words / Min</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Assessment sx={{ color: "info.main" }} />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
                   {avgResponseSeconds != null ? `${avgResponseSeconds}s` : "-"}
@@ -1189,20 +803,20 @@ export default function ReportPage() {
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
-              <Card variant="outlined" sx={reportMetricCardSx}><CardContent>
+              <Card variant="outlined"><CardContent>
                 <Visibility sx={{ color: eyeContactPct != null ? "success.main" : "text.secondary" }} />
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
                   {eyeContactPct != null ? `${eyeContactPct}%` : "Not Captured"}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">Gaze Observation</Typography>
+                <Typography variant="caption" color="text.secondary">Eye Contact</Typography>
               </CardContent></Card>
             </Grid>
           </Grid>
         </CardContent>
       </Card>
 
-      {showDetailedEvaluationSections && scores && (
-        <Card sx={{ ...reportPanelSx, mb: 3 }}>
+      {!isIncompleteCapture && scores && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
           <CardContent>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Box>
@@ -1223,6 +837,7 @@ export default function ReportPage() {
                 { label: "Structure (STAR)", value: scores.structure, color: "#388e3c", help: "Use of Situation / Task / Action / Result" },
                 { label: "Relevance", value: scores.relevance, color: "#7b1fa2", help: "On-topic answers aligned to questions" },
                 ...(scores.technical_depth != null ? [{ label: "Technical Depth", value: scores.technical_depth, color: "#e65100", help: "Domain knowledge, specificity, tradeoffs" }] : []),
+                ...(scores.eye_contact != null ? [{ label: "Eye Contact", value: scores.eye_contact, color: "#00796b", help: "Face-on-camera presence during interview" }] : []),
               ].map(({ label, value, color, help }) => (
                 <Box key={label}>
                   <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
@@ -1243,63 +858,6 @@ export default function ReportPage() {
           </CardContent>
         </Card>
       )}
-
-      {/* ── Competency Radar Chart ──────────────────────────────────────── */}
-      {report?.competency_scores && showDetailedEvaluationSections && (() => {
-        const COMP_LABELS = {
-          communication: "Communication",
-          problem_solving: "Problem Solving",
-          technical_depth: "Technical Depth",
-          ownership: "Ownership",
-          collaboration: "Collaboration",
-          adaptability: "Adaptability",
-        };
-        const radarData = Object.entries(report.competency_scores)
-          .filter(([, v]) => v > 0)
-          .map(([key, value]) => ({ subject: COMP_LABELS[key] || key, score: value, fullMark: 100 }));
-        if (radarData.length < 3) return null;
-        return (
-          <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Competency Analysis</Typography>
-              {report.score_context && (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{report.score_context}</Typography>
-              )}
-              <Grid container spacing={3} alignItems="center">
-                <Grid item xs={12} md={6}>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <RadarChart data={radarData}>
-                      <PolarGrid />
-                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 12 }} />
-                      <Radar name="Score" dataKey="score" stroke="#1976d2" fill="#1976d2" fillOpacity={0.25} />
-                      <Tooltip formatter={(v) => [`${v}/100`, "Score"]} />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Box sx={{ display: "grid", gap: 1.5 }}>
-                    {radarData.map(({ subject, score }) => (
-                      <Box key={subject}>
-                        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{subject}</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: score >= 80 ? "success.main" : score >= 60 ? "warning.main" : "error.main" }}>
-                            {score}/100
-                          </Typography>
-                        </Box>
-                        <LinearProgress
-                          variant="determinate"
-                          value={score}
-                          sx={{ height: 6, borderRadius: 3, backgroundColor: "action.hover", "& .MuiLinearProgress-bar": { backgroundColor: score >= 80 ? "#388e3c" : score >= 60 ? "#f57c00" : "#d32f2f", borderRadius: 3 } }}
-                        />
-                      </Box>
-                    ))}
-                  </Box>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent>
@@ -1336,149 +894,111 @@ export default function ReportPage() {
         </CardContent>
       </Card>
 
-      {/* ── Per-Question Analysis ───────────────────────────────────────── */}
-      {report?.turn_analyses?.length > 0 && showDetailedEvaluationSections && isLowCaptureQuality && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Analysis Quality Limited
-          </Typography>
-          <Typography variant="body2">
-            Not enough candidate speech was captured to generate a reliable per-question analysis 
-            (only {metrics.candidate_word_count || 0} words recorded). This can happen when audio 
-            echo or background noise is captured instead of your voice. Try completing a new session 
-            with headphones for more accurate results.
-          </Typography>
-        </Alert>
-      )}
-      {report?.turn_analyses?.length > 0 && showDetailedEvaluationSections && !isLowCaptureQuality && (
-        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>Per-Question Analysis</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Each answer evaluated for competency, STAR structure, and evidence of impact.
-            </Typography>
-            {report.turn_analyses.map((turn, idx) => {
-              const star = turn.star_breakdown || {};
-              const starKeys = ["situation", "task", "action", "result"];
-              const scoreColor = turn.score_0_100 >= 80 ? "success.main" : turn.score_0_100 >= 60 ? "warning.main" : "error.main";
-              return (
-                <Accordion key={idx} disableGutters sx={{ mb: 1, border: "1px solid", borderColor: "divider", borderRadius: "8px !important", "&:before": { display: "none" } }}>
-                  <AccordionSummary expandIcon={<ExpandMore />}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap", width: "100%" }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>Q{turn.turn_id}</Typography>
-                      <Chip size="small" label={turn.competency?.replace(/_/g, " ")} variant="outlined" color="primary" />
-                      <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1, display: { xs: "none", sm: "block" } }}>
-                        {(turn.question_text || "").slice(0, 60)}{turn.question_text?.length > 60 ? "…" : ""}
-                      </Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 700, color: scoreColor, ml: "auto" }}>
-                        {turn.score_0_100}/100
-                      </Typography>
-                    </Box>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>{turn.question_text}</Typography>
-
-                    {/* STAR breakdown */}
-                    <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
-                      {starKeys.map((k) => {
-                        const detected = star[k];
-                        const snippet = star[`${k}_snippet`];
-                        return (
-                          <Chip
-                            key={k}
-                            size="small"
-                            label={k.charAt(0).toUpperCase() + k.slice(1)}
-                            color={detected ? "success" : "default"}
-                            variant={detected ? "filled" : "outlined"}
-                            title={snippet || ""}
-                            sx={{ fontSize: "0.7rem" }}
-                          />
-                        );
-                      })}
-                      {star.source === "llm" && <Chip size="small" label="AI-extracted" variant="outlined" sx={{ fontSize: "0.65rem", color: "text.secondary" }} />}
-                    </Box>
-
-                    {/* Evidence quote */}
-                    {turn.evidence_quote && (
-                      <Alert severity="info" icon={false} sx={{ mb: 1.5, py: 0.75 }}>
-                        <Typography variant="body2" sx={{ fontStyle: "italic" }}>
-                          "{turn.evidence_quote}"
-                        </Typography>
-                      </Alert>
-                    )}
-
-                    {/* One-line feedback */}
-                    {turn.one_line_feedback && (
-                      <Typography variant="body2" color="text.secondary">
-                        💡 {turn.one_line_feedback}
-                      </Typography>
-                    )}
-
-                    {/* Depth signals */}
-                    {turn.depth_signals && (
-                      <Box sx={{ mt: 1, display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-                        {turn.depth_signals.metrics_mentioned?.length > 0 && (
-                          <Chip size="small" label={`📊 ${turn.depth_signals.metrics_mentioned.length} metric(s)`} variant="outlined" color="success" />
-                        )}
-                        {turn.depth_signals.ownership_signals > 0 && (
-                          <Chip size="small" label={`✋ ${turn.depth_signals.ownership_signals} ownership signal(s)`} variant="outlined" color="primary" />
-                        )}
-                        {turn.depth_signals.tech_named?.length > 0 && (
-                          <Chip size="small" label={`⚙ ${turn.depth_signals.tech_named.slice(0, 3).join(", ")}`} variant="outlined" />
-                        )}
-                      </Box>
-                    )}
-                  </AccordionDetails>
-                </Accordion>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Improvement Roadmap ─────────────────────────────────────────── */}
-      {premiumActionPlan.length > 0 && showPremiumEvaluationSections && (
+      {!isIncompleteCapture && (turnEvalSummary || turnEvaluations.length > 0) && (
         <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-              {isTrialPlan ? "Action Plan" : "Coaching Priorities"}
+              Evaluation Transparency
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {isTrialPlan
-                ? "The shortest path to a stronger next interview."
-                : "Prioritized actions designed to move the score materially in the next interview."}
+              Scores are computed from candidate turns using clarity, depth, and relevance.
             </Typography>
-            <Box sx={{ display: "grid", gap: 2 }}>
-              {premiumActionPlan.map((item, idx) => (
-                <Card key={idx} variant="outlined" sx={{ borderLeft: "4px solid", borderLeftColor: "warning.main" }}>
-                  <CardContent sx={{ py: 1.5 }}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-                      <Chip size="small" label={item.competency?.replace(/_/g, " ")} color="warning" variant="outlined" />
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{item.priorityLabel}</Typography>
-                      <Chip size="small" label={item.impactLabel} variant="outlined" />
-                    </Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                      <strong>Finding:</strong> {item.finding}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                      <strong>Action:</strong> {item.suggested_action}
-                    </Typography>
-                    {item.example_reframe && (
-                      <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
-                        <Typography variant="body2" sx={{ fontStyle: "italic", fontSize: "0.8rem" }}>
-                          {item.example_reframe}
-                        </Typography>
-                      </Alert>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
+
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={12} md={3}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Clarity</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_clarity ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Communication</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_communication ?? "—"}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Depth</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_depth ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card variant="outlined"><CardContent>
+                  <Typography variant="caption" color="text.secondary">Avg Relevance</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {turnEvalSummary?.avg_relevance ?? 0}
+                  </Typography>
+                </CardContent></Card>
+              </Grid>
+            </Grid>
+
+            {evaluationExplainability && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  Source: <strong>{evaluationExplainability.source}</strong> · Confidence: <strong>{evaluationExplainability.confidence || "unknown"}</strong> · Formula: <strong>{evaluationExplainability.formula}</strong> · Turns Evaluated: <strong>{evaluationExplainability.turns_evaluated}</strong>
+                </Typography>
+              </Alert>
+            )}
+
+            {turnEvaluations.length > 0 && (
+              <Box sx={{ display: "grid", gap: 1 }}>
+                {turnEvaluations.slice(0, 8).map((turn, index) => {
+                  const star = turn.star_completeness || {};
+                  const starKeys = ["situation", "task", "action", "result"];
+                  return (
+                    <Card key={index} variant="outlined">
+                      <CardContent sx={{ py: 1.5 }}>
+                        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 0.5 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            Turn {index + 1}
+                            {turn.confidence && <Chip size="small" label={turn.confidence} sx={{ ml: 1 }} />}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Clarity {turn.clarity ?? "—"} · Comm {turn.communication ?? "—"} · Depth {turn.depth ?? "—"} · Rel {turn.relevance ?? "—"}
+                          </Typography>
+                        </Box>
+                        {Object.values(star).some(Boolean) && (
+                          <Box sx={{ display: "flex", gap: 0.5, mb: 0.5, flexWrap: "wrap" }}>
+                            {starKeys.map((k) => (
+                              <Chip
+                                key={k}
+                                size="small"
+                                label={k.charAt(0).toUpperCase() + k.slice(1)}
+                                color={star[k] ? "success" : "default"}
+                                variant={star[k] ? "filled" : "outlined"}
+                                sx={{ fontSize: "0.65rem" }}
+                              />
+                            ))}
+                          </Box>
+                        )}
+                        {turn.rationale && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
+                            {turn.rationale}
+                          </Typography>
+                        )}
+                        {turn.evidence_excerpt && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem", fontStyle: "italic", mt: 0.5 }}>
+                            "{turn.evidence_excerpt}"
+                          </Typography>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </Box>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {showDetailedEvaluationSections && report?.ai_feedback && (
+      {!isIncompleteCapture && report?.ai_feedback && (
         <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
@@ -1500,6 +1020,19 @@ export default function ReportPage() {
                 ))}
               </Grid>
             </Grid>
+          </CardContent>
+        </Card>
+      )}
+
+      {isIncompleteCapture && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+              Next Steps
+            </Typography>
+            <Typography variant="body2" color="text.secondary">1. Confirm browser microphone permission is granted.</Typography>
+            <Typography variant="body2" color="text.secondary">2. Speak for 5–10 seconds and verify live transcript appears before ending.</Typography>
+            <Typography variant="body2" color="text.secondary">3. Re-run the interview to generate full candidate-centric scoring.</Typography>
           </CardContent>
         </Card>
       )}

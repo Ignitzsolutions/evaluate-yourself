@@ -2,11 +2,25 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
 import { useAuth } from '@clerk/clerk-react';
-import { authFetch, getApiErrorMessage, isBackendUnavailableError } from '../utils/apiClient';
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from '../utils/apiClient';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { isDevAuthBypassEnabled } from '../utils/devAuthBypass';
 import { classifyConversationItem, extractTranscriptText } from '../utils/realtimeTranscript';
 import { shouldAcceptBrowserSpeechResult } from '../utils/realtimeSpeechGuards';
 import { mapLiveGazeFlag } from '../utils/gazeDirection';
+import {
+  buildAdaptiveTurnFallbackQuestion,
+  buildRealtimeSessionUpdateEvent,
+  canSendOpeningPrompt,
+} from '../utils/interviewRealtime';
+import { requestNextInterviewTurn } from '../utils/interviewNextTurn';
+import {
+  annotateCaptureEntry,
+  buildCanonicalTranscriptPayloadFromMessages,
+} from '../utils/trustedCaptureBuffer';
+import { createGazeTelemetryBatcher } from '../utils/gazeTelemetryBatch';
+import useConversationalFillers from '../hooks/useConversationalFillers';
+import useVAD from '../hooks/useVAD';
 import {
   createSessionEndError,
   getEndErrorPresentation,
@@ -45,8 +59,8 @@ const resolveSoniaAvatarSrc = () => {
 };
 const INTERVIEW_SERVER_CONTROL_ENABLED = String(process.env.REACT_APP_INTERVIEW_SERVER_CONTROL_ENABLED || 'true').toLowerCase() === 'true';
 const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
-const DUAL_TRANSCRIPTION_KEYS = String(process.env.REACT_APP_REALTIME_SESSION_DUAL_TRANSCRIPTION_KEYS || 'true').toLowerCase() === 'true';
 const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'whisper').trim() || 'whisper';
+const REALTIME_DEBUG = String(process.env.REACT_APP_REALTIME_DEBUG || 'false').toLowerCase() === 'true';
 const DEDUPE_TTL_MS = 8000;
 const BROWSER_SR_AI_AUDIO_COOLDOWN_MS = 1600;
 const BROWSER_SR_USER_SPEECH_WINDOW_MS = 5000;
@@ -313,11 +327,21 @@ const extractResponseDoneText = (msg) => {
   return fragments.join(' ').trim();
 };
 
+const debugRealtime = (...args) => {
+  if (REALTIME_DEBUG) {
+    console.log(...args);
+  }
+};
+
 export default function InterviewSessionRoom() {
   const params = useParams();
   const navigate = useNavigate();
   const { user } = useUser();
   const { getToken } = useAuth();
+  const devAuthBypass = isDevAuthBypassEnabled();
+  const effectiveUser = useMemo(() => (
+    user || (devAuthBypass ? { id: 'dev-bypass-user' } : null)
+  ), [devAuthBypass, user]);
   const soniaAvatarSrc = useMemo(() => resolveSoniaAvatarSrc(), []);
 
   // Generate sessionId
@@ -378,6 +402,7 @@ export default function InterviewSessionRoom() {
   const audioElementRef = useRef(null);
   const audioResumeActionRef = useRef(null);
   const gazeWsRef = useRef(null);
+  const gazeBatcherRef = useRef(null);
   const gazeCanvasRef = useRef(null);
   const gazeRafRef = useRef(0);
   const cameraOffRef = useRef(false);
@@ -399,7 +424,7 @@ export default function InterviewSessionRoom() {
 
   // State
   const [status, setStatus] = useState('idle');
-  const [, setMicActive] = useState(false);
+  const [micActive, setMicActive] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [, setTranscript] = useState([]);
   const [error, setError] = useState(null);
@@ -431,6 +456,7 @@ export default function InterviewSessionRoom() {
   });
   const capturedAiRef = useRef(new Map());
   const capturedUserRef = useRef(new Map());
+  const capturedAiResponseIdsRef = useRef(new Set());
 
   // Collect all AI and user messages for saving
   const aiMessagesRef = useRef([]);
@@ -454,9 +480,9 @@ export default function InterviewSessionRoom() {
   const finalUserTranscriptItemIdsRef = useRef(new Set());
   const pendingOpeningQuestionRef = useRef(null);
   const pendingOpeningInstructionRef = useRef(null);
-  const transcriptionReapplyAttemptedRef = useRef(false);
   const transcriptionFallbackNotifiedRef = useRef(false);
-  const legacySessionSchemaFallbackTriedRef = useRef(false);
+  const openingResponseSentRef = useRef(false);
+  const sessionConfiguredRef = useRef(false);
   const browserSpeechRef = useRef(null);
   const browserSpeechShouldRunRef = useRef(false);
   const lastUserTranscriptRef = useRef({ text: '', at: 0 });
@@ -480,10 +506,24 @@ export default function InterviewSessionRoom() {
 
   // In-session capture warnings: null | 'fallback' | 'no_audio' | 'audio_blocked'
   const [captureWarning, setCaptureWarning] = useState(null);
+  const [continuityWarning, setContinuityWarning] = useState(null);
+  const [isThinking, setIsThinking] = useState(false);
   const pendingTranscriptPayloadRef = useRef(null);
+  const pendingRambleInterruptRef = useRef(false);
+  const fillerPlayingRef = useRef(false);
 
   // Utility
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const {
+    isPlaying: fillerIsPlaying,
+    currentFiller,
+    playFiller,
+    stopFiller,
+  } = useConversationalFillers();
+
+  useEffect(() => {
+    fillerPlayingRef.current = fillerIsPlaying;
+  }, [fillerIsPlaying]);
 
   const incrementDroppedEvent = useCallback((reason) => {
     if (!reason) return;
@@ -551,7 +591,7 @@ export default function InterviewSessionRoom() {
       let overlap = 0;
       for (const w of userWords) { if (aiWords.has(w)) overlap++; }
       if (overlap / userWords.size >= 0.60) {
-        console.warn('[echo_detection] Discarding user transcript as AI echo:', userText);
+        debugRealtime('[echo_detection] Discarding user transcript as AI echo:', userText);
         return true;
       }
     }
@@ -560,10 +600,26 @@ export default function InterviewSessionRoom() {
 
   // Add transcript entry
   // eslint-disable-next-line react-hooks/exhaustive-deps -- callback uses refs only; adding state deps would re-register listeners
-  const addTranscript = useCallback((speaker, text) => {
+  const addTranscript = useCallback((speaker, text, meta = {}) => {
     const ts = new Date().toISOString();
-    console.log(`[addTranscript] speaker: ${speaker}, text:`, text);
-    
+    const transcriptMeta = annotateCaptureEntry({
+      speaker,
+      text,
+      timestamp: ts,
+      evidenceSource:
+        meta.evidence_source ||
+        (speaker === 'ai'
+          ? 'realtime_model_audio'
+          : speaker === 'user'
+            ? 'realtime_input_transcription'
+            : 'ui_system_notice'),
+      trustedForEvaluation:
+        typeof meta.trusted_for_evaluation === 'boolean'
+          ? meta.trusted_for_evaluation
+          : speaker === 'ai' || speaker === 'user',
+      transcriptOrigin: meta.transcript_origin || null,
+    });
+
     // Update drain tracking
     lastMessageAtRef.current = Date.now();
 
@@ -577,7 +633,7 @@ export default function InterviewSessionRoom() {
 
     // Also collect for saving (refs are source of truth)
     if (speaker === 'ai') {
-      aiMessagesRef.current.push({ speaker: 'ai', text, timestamp: ts });
+      aiMessagesRef.current.push({ speaker: 'ai', text, timestamp: ts, ...transcriptMeta });
       captureStatsRef.current.captured_ai_turns += 1;
     } else if (speaker === 'user') {
       const normalized = String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -591,15 +647,181 @@ export default function InterviewSessionRoom() {
         return;
       }
       lastUserTranscriptRef.current = { text: normalized, at: now };
-      userMessagesRef.current.push({ speaker: 'user', text, timestamp: ts });
+      userMessagesRef.current.push({ speaker: 'user', text, timestamp: ts, ...transcriptMeta });
       captureStatsRef.current.captured_user_turns += 1;
       setCaptureWarning(null); // audio confirmed — dismiss any capture warning
-      console.log(`[addTranscript] userMessagesRef now:`, JSON.stringify(userMessagesRef.current, null, 2));
+      if (transcriptMeta.trusted_for_evaluation === false) {
+        setContinuityWarning({
+          tone: 'warning',
+          message: 'Browser speech fallback kept the interview moving. Fallback candidate transcript will remain visible, but it will not be used as trusted scoring evidence.',
+        });
+      }
       if (!isEndingRef.current && typeof requestAdaptiveTurnRef.current === 'function') {
         requestAdaptiveTurnRef.current(text, ts);
       }
     }
   }, [incrementDroppedEvent]);
+
+  const incrementQuestionCount = useCallback((responseId, text = '') => {
+    if (!responseId || countedResponseIdsRef.current.has(responseId)) {
+      return false;
+    }
+    const normalizedText = String(text || '').trim();
+    if (normalizedText && normalizedText.length <= 10) {
+      return false;
+    }
+    countedResponseIdsRef.current.add(responseId);
+    setQuestionCount((prev) => prev + 1);
+    return true;
+  }, []);
+
+  const commitAiTranscript = useCallback((text, responseId) => {
+    const finalText = String(text || '').trim();
+    if (!finalText) {
+      return false;
+    }
+    if (responseId && capturedAiResponseIdsRef.current.has(responseId)) {
+      incrementDroppedEvent('duplicate_ai_response');
+      return false;
+    }
+    const key = `${responseId || 'ai'}:${finalText}`;
+    if (rememberByTtl(capturedAiRef, key)) {
+      return false;
+    }
+    if (responseId) {
+      capturedAiResponseIdsRef.current.add(responseId);
+    }
+    addTranscript('ai', finalText, {
+      evidence_source: 'realtime_output_audio_transcript',
+      trusted_for_evaluation: true,
+      transcript_origin: 'server_audio_transcript',
+    });
+    lastAiSpokenTextRef.current = finalText;
+    incrementQuestionCount(responseId, finalText);
+    return true;
+  }, [addTranscript, incrementDroppedEvent, incrementQuestionCount, rememberByTtl]);
+
+  const commitUserTranscript = useCallback((text, itemId, meta = {}) => {
+    const finalText = String(text || '').trim();
+    if (!finalText) {
+      incrementDroppedEvent('empty_user_transcription');
+      return false;
+    }
+    const key = `${itemId || 'user'}:${finalText}`;
+    if (rememberByTtl(capturedUserRef, key)) {
+      incrementDroppedEvent('duplicate_user_transcription');
+      return false;
+    }
+    if (isEchoOfAI(finalText)) {
+      incrementDroppedEvent('echo_of_ai_discarded');
+      return false;
+    }
+    addTranscript('user', finalText, meta);
+    setMicActive(false);
+    return true;
+  }, [addTranscript, incrementDroppedEvent, isEchoOfAI, rememberByTtl]);
+
+  const sendRealtimeQuestion = useCallback((questionText, options = {}) => {
+    const q = String(questionText || '').trim();
+    if (!q || !dcRef.current || dcRef.current.readyState !== 'open') return false;
+    stopFiller();
+    setIsThinking(false);
+    lastSentQuestionTextRef.current = q;
+    const wrappedInstruction = String(options?.instruction || '').trim()
+      || buildInterviewerUtteranceInstruction(
+        q,
+        options?.refusalMessage || null,
+        options,
+      );
+    dcRef.current.send(
+      JSON.stringify({
+        type: 'response.create',
+        response: {
+          instructions: wrappedInstruction,
+        },
+      }),
+    );
+    debugRealtime('[realtime] Sent interviewer prompt', {
+      opening: Boolean(options?.opening),
+      recovery: Boolean(options?.recovery),
+    });
+    return true;
+  }, [stopFiller]);
+
+  const stopSoniaPlayback = useCallback(() => {
+    stopFiller();
+    const audio = audioElementRef.current;
+    if (audio) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {
+        // no-op
+      }
+    }
+    setAiSpeakingState(false);
+  }, [setAiSpeakingState, stopFiller]);
+
+  const handleVadSpeechStart = useCallback(() => {
+    setMicActive(true);
+    markUserSpeechSignal();
+    if (aiSpeakingRef.current || fillerPlayingRef.current) {
+      stopSoniaPlayback();
+      setContinuityWarning({
+        tone: 'warning',
+        message: 'Candidate barge-in detected. Sonia paused so you can continue.',
+      });
+    }
+  }, [markUserSpeechSignal, stopSoniaPlayback]);
+
+  const handleVadSpeechEnd = useCallback(() => {
+    setMicActive(false);
+    markUserSpeechSignal();
+    if (pendingRambleInterruptRef.current) {
+      pendingRambleInterruptRef.current = false;
+      const rambleInterrupt = buildAdaptiveTurnFallbackQuestion({
+        interviewType,
+        role: targetRole,
+        company: targetCompany,
+        questionMix,
+      });
+      stopFiller();
+      setContinuityWarning({
+        tone: 'warning',
+        message: 'Sonia is stepping in to keep the interview moving. Please keep answers concise.',
+      });
+      sendRealtimeQuestion(rambleInterrupt, { recovery: true });
+    }
+  }, [
+    interviewType,
+    markUserSpeechSignal,
+    questionMix,
+    sendRealtimeQuestion,
+    stopFiller,
+    targetCompany,
+    targetRole,
+  ]);
+
+  const handleVadRambleThreshold = useCallback(() => {
+    pendingRambleInterruptRef.current = true;
+    setContinuityWarning({
+      tone: 'warning',
+      message: 'Sonia may interrupt if the answer keeps running. Keep your main point focused.',
+    });
+  }, []);
+
+  const shouldBargeIn = useCallback(() => aiSpeakingRef.current || fillerPlayingRef.current, []);
+
+  const vad = useVAD({
+    threshold: 0.02,
+    silenceMs: 450,
+    rambleThresholdMs: 180000,
+    onSpeechStart: handleVadSpeechStart,
+    onSpeechEnd: handleVadSpeechEnd,
+    onBargeIn: stopSoniaPlayback,
+    onRambleThreshold: handleVadRambleThreshold,
+    shouldBargeIn,
+  });
 
   useEffect(() => {
     const handleOffline = () => {
@@ -717,6 +939,10 @@ export default function InterviewSessionRoom() {
         // no-op
       }
       gazeWsRef.current = null;
+    }
+    if (gazeBatcherRef.current) {
+      gazeBatcherRef.current.close();
+      gazeBatcherRef.current = null;
     }
     settleGazeFinalize({ finalized: false, reason: resetDetector ? 'STOP' : 'SOCKET_CLOSED' });
     setGazeMetrics((prev) => ({
@@ -1011,6 +1237,14 @@ export default function InterviewSessionRoom() {
     stopGazeMonitoring({ resetDetector: false });
     const ws = new WebSocket(buildGazeWsUrl(token));
     gazeWsRef.current = ws;
+    gazeBatcherRef.current = createGazeTelemetryBatcher((payload) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+      }
+    }, {
+      maxBatchSize: 5,
+      flushIntervalMs: 100,
+    });
     let readyResolved = false;
     let readyResolver = null;
     const readyPromise = new Promise((resolve) => {
@@ -1023,8 +1257,7 @@ export default function InterviewSessionRoom() {
     };
 
     const sendCameraState = (enabled) => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'camera_state', enabled, t: Date.now() }));
+      gazeBatcherRef.current?.enqueue({ type: 'camera_state', enabled, t: Date.now() });
     };
 
     ws.onopen = async () => {
@@ -1035,7 +1268,7 @@ export default function InterviewSessionRoom() {
       }
 
       setGazeMetrics((prev) => ({ ...prev, connected: true }));
-      ws.send(JSON.stringify({ type: 'init', t: Date.now() }));
+      gazeBatcherRef.current?.enqueue({ type: 'init', t: Date.now() });
       sendCameraState(!cameraOffRef.current);
 
       let lastSent = 0;
@@ -1088,12 +1321,12 @@ export default function InterviewSessionRoom() {
               });
           }
           const dataUrl = clientGazeRef.current.detectorReady ? '' : canvas.toDataURL('image/jpeg', 0.6);
-          ws.send(JSON.stringify({
+          gazeBatcherRef.current?.enqueue({
             type: 'frame',
             t: Date.now(),
             data: dataUrl,
             clientMetrics: clientGazeRef.current,
-          }));
+          });
         } catch (e) {
           // Ignore transient draw errors while camera initializes.
         }
@@ -1152,6 +1385,8 @@ export default function InterviewSessionRoom() {
         cancelAnimationFrame(gazeRafRef.current);
         gazeRafRef.current = 0;
       }
+      gazeBatcherRef.current?.close();
+      gazeBatcherRef.current = null;
       setGazeMetrics((prev) => ({ ...prev, connected: false, activeFlag: null, faceDetected: false, trackingActive: false }));
       gazeWsRef.current = null;
       settleGazeFinalize({ finalized: false, reason: 'WS_CLOSE' });
@@ -1159,6 +1394,8 @@ export default function InterviewSessionRoom() {
     };
 
     ws.onerror = () => {
+      gazeBatcherRef.current?.close();
+      gazeBatcherRef.current = null;
       setGazeMetrics((prev) => ({ ...prev, connected: false, faceDetected: false, trackingActive: false }));
       settleGazeFinalize({ finalized: false, reason: 'WS_ERROR' });
       settleReady({ connected: false, detectorReady: false, reason: 'WS_ERROR' });
@@ -1195,6 +1432,7 @@ export default function InterviewSessionRoom() {
           resolve(payload);
         };
       });
+      gazeBatcherRef.current?.flush();
       ws.send(JSON.stringify({
         type: 'finalize',
         t: Date.now(),
@@ -1220,7 +1458,7 @@ export default function InterviewSessionRoom() {
     }
     if (gazeWsRef.current && gazeWsRef.current.readyState === WebSocket.OPEN) {
       try {
-        gazeWsRef.current.send(JSON.stringify({ type: 'camera_state', enabled: !cameraOff, t: Date.now() }));
+        gazeBatcherRef.current?.enqueue({ type: 'camera_state', enabled: !cameraOff, t: Date.now() });
       } catch {
         // no-op
       }
@@ -1240,6 +1478,31 @@ export default function InterviewSessionRoom() {
     if (!dcRef.current || dcRef.current.readyState !== 'open') return;
 
     adaptiveInFlightRef.current = true;
+    setIsThinking(true);
+    playFiller('thinking', { delayMs: 350, seed: userTurnText });
+    const recoverAdaptiveTurn = (message, detail = null) => {
+      const fallbackQuestion = buildAdaptiveTurnFallbackQuestion({
+        interviewType,
+        role: targetRole,
+        company: targetCompany,
+        questionMix,
+      });
+      const sent = sendRealtimeQuestion(fallbackQuestion, { recovery: true });
+      setContinuityWarning({
+        tone: sent ? 'warning' : 'error',
+        message:
+          message ||
+          (sent
+            ? 'Adaptive scoring is temporarily unavailable. Sonia is continuing with a safe fallback question.'
+            : 'Adaptive scoring failed and Sonia could not send the recovery question. Reconnect and continue the interview.'),
+      });
+      setIsThinking(false);
+      stopFiller();
+      if (detail) {
+        console.warn('[adaptive-turn] recovery detail:', detail);
+      }
+    };
+
     try {
       const token = await getToken();
       const transcriptWindow = [...aiMessagesRef.current, ...userMessagesRef.current]
@@ -1252,10 +1515,12 @@ export default function InterviewSessionRoom() {
         .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
         .slice(-16);
 
-      const resp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/adaptive-turn`, token, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const decision = await requestNextInterviewTurn({
+        authFetch,
+        baseUrl: API_BASE_URL,
+        token,
+        sessionId,
+        payload: {
           last_user_turn: userTurnText,
           transcript_window: transcriptWindow,
           interviewType,
@@ -1267,16 +1532,10 @@ export default function InterviewSessionRoom() {
           durationMinutes,
           askedQuestionIds: askedQuestionIdsRef.current,
           selectedSkills: selectedSkills || [],
-        }),
+        },
       });
 
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        console.warn('[adaptive-turn] failed:', resp.status, text);
-        return;
-      }
-
-      const decision = await resp.json();
+      setContinuityWarning(null);
       if (decision?.turn_scores) {
         turnEvaluationsRef.current.push({
           ...decision.turn_scores,
@@ -1292,33 +1551,39 @@ export default function InterviewSessionRoom() {
         askedQuestionIdsRef.current = Array.from(new Set([...askedQuestionIdsRef.current, decision.question_id]));
       }
 
+      if (decision?.recoverable_error?.message) {
+        setContinuityWarning({
+          tone: 'warning',
+          message: decision.recoverable_error.message,
+        });
+      }
+
       if (decision?.next_question && dcRef.current && dcRef.current.readyState === 'open') {
         const nextQuestion = String(decision.next_question || '').trim();
         if (nextQuestion) {
           if (decision?.policy_action === 'REFUSED_META_CONTROL' && decision?.refusal_message) {
             addTranscript('system', decision.refusal_message);
           }
-          const wrappedInstruction = String(decision?.utterance_instruction || '').trim() || buildInterviewerUtteranceInstruction(
-            nextQuestion,
-            decision?.policy_action === 'REFUSED_META_CONTROL' ? decision?.refusal_message : null,
-          );
-
-          dcRef.current.send(
-            JSON.stringify({
-              type: 'response.create',
-              response: {
-                instructions: wrappedInstruction,
-              },
-            }),
-          );
+          sendRealtimeQuestion(nextQuestion, {
+            instruction: decision?.utterance_instruction,
+            refusalMessage: decision?.policy_action === 'REFUSED_META_CONTROL' ? decision?.refusal_message : null,
+            opening: false,
+          });
         }
       }
     } catch (err) {
       console.warn('[adaptive-turn] error:', err);
+      recoverAdaptiveTurn(
+        'Adaptive scoring failed during the interview. Sonia is continuing with a safe fallback question.',
+        err,
+      );
     } finally {
       adaptiveInFlightRef.current = false;
+      setIsThinking(false);
+      stopFiller();
     }
   }, [
+    sendRealtimeQuestion,
     getToken,
     sessionId,
     interviewType,
@@ -1330,6 +1595,8 @@ export default function InterviewSessionRoom() {
     interviewStyle,
     durationMinutes,
     selectedSkills,
+    playFiller,
+    stopFiller,
   ]);
 
   useEffect(() => {
@@ -1400,7 +1667,11 @@ export default function InterviewSessionRoom() {
           }
           const key = `browser-sr:${text.toLowerCase().replace(/\s+/g, ' ')}`;
           if (!rememberByTtl(capturedUserRef, key)) {
-            addTranscript('user', text);
+            addTranscript('user', text, {
+              evidence_source: 'browser_speech_fallback',
+              trusted_for_evaluation: false,
+              transcript_origin: 'browser_speech_fallback',
+            });
             markUserSpeechSignal();
           } else {
             incrementDroppedEvent('duplicate_browser_speech_text');
@@ -1425,7 +1696,6 @@ export default function InterviewSessionRoom() {
       browserSpeechRef.current = recognition;
       browserSpeechShouldRunRef.current = true;
       recognition.start();
-      addTranscript('system', 'Browser speech fallback enabled');
     } catch (e) {
       incrementDroppedEvent('browser_speech_start_failed');
     }
@@ -1437,7 +1707,7 @@ export default function InterviewSessionRoom() {
       return;
     }
 
-    if (!user) {
+    if (!effectiveUser) {
       setError('Please sign in first.');
       return;
     }
@@ -1452,6 +1722,7 @@ export default function InterviewSessionRoom() {
     setStatus('connecting');
     setError(null);
     setCaptureWarning(null);
+    setContinuityWarning(null);
     transcriptionFallbackNotifiedRef.current = false;
     if (!isReconnectAttempt) {
       setTranscript([]);
@@ -1464,18 +1735,25 @@ export default function InterviewSessionRoom() {
       finalUserTranscriptItemIdsRef.current = new Set();
       pendingOpeningQuestionRef.current = null;
       pendingOpeningInstructionRef.current = null;
+      openingResponseSentRef.current = false;
+      sessionConfiguredRef.current = false;
+      setIsThinking(false);
+      pendingRambleInterruptRef.current = false;
       lastAiSpokenTextRef.current = '';
       lastSentQuestionTextRef.current = '';
       lastAIItemRef.current = null;
       lastCommittedInputItemRef.current = null;
+      countedResponseIdsRef.current = new Set();
       lastAiAudioStoppedAtRef.current = 0;
       lastUserSpeechSignalAtRef.current = 0;
       aiSpeakingRef.current = false;
       setAiSpeaking(false);
-      transcriptionReapplyAttemptedRef.current = false;
       transcriptionFallbackNotifiedRef.current = false;
       capturedAiRef.current = new Map();
       capturedUserRef.current = new Map();
+      capturedAiResponseIdsRef.current = new Set();
+      lastUserTranscriptRef.current = { text: '', at: 0 };
+      setMicActive(false);
       setCameraOff(false);
       setSelfViewHidden(false);
     } else {
@@ -1483,6 +1761,7 @@ export default function InterviewSessionRoom() {
     }
     stopGazeMonitoring();
     stopBrowserSpeechRecognition();
+    stopFiller();
     if (!isReconnectAttempt) {
       captureStatsRef.current = {
         captured_user_turns: 0,
@@ -1541,7 +1820,7 @@ export default function InterviewSessionRoom() {
       }
 
       localStreamRef.current = stream;
-      setMicActive(true);
+      setMicActive(false);
       if (localVideoRef.current) {
         try {
           localVideoRef.current.srcObject = stream;
@@ -1550,7 +1829,7 @@ export default function InterviewSessionRoom() {
           console.warn('Local video preview failed:', previewErr);
         }
       }
-      addTranscript('system', 'Running quick gaze pre-check...');
+      await vad.start(stream);
       await runGazePreflight();
 
       // Step 2: Create RTCPeerConnection
@@ -1575,8 +1854,7 @@ export default function InterviewSessionRoom() {
       };
 
       pc.oniceconnectionstatechange = () => {
-        const iceState = pc.iceConnectionState;
-        addTranscript('system', `ICE state: ${iceState}`);
+        debugRealtime('[realtime] ICE state:', pc.iceConnectionState);
       };
 
       // Step 3: Add local audio tracks
@@ -1591,10 +1869,6 @@ export default function InterviewSessionRoom() {
       audioElement.preload = 'auto';
       audioElement.volume = 1;
       audioElementRef.current = audioElement;
-      const sessionUpdateCompat = {
-        schema: 'legacy',
-        includeDualTranscriptionKeys: DUAL_TRANSCRIPTION_KEYS,
-      };
 
       audioElement.onplaying = () => {
         audioResumeActionRef.current = null;
@@ -1602,24 +1876,21 @@ export default function InterviewSessionRoom() {
       };
 
       pc.ontrack = async (event) => {
-        console.log('Remote track received', event);
+        debugRealtime('[realtime] Remote track received', event);
         audioElement.srcObject = event.streams[0];
         try {
           await audioElement.play();
           audioResumeActionRef.current = null;
           setCaptureWarning((prev) => (prev === 'audio_blocked' ? null : prev));
-          addTranscript('system', 'Audio playback started');
         } catch (err) {
           console.error('Audio play error:', err);
           if (err?.name === 'NotAllowedError') {
             setCaptureWarning('audio_blocked');
-            addTranscript('system', 'Click anywhere to enable Sonia audio playback.');
             const resumeAudio = async () => {
               try {
                 await audioElement.play();
                 audioResumeActionRef.current = null;
                 setCaptureWarning((prev) => (prev === 'audio_blocked' ? null : prev));
-                addTranscript('system', 'Audio playback resumed');
               } catch (resumeErr) {
                 console.error('Audio resume error:', resumeErr);
               }
@@ -1637,104 +1908,47 @@ export default function InterviewSessionRoom() {
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
-      const sendSessionUpdate = (overrides = {}) => {
+      const sendSessionUpdate = () => {
         if (dc.readyState !== 'open') return false;
-        Object.assign(sessionUpdateCompat, overrides || {});
-        const turnDetection = {
-          type: 'server_vad',
-          threshold: 0.55,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
-          create_response: !INTERVIEW_SERVER_CONTROL_ENABLED,
-          interrupt_response: true,
-        };
-        const transcriptionConfig = {
-          model: TRANSCRIPTION_MODEL,
-          language: 'en',
-        };
-        const sessionPayload = sessionUpdateCompat.schema === 'nested'
-          ? {
-              type: 'session.update',
-              session: {
-                type: 'realtime',
-                audio: {
-                  input: {
-                    turn_detection: turnDetection,
-                    transcription: transcriptionConfig,
-                  },
-                  output: {
-                    voice: REALTIME_VOICE,
-                  },
-                },
-              },
-            }
-          : {
-              type: 'session.update',
-              session: {
-                voice: REALTIME_VOICE,
-                turn_detection: turnDetection,
-                input_audio_transcription: transcriptionConfig,
-              },
-            };
-
-        if (sessionUpdateCompat.schema === 'nested' && sessionUpdateCompat.includeDualTranscriptionKeys) {
-          sessionPayload.session.input_audio_transcription = transcriptionConfig;
-        }
-
-        if (sessionUpdateCompat.schema === 'legacy' && !sessionUpdateCompat.includeDualTranscriptionKeys) {
-          delete sessionPayload.session.input_audio_transcription;
-        }
-
-        dc.send(JSON.stringify(sessionPayload));
-        addTranscript(
-          'system',
-          `Sent session.update (schema=${sessionUpdateCompat.schema}, voice=${REALTIME_VOICE}, transcription=${TRANSCRIPTION_MODEL}, dualKeys=${sessionUpdateCompat.includeDualTranscriptionKeys ? 'on' : 'off'})`,
-        );
+        dc.send(JSON.stringify(buildRealtimeSessionUpdateEvent({
+          voice: REALTIME_VOICE,
+          transcriptionModel: TRANSCRIPTION_MODEL,
+          interviewServerControlEnabled: INTERVIEW_SERVER_CONTROL_ENABLED,
+        })));
+        debugRealtime('[realtime] Sent canonical session.update');
         return true;
       };
 
-      const sendServerQuestion = (questionText, options = {}) => {
-        const q = String(questionText || '').trim();
-        if (!q || !dcRef.current || dcRef.current.readyState !== 'open') return false;
-        // Track immediately for echo detection timing — before audio transcript events arrive
-        lastSentQuestionTextRef.current = q;
-        const wrappedInstruction = String(options?.instruction || '').trim()
-          || buildInterviewerUtteranceInstruction(q, null, options);
-        dcRef.current.send(
-          JSON.stringify({
-            type: 'response.create',
-            response: {
-              instructions: wrappedInstruction,
-            },
-          }),
-        );
-        addTranscript('system', 'Sent server-selected question');
-        return true;
+      const tryStartOpeningTurn = () => {
+        const openingQuestion = pendingOpeningQuestionRef.current;
+        if (!canSendOpeningPrompt({
+          channelState: dcRef.current?.readyState,
+          sessionConfigured: sessionConfiguredRef.current,
+          openingQuestion,
+          openingAlreadySent: openingResponseSentRef.current,
+        })) {
+          return false;
+        }
+        const sent = sendRealtimeQuestion(openingQuestion, {
+          opening: true,
+          instruction: pendingOpeningInstructionRef.current,
+        });
+        if (sent) {
+          openingResponseSentRef.current = true;
+          pendingOpeningQuestionRef.current = null;
+          pendingOpeningInstructionRef.current = null;
+        }
+        return sent;
       };
 
       dc.onopen = () => {
         setStatus('connected');
 
-        // Send session.update with turn detection
         if (dc.readyState === 'open') {
           try {
             sendSessionUpdate();
           } catch (err) {
             console.error('Error sending session.update:', err);
-          }
-          if (pendingOpeningQuestionRef.current) {
-            try {
-              const sent = sendServerQuestion(pendingOpeningQuestionRef.current, {
-                opening: true,
-                instruction: pendingOpeningInstructionRef.current,
-              });
-              if (sent) {
-                pendingOpeningQuestionRef.current = null;
-                pendingOpeningInstructionRef.current = null;
-              }
-            } catch (err) {
-              console.error('Error sending pending opening question:', err);
-            }
           }
         }
       };
@@ -1742,94 +1956,23 @@ export default function InterviewSessionRoom() {
       dc.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          console.log('Message received:', msg.type, msg);
           const msgType = msg?.type || '';
           if (!msgType) {
-            console.debug('[realtime] Received event without type', msg);
+            debugRealtime('[realtime] Received event without type', msg);
             return;
           }
+          debugRealtime('[realtime] Message received:', msgType, msg);
 
-          // Handle messages
           if (msgType === 'session.created') {
-            addTranscript('system', 'Azure session created');
+            debugRealtime('[realtime] Session created');
           } else if (msgType === 'session.updated') {
-            const configuredVoice =
-              msg?.session?.audio?.output?.voice ||
-              msg?.session?.voice ||
-              REALTIME_VOICE;
-            const hasTranscriptionConfig = Boolean(
-              msg?.session?.input_audio_transcription ||
-              msg?.session?.audio?.input?.transcription
-            );
-            addTranscript(
-              'system',
-              `Session updated (voice=${configuredVoice}, transcription=${hasTranscriptionConfig ? 'enabled' : 'missing'})`
-            );
-            if (!hasTranscriptionConfig && !transcriptionReapplyAttemptedRef.current) {
-              transcriptionReapplyAttemptedRef.current = true;
-              try {
-                const resent = sendSessionUpdate();
-                if (resent) {
-                  addTranscript('system', 'Re-applied transcription config for compatibility');
-                }
-              } catch (reapplyErr) {
-                console.warn('Failed to re-apply transcription config:', reapplyErr);
-                incrementDroppedEvent('transcription_reapply_failed');
-              }
-            }
+            sessionConfiguredRef.current = true;
+            tryStartOpeningTurn();
           } else if (msgType === 'error') {
-            // Ignore harmless unknown-parameter errors we caused earlier (modalities); don't show them in UI.
             const errMsg = msg.error?.message || 'Azure API error';
             if (errMsg.includes("response.modalities")) {
               console.warn('Ignored Azure warning:', errMsg);
               incrementDroppedEvent('azure_unknown_response_modalities');
-            } else if (
-              errMsg.includes("Unknown parameter: 'session.turn_detection'")
-              && !legacySessionSchemaFallbackTriedRef.current
-            ) {
-              legacySessionSchemaFallbackTriedRef.current = true;
-              console.warn('Realtime schema fallback: switching to nested audio session schema');
-              incrementDroppedEvent('legacy_turn_detection_param_rejected');
-              try {
-                const resent = sendSessionUpdate({ schema: 'nested' });
-                if (resent) {
-                  addTranscript('system', 'Applied compatibility fallback for realtime session schema');
-                }
-              } catch (reapplyErr) {
-                console.warn('Failed to retry session.update without legacy keys:', reapplyErr);
-                incrementDroppedEvent('legacy_schema_fallback_failed');
-              }
-            } else if (
-              errMsg.includes("Unknown parameter: 'session.audio.input.turn_detection'")
-              && sessionUpdateCompat.schema !== 'legacy'
-            ) {
-              console.warn('Realtime schema fallback: switching back to legacy session schema');
-              incrementDroppedEvent('nested_turn_detection_param_rejected');
-              try {
-                const resent = sendSessionUpdate({ schema: 'legacy' });
-                if (resent) {
-                  addTranscript('system', 'Applied legacy compatibility fallback for realtime session schema');
-                }
-              } catch (reapplyErr) {
-                console.warn('Failed to retry session.update with legacy schema:', reapplyErr);
-                incrementDroppedEvent('legacy_schema_retry_failed');
-              }
-            } else if (
-              (errMsg.includes("Unknown parameter: 'session.input_audio_transcription'")
-                || errMsg.includes("Unknown parameter: 'input_audio_transcription'"))
-              && sessionUpdateCompat.includeDualTranscriptionKeys
-            ) {
-              console.warn('Realtime transcription fallback: disabling duplicate top-level transcription keys');
-              incrementDroppedEvent('dual_transcription_keys_rejected');
-              try {
-                const resent = sendSessionUpdate({ includeDualTranscriptionKeys: false });
-                if (resent) {
-                  addTranscript('system', 'Adjusted transcription compatibility settings for realtime session');
-                }
-              } catch (reapplyErr) {
-                console.warn('Failed to retry session.update without duplicate transcription keys:', reapplyErr);
-                incrementDroppedEvent('dual_transcription_retry_failed');
-              }
             } else {
               setError(errMsg);
               addTranscript('system', `Error: ${errMsg}`);
@@ -1850,20 +1993,13 @@ export default function InterviewSessionRoom() {
             }
           } else if (msgType === 'response.output_text.done') {
             setAiSpeakingState(false);
-            const finalText = msg.text || msg.transcript;
-            const responseId = msg.response_id || msg.response?.id || 'text';
-            const key = `${responseId}:${finalText}`;
-            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
-              addTranscript('ai', finalText);
-            }
           } else if (msgType === 'response.output_item.added') {
-            // Remember the last AI output item id so we can detect the user reply that follows
             try {
               const item = msg.item || {};
               const itemId = item.id || item.item_id || item.itemId || msg.item_id || msg.itemId || null;
               if (itemId) lastAIItemRef.current = itemId;
             } catch (e) {
-              console.warn('Failed to capture output item id:', e);
+              debugRealtime('Failed to capture output item id:', e);
             }
           } else if (msgType === 'response.output_audio_transcript.delta') {
             const text = msg.delta || msg.transcript || msg.text || msg.transcript_delta || null;
@@ -1872,52 +2008,16 @@ export default function InterviewSessionRoom() {
             }
           } else if (msgType === 'response.output_audio_transcript.done' || msgType === 'response.output_audio_transcript.completed') {
             setAiSpeakingState(false);
-            const finalText = msg.text || msg.transcript;
             const responseId = msg.response_id || msg.response?.id || 'audio';
-            const key = `${responseId}:${finalText}`;
-            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
-              addTranscript('ai', finalText);
-              lastAiSpokenTextRef.current = finalText.trim();
-            }
-            // Count question if we haven't seen response.completed for this response_id
-            const countId = msg.response_id;
-            if (finalText && finalText.trim().length > 10 && countId && !countedResponseIdsRef.current.has(countId)) {
-              countedResponseIdsRef.current.add(countId);
-              setQuestionCount(prev => {
-                const newCount = prev + 1;
-                console.log(`📊 Question count incremented to ${newCount} (from response.output_audio_transcript.done, response_id: ${countId})`);
-                return newCount;
-              });
-            }
+            commitAiTranscript(msg.text || msg.transcript, responseId);
           } else if (msgType === 'response.done') {
             setAiSpeakingState(false);
             const responseId = msg.response_id || msg.response?.id || 'done';
-            const finalText = extractResponseDoneText(msg);
-            const key = `${responseId}:${finalText}`;
-            if (finalText && finalText.trim().length > 0 && !rememberByTtl(capturedAiRef, key)) {
-              addTranscript('ai', finalText);
-              lastAiSpokenTextRef.current = finalText.trim();
-            }
-            if (responseId && !countedResponseIdsRef.current.has(responseId)) {
-              countedResponseIdsRef.current.add(responseId);
-              setQuestionCount(prev => {
-                const newCount = prev + 1;
-                console.log(`📊 Question count incremented to ${newCount} (from response.done, response_id: ${responseId})`);
-                return newCount;
-              });
-            }
+            commitAiTranscript(extractResponseDoneText(msg), responseId);
           } else if (msgType === 'response.completed') {
             setAiSpeakingState(false);
-            // Increment question count - this is the primary event for question completion
             const responseId = msg.response_id || msg.response?.id;
-            if (responseId && !countedResponseIdsRef.current.has(responseId)) {
-              countedResponseIdsRef.current.add(responseId);
-              setQuestionCount(prev => {
-                const newCount = prev + 1;
-                console.log(`📊 Question count incremented to ${newCount} (from response.completed, response_id: ${responseId})`);
-                return newCount;
-              });
-            }
+            incrementQuestionCount(responseId);
           } else if (msgType === 'output_audio_buffer.started') {
             setAiSpeakingState(true);
           } else if (msgType === 'output_audio_buffer.stopped') {
@@ -1942,7 +2042,6 @@ export default function InterviewSessionRoom() {
             const committedItemId = msg.item_id || msg.itemId || msg.conversation_item_id || null;
             if (committedItemId) {
               lastCommittedInputItemRef.current = committedItemId;
-              console.log('[input_audio_buffer.committed] item id:', committedItemId);
             }
             markUserSpeechSignal();
           } else if (
@@ -1960,21 +2059,11 @@ export default function InterviewSessionRoom() {
             if (itemId && pendingUserTranscriptRef.current[itemId]) {
               delete pendingUserTranscriptRef.current[itemId];
             }
-            const key = `${itemId}:${text}`;
-            console.log('[input_audio_transcription.*] text:', text);
-            if (text && text.trim().length > 0 && !rememberByTtl(capturedUserRef, key)) {
-              if (isEchoOfAI(text)) {
-                incrementDroppedEvent('echo_of_ai_discarded');
-              } else {
-                addTranscript('user', text);
-                setMicActive(false);
-              }
-            } else if (!text) {
-              incrementDroppedEvent('empty_user_transcription');
-              console.warn('[input_audio_transcription.*] No user text found in message:', msg);
-            } else {
-              incrementDroppedEvent('duplicate_user_transcription');
-            }
+            commitUserTranscript(text, itemId, {
+              evidence_source: 'realtime_input_transcription',
+              trusted_for_evaluation: true,
+              transcript_origin: 'server_input_transcription',
+            });
           } else if (
             msgType === 'conversation.item.added' ||
             msgType === 'conversation.item.done' ||
@@ -1990,17 +2079,12 @@ export default function InterviewSessionRoom() {
                 delete pendingUserTranscriptRef.current[parsed.itemId];
               }
 
-              console.log('[conversation.item.*]', parsed);
-
               if (parsed.isUserReply && parsed.text) {
-                const key = `${parsed.itemId || 'item'}:${parsed.text}`;
-                if (!rememberByTtl(capturedUserRef, key)) {
-                  if (isEchoOfAI(parsed.text)) {
-                    incrementDroppedEvent('echo_of_ai_discarded');
-                  } else {
-                    addTranscript('user', parsed.text);
-                  }
-                } else {
+                if (!commitUserTranscript(parsed.text, parsed.itemId || 'item', {
+                  evidence_source: 'realtime_conversation_item',
+                  trusted_for_evaluation: true,
+                  transcript_origin: 'server_conversation_fallback',
+                })) {
                   incrementDroppedEvent('duplicate_user_conversation_item');
                 }
               } else if (parsed.isAssistantReply && parsed.text) {
@@ -2015,11 +2099,9 @@ export default function InterviewSessionRoom() {
           } else if (msg.type === 'input_audio_buffer.speech_started') {
             setMicActive(true);
             markUserSpeechSignal();
-            addTranscript('system', 'User started speaking');
           } else if (msg.type === 'input_audio_buffer.speech_stopped') {
             setMicActive(false);
             markUserSpeechSignal();
-            addTranscript('system', 'User stopped speaking');
           }
         } catch (err) {
           console.error('Error parsing message:', err);
@@ -2029,6 +2111,8 @@ export default function InterviewSessionRoom() {
 
       dc.onerror = (err) => {
         console.error('DataChannel error:', err);
+        setMicActive(false);
+        setAiSpeakingState(false);
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setStatus('disconnected');
           setError('Internet disconnected. Interview paused. Reconnect when network is back.');
@@ -2038,6 +2122,8 @@ export default function InterviewSessionRoom() {
       };
 
       dc.onclose = () => {
+        setMicActive(false);
+        setAiSpeakingState(false);
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('Internet disconnected. Interview paused. Reconnect when network is back.');
         }
@@ -2071,39 +2157,22 @@ export default function InterviewSessionRoom() {
       });
 
       if (!resp.ok) {
-        const text = await resp.text();
-        let errorMessage = `HTTP ${resp.status} from backend`;
-        let trialCodeRequired = false;
+        const apiError = await buildApiErrorFromResponse(resp, {
+          defaultMessage: resp.status === 404
+            ? 'Backend route not found (404). Check if server is running and route exists.'
+            : `HTTP ${resp.status} from backend`,
+        });
 
-        try {
-          const errorData = JSON.parse(text);
-          if (errorData?.detail && typeof errorData.detail === "object") {
-            if (errorData.detail.code === "TRIAL_CODE_REQUIRED") {
-              trialCodeRequired = true;
-              errorMessage = errorData.detail.message || "Trial code is required before starting.";
-            } else {
-              errorMessage = JSON.stringify(errorData.detail);
-            }
-          } else {
-            errorMessage = errorData.detail || errorMessage;
-          }
-        } catch {
-          errorMessage = text || errorMessage;
+        if (apiError.code === 'TRIAL_CODE_REQUIRED') {
+          apiError.recoveryTarget = {
+            pathname: '/interview-config',
+            state: {
+              type: interviewType,
+              recoveryMessage: apiError.userMessage || 'Redeem a valid trial code before starting.',
+            },
+          };
         }
-
-        if (resp.status === 404 && !text.includes('Realtime API')) {
-          errorMessage = `Backend route not found (404). Check if server is running and route exists.`;
-        }
-
-        if (trialCodeRequired) {
-          addTranscript('system', `Backend error: ${errorMessage} Redirecting to interview configuration.`);
-          setTimeout(() => {
-            window.location.href = "/interview-config";
-          }, 1200);
-        } else {
-          addTranscript('system', `Backend error: ${errorMessage}`);
-        }
-        throw new Error(errorMessage);
+        throw apiError;
       }
 
       const data = await resp.json();
@@ -2147,20 +2216,11 @@ export default function InterviewSessionRoom() {
         addTranscript('system', 'Gaze calibration complete.');
       }
 
-      addTranscript('system', 'SDP answer received from backend');
-
-
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
-      addTranscript('system', 'Remote description set, connection establishing...');
       if (data.openingQuestion && String(data.openingQuestion).trim()) {
-        const opening = String(data.openingQuestion).trim();
-        const openingInstruction = String(data.openingQuestionInstruction || '').trim();
-        if (dcRef.current && dcRef.current.readyState === 'open') {
-          sendServerQuestion(opening, { opening: true, instruction: openingInstruction });
-        } else {
-          pendingOpeningQuestionRef.current = opening;
-          pendingOpeningInstructionRef.current = openingInstruction;
-        }
+        pendingOpeningQuestionRef.current = String(data.openingQuestion).trim();
+        pendingOpeningInstructionRef.current = String(data.openingQuestionInstruction || '').trim();
+        tryStartOpeningTurn();
       }
 
     } catch (err) {
@@ -2181,6 +2241,8 @@ export default function InterviewSessionRoom() {
         errorMessage = 'Cannot reach the interview service. Start the backend server and reconnect.';
       }
 
+      const recoveryTarget = err?.recoveryTarget || null;
+
       setError(errorMessage);
       addTranscript('system', `Error: ${errorMessage}`);
       if (!isReconnectAttempt) {
@@ -2194,9 +2256,17 @@ export default function InterviewSessionRoom() {
       }
       stopGazeMonitoring();
       stopBrowserSpeechRecognition();
+      vad.stop();
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
+      }
+      if (recoveryTarget) {
+        navigate(recoveryTarget.pathname, {
+          replace: true,
+          state: recoveryTarget.state,
+        });
+        return;
       }
     }
   }, [
@@ -2205,7 +2275,7 @@ export default function InterviewSessionRoom() {
     networkOnline,
     addTranscript,
     getToken,
-    user,
+    effectiveUser,
     sessionId,
     interviewType,
     difficulty,
@@ -2215,22 +2285,25 @@ export default function InterviewSessionRoom() {
     interviewStyle,
     durationMinutes,
     selectedSkills,
+    navigate,
+    sendRealtimeQuestion,
+    commitAiTranscript,
+    commitUserTranscript,
+    incrementQuestionCount,
     incrementDroppedEvent,
-    rememberByTtl,
     startGazeMonitoring,
     runGazePreflight,
     stopGazeMonitoring,
     startBrowserSpeechRecognition,
     stopBrowserSpeechRecognition,
-    isEchoOfAI,
-    markUserSpeechSignal,
     setAiSpeakingState,
+    markUserSpeechSignal,
+    stopFiller,
+    vad,
   ]);
 
   // Build canonical transcript payload (structured/hybrid/raw)
   const buildCanonicalTranscriptPayload = useCallback(() => {
-    const ai = aiMessagesRef.current.map(m => ({ ...m, speaker: 'ai' }));
-    const user = userMessagesRef.current.map(m => ({ ...m, speaker: 'user' }));
     const pendingUserMessages = Object.values(pendingUserTranscriptRef.current || {})
       .map((value) => String(value || '').trim())
       .filter((text) => text.length > 0)
@@ -2238,65 +2311,15 @@ export default function InterviewSessionRoom() {
         speaker: 'user',
         text,
         timestamp: new Date(Date.now() - (idx + 1) * 100).toISOString(),
+        evidence_source: 'pending_transcript_delta',
+        trusted_for_evaluation: false,
+        transcript_origin: 'pending_input_delta',
       }));
-
-    // Merge into a single ordered list
-    const raw_messages = [...ai, ...user, ...pendingUserMessages]
-      .filter(m => m.text && String(m.text).trim().length > 0)
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    console.log(`[buildPayload] Total messages: ${raw_messages.length}`);
-
-    // Attempt Q/A pairing
-    const qa_pairs = [];
-    const unpaired = [];
-    let pendingQuestion = null;
-
-    for (const m of raw_messages) {
-      if (m.speaker === 'ai') {
-        if (pendingQuestion) {
-          // Previous question had no answer
-          unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
-          console.info('[transcript] AI question without paired user answer yet:', pendingQuestion.text);
-        }
-        pendingQuestion = { text: m.text, timestamp: m.timestamp };
-      } else {
-        // user message
-        if (pendingQuestion) {
-          qa_pairs.push({
-            question: pendingQuestion.text,
-            answer: m.text,
-            timestamp: m.timestamp
-          });
-          pendingQuestion = null;
-        } else {
-          unpaired.push({ type: 'answer_without_question', text: m.text, timestamp: m.timestamp, speaker: 'user' });
-          console.info('[transcript] User answer without paired AI question:', m.text);
-        }
-      }
-    }
-
-    if (pendingQuestion) {
-      unpaired.push({ type: 'unanswered_question', text: pendingQuestion.text, timestamp: pendingQuestion.timestamp });
-      console.info('[transcript] Trailing AI question at end of call:', pendingQuestion.text);
-    }
-
-    // Determine mode
-    let mode = 'structured';
-    if (qa_pairs.length === 0 && raw_messages.length > 0) {
-      mode = 'raw';
-    } else if (unpaired.length > 0) {
-      mode = 'hybrid';
-    }
-
-    console.log(`[buildPayload] Mode: ${mode}, QA pairs: ${qa_pairs.length}, Unpaired: ${unpaired.length}`);
-
-    return {
-      mode,
-      qa_pairs,
-      unpaired,
-      raw_messages,
-    };
+    return buildCanonicalTranscriptPayloadFromMessages({
+      aiMessages: aiMessagesRef.current,
+      userMessages: userMessagesRef.current,
+      pendingUserMessages,
+    });
   }, []);
 
   // Save transcript and generate report with canonical payload
@@ -2360,6 +2383,27 @@ export default function InterviewSessionRoom() {
       // Send canonical transcript payload
       const token = await getToken();
 
+      const captureResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/capture`, token, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          trusted_transcript: transcriptPayload.trusted_raw_messages || [],
+          fallback_transcript: transcriptPayload.fallback_raw_messages || [],
+          word_timestamps: [],
+          capture_integrity: transcriptPayload.capture_integrity || {},
+          transcript_origin: 'server_transcript',
+          evaluation_source: 'server_transcript',
+        }),
+      });
+
+      if (!captureResp.ok && captureResp.status !== 404) {
+        const captureError = await buildApiErrorFromResponse(captureResp, {
+          defaultMessage: 'We could not persist trusted interview evidence. Please retry.',
+        });
+        console.error('❌ Capture persistence failed:', captureError);
+        throw captureError;
+      }
+
       const saveResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, token, {
         method: 'POST',
         headers: headers,
@@ -2406,9 +2450,11 @@ export default function InterviewSessionRoom() {
       });
 
       if (!saveResp.ok) {
-        const errText = await saveResp.text().catch(() => 'Unknown error');
-        console.error('❌ Transcript save failed:', errText);
-        throw new Error(`Save failed: ${errText}`);
+        const saveError = await buildApiErrorFromResponse(saveResp, {
+          defaultMessage: 'We could not save this interview report. Please retry.',
+        });
+        console.error('❌ Transcript save failed:', saveError);
+        throw saveError;
       }
 
       const raw = await saveResp.text();
@@ -2521,6 +2567,8 @@ export default function InterviewSessionRoom() {
         audioElementRef.current = null;
       }
       audioResumeActionRef.current = null;
+      vad.stop();
+      stopFiller();
 
       setStatus('idle');
       setMicActive(false);
@@ -2549,7 +2597,7 @@ export default function InterviewSessionRoom() {
       // DO NOT reset endInProgressRef - modal controls that
     } finally {
     }
-  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopFiller, stopGazeMonitoring, vad]);
 
   // Retry handler
   const handleRetryEnd = useCallback(async () => {
@@ -2584,6 +2632,8 @@ export default function InterviewSessionRoom() {
         audioElementRef.current = null;
       }
       audioResumeActionRef.current = null;
+      vad.stop();
+      stopFiller();
 
       setStatus('idle');
       setAiSpeakingState(false);
@@ -2608,7 +2658,7 @@ export default function InterviewSessionRoom() {
       isEndingRef.current = false;
     } finally {
     }
-  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [runSaveFlow, navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring, stopFiller, vad]);
 
   const handleResumeInterview = useCallback(() => {
     setEndError(null);
@@ -2647,6 +2697,8 @@ export default function InterviewSessionRoom() {
         audioElementRef.current = null;
       }
       audioResumeActionRef.current = null;
+      vad.stop();
+      stopFiller();
     } finally {
       setStatus('idle');
       setMicActive(false);
@@ -2656,7 +2708,7 @@ export default function InterviewSessionRoom() {
       pendingTranscriptPayloadRef.current = null;
       navigate('/dashboard');
     }
-  }, [navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopGazeMonitoring]);
+  }, [navigate, setAiSpeakingState, stopBrowserSpeechRecognition, stopFiller, stopGazeMonitoring, vad]);
 
   const gazeStatus = useMemo(() => {
     const liveFlag = mapLiveGazeFlag(gazeMetrics.activeFlag, gazeMetrics.gazeDirection);
@@ -2713,8 +2765,14 @@ export default function InterviewSessionRoom() {
     if (captureWarning === 'audio_blocked') {
       return 'Browser audio is blocked. Use the stage button to enable Sonia playback before continuing.';
     }
+    if (isThinking && currentFiller?.text) {
+      return `Sonia is thinking aloud: ${currentFiller.text}`;
+    }
     if (aiSpeaking) {
       return 'Sonia is speaking. Let the question finish, then answer directly and stay specific.';
+    }
+    if (micActive) {
+      return 'We are listening now. Finish your point cleanly and keep your examples concrete.';
     }
     if (captureWarning === 'no_audio') {
       return 'No candidate speech has been captured yet. Check your mic, browser permissions, and transcript flow.';
@@ -2723,7 +2781,59 @@ export default function InterviewSessionRoom() {
       return 'Sonia is waiting. Answer directly, stay concrete, and stop once your point is made.';
     }
     return 'Interview session ready.';
-  }, [aiSpeaking, cameraOff, captureWarning, gazeMetrics.calibrationProgress, gazeMetrics.calibrationState, gazeMetrics.detectorReady, gazeMetrics.faceDetected, status]);
+  }, [aiSpeaking, cameraOff, captureWarning, currentFiller?.text, gazeMetrics.calibrationProgress, gazeMetrics.calibrationState, gazeMetrics.detectorReady, gazeMetrics.faceDetected, isThinking, micActive, status]);
+
+  const stageStatusLabel = useMemo(() => {
+    if (status === 'connecting' || status === 'idle') {
+      return 'Connecting';
+    }
+    if (status === 'error' || status === 'disconnected' || status === 'failed') {
+      return 'Reconnect Needed';
+    }
+    if (aiSpeaking) {
+      return 'Sonia Speaking';
+    }
+    if (micActive) {
+      return 'Listening';
+    }
+    if (status === 'connected' || status === 'ready') {
+      return 'Live';
+    }
+    return 'Ready';
+  }, [aiSpeaking, micActive, status]);
+
+  const runtimeBadges = useMemo(() => {
+    const badges = [];
+    if (hasJoined && status === 'connecting') {
+      badges.push({ label: 'Resuming', tone: 'neutral' });
+    }
+    if (continuityWarning?.message || captureWarning || status === 'error' || status === 'disconnected' || status === 'failed') {
+      badges.push({ label: 'Recovery Mode', tone: 'warn' });
+    }
+    if (isThinking) {
+      badges.push({ label: 'Thinking', tone: 'neutral' });
+    }
+    if (aiSpeaking || fillerIsPlaying) {
+      badges.push({ label: 'Sonia Speaking', tone: 'live' });
+    }
+    if (micActive) {
+      badges.push({ label: 'Listening', tone: 'ok' });
+    }
+    if (!badges.length) {
+      badges.push({ label: stageStatusLabel, tone: 'neutral' });
+    }
+    return badges;
+  }, [
+    aiSpeaking,
+    captureWarning,
+    continuityWarning?.message,
+    fillerIsPlaying,
+    hasJoined,
+    isThinking,
+    micActive,
+    stageStatusLabel,
+    status,
+  ]);
 
   const handleResumeSoniaAudio = useCallback(async () => {
     try {
@@ -2735,7 +2845,7 @@ export default function InterviewSessionRoom() {
     }
   }, []);
 
-  if (!user) {
+  if (!effectiveUser) {
     return (
       <Box sx={{ p: 4 }}>
         <Typography variant="h6">Please sign in to access the interview.</Typography>
@@ -2784,6 +2894,19 @@ export default function InterviewSessionRoom() {
           🔊 Sonia audio is blocked by the browser. Use the stage button to enable playback.
         </div>
       )}
+      {continuityWarning?.message && (
+        <div className={`meet-capture-banner ${continuityWarning.tone === 'error' ? 'meet-capture-banner--error' : 'meet-capture-banner--warn'}`}>
+          {continuityWarning.message}
+        </div>
+      )}
+
+      <div className="meet-runtime-badges" aria-label="Interview status">
+        {runtimeBadges.map((badge) => (
+          <span key={badge.label} className={`meet-runtime-badge ${badge.tone}`}>
+            {badge.label}
+          </span>
+        ))}
+      </div>
 
       {/* Main Stage */}
       <div className="meet-stage-wrap">
@@ -2796,7 +2919,7 @@ export default function InterviewSessionRoom() {
             <span>•</span>
             <span>{effectiveDurationMinutes}m target</span>
             <span>•</span>
-            <span>{status === 'connected' ? 'Live' : status === 'connecting' ? 'Connecting' : 'Ready'}</span>
+            <span>{stageStatusLabel}</span>
           </div>
           <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
             {soniaAvatarSrc && !avatarLoadError && (
@@ -2833,16 +2956,16 @@ export default function InterviewSessionRoom() {
               </Button>
             </div>
           )}
-          {(status === 'connecting' || status === 'idle') && (
-            <div className="meet-stage-status">Connecting…</div>
-          )}
+          <div className={`meet-stage-status ${micActive ? 'listening' : aiSpeaking ? 'speaking' : ''}`}>
+            {stageStatusLabel}
+          </div>
           {hasJoined && (
             <div className={`meet-self-view ${selfViewHidden ? 'collapsed' : ''}`}>
               <div className="meet-self-header">
                 <div className="meet-self-meta">
                   <span>You</span>
-                  <span className={`meet-self-chip ${(micMuted || cameraOff) ? 'warn' : 'ok'}`}>
-                    {micMuted ? 'Mic Off' : 'Mic On'} · {cameraOff ? 'Cam Off' : 'Cam On'}
+                  <span className={`meet-self-chip ${(micMuted || cameraOff) ? 'warn' : micActive ? 'live' : 'ok'}`}>
+                    {micMuted ? 'Mic Off' : 'Mic On'} · {cameraOff ? 'Cam Off' : 'Cam On'} · {micActive ? 'Listening' : aiSpeaking ? 'Sonia Live' : 'Ready'}
                   </span>
                 </div>
                 <div className="meet-self-actions">

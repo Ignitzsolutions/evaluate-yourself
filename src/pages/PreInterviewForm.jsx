@@ -19,7 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
-import { authFetch } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 
@@ -31,15 +31,49 @@ const trialCodeEnforcement = !["0", "false", "no", "off"].includes(
 );
 const freeTrialMinutes = Math.max(1, Number(process.env.REACT_APP_FREE_TRIAL_MINUTES || 5));
 const API_BASE = getApiBaseUrl();
+const EMPTY_TRIAL_FEEDBACK = { code: "", message: "", severity: "error", retryable: false };
+
+function toTrialFeedback(error, fallbackMessage) {
+  if (!error) {
+    return EMPTY_TRIAL_FEEDBACK;
+  }
+  const code = String(error.code || "");
+  if (isBackendUnavailableError(error)) {
+    return {
+      code: code || "BACKEND_UNAVAILABLE",
+      message: getApiErrorMessage(error, {
+        backendLabel: "trial code service",
+        defaultMessage: fallbackMessage,
+      }),
+      severity: "warning",
+      retryable: true,
+    };
+  }
+
+  const message = getApiErrorMessage(error, {
+    backendLabel: "trial code service",
+    defaultMessage: fallbackMessage,
+  });
+  const severity = code === "TRIAL_CODE_BACKEND_ERROR" ? "warning" : "error";
+  return {
+    code,
+    message,
+    severity,
+    retryable: Boolean(error.retryable),
+  };
+}
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
   const location = useLocation();
   const { getToken } = useAuth();
 
-  const selectedType = useMemo(() => location.state?.type || "technical", [location.state?.type]);
+  const [selectedType, setSelectedType] = useState(location.state?.type || "technical");
 
-  const durationOptions = trialModeEnabled ? [freeTrialMinutes] : [10, 15, 20, 30];
+  const durationOptions = useMemo(
+    () => (trialModeEnabled ? [freeTrialMinutes] : [10, 15, 20, 30]),
+    [],
+  );
   const [duration, setDuration] = useState(durationOptions[0]);
   const [difficulty, setDifficulty] = useState("easy");
   const [role, setRole] = useState("");
@@ -50,12 +84,46 @@ export default function PreInterviewForm() {
   const [consentError, setConsentError] = useState(false);
   const [trialCode, setTrialCode] = useState("");
   const [trialEntitlement, setTrialEntitlement] = useState(null);
-  const [trialError, setTrialError] = useState("");
+  const [trialFeedback, setTrialFeedback] = useState(EMPTY_TRIAL_FEEDBACK);
+  const [recoveryMessage, setRecoveryMessage] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState(null);
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [skillError, setSkillError] = useState("");
   const [skillLoading, setSkillLoading] = useState(false);
+
+  useEffect(() => {
+    const locationType = location.state?.type;
+    const locationRecoveryMessage = location.state?.recoveryMessage;
+    if (locationType) {
+      setSelectedType(locationType);
+    }
+    if (locationRecoveryMessage) {
+      setRecoveryMessage(locationRecoveryMessage);
+    }
+
+    const config = sessionStorage.getItem("interviewConfig");
+    if (!config) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(config);
+      setSelectedType(locationType || parsed.type || "technical");
+      setDuration(Number(parsed.duration) || durationOptions[0]);
+      setDifficulty(parsed.difficulty || "easy");
+      setRole(parsed.role || "");
+      setCompany(parsed.company || "");
+      setQuestionMix(parsed.questionMix || "balanced");
+      setInterviewStyle(parsed.interviewStyle || "neutral");
+      setTranscriptConsent(Boolean(parsed.transcriptConsent));
+      setTrialCode(String(parsed.trialCode || "").toUpperCase());
+      setTrialEntitlement(parsed.trialEntitlement || null);
+      setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
+    } catch {
+      // ignore invalid saved config and use defaults
+    }
+  }, [durationOptions, location.state?.recoveryMessage, location.state?.type]);
 
   useEffect(() => {
     let mounted = true;
@@ -70,18 +138,26 @@ export default function PreInterviewForm() {
           { method: "GET" }
         );
         if (!resp.ok) {
-          const text = await resp.text().catch(() => "");
-          throw new Error(text || "Failed to load stream catalog");
+          throw await buildApiErrorFromResponse(resp, {
+            defaultMessage: "Failed to load stream catalog",
+          });
         }
         const data = await resp.json();
         if (!mounted) return;
         setSkillCatalog(data);
-        setSelectedSkills(Array.isArray(data?.suggested_defaults) ? data.suggested_defaults : []);
+        setSelectedSkills((prev) => (
+          prev.length > 0
+            ? prev
+            : Array.isArray(data?.suggested_defaults) ? data.suggested_defaults : []
+        ));
       } catch (err) {
         if (!mounted) return;
         setSkillCatalog(null);
         setSelectedSkills([]);
-        setSkillError(err.message || "Could not load stream catalog.");
+        setSkillError(getApiErrorMessage(err, {
+          backendLabel: "stream catalog service",
+          defaultMessage: "Could not load stream catalog.",
+        }));
       } finally {
         if (mounted) setSkillLoading(false);
       }
@@ -106,9 +182,15 @@ export default function PreInterviewForm() {
   };
 
   const redeemTrialCode = async () => {
-    setTrialError("");
+    setTrialFeedback(EMPTY_TRIAL_FEEDBACK);
+    setRecoveryMessage("");
     if (!trialCode.trim()) {
-      setTrialError("Enter a trial code first.");
+      setTrialFeedback({
+        code: "TRIAL_CODE_REQUIRED",
+        message: "Enter a trial code first.",
+        severity: "error",
+        retryable: false,
+      });
       return;
     }
     setRedeeming(true);
@@ -120,14 +202,21 @@ export default function PreInterviewForm() {
         body: JSON.stringify({ code: trialCode.trim() }),
       });
       if (!resp.ok) {
-        const text = await resp.text().catch(() => "");
-        throw new Error(text || "Failed to redeem trial code");
+        throw await buildApiErrorFromResponse(resp, {
+          defaultMessage: "Failed to redeem trial code",
+        });
       }
       const data = await resp.json();
       setTrialEntitlement(data);
+      setTrialFeedback({
+        code: "TRIAL_CODE_REDEEMED",
+        message: `Trial code redeemed. Limit: ${data.duration_minutes_effective} minutes.`,
+        severity: "success",
+        retryable: false,
+      });
     } catch (err) {
       setTrialEntitlement(null);
-      setTrialError(err.message || "Could not redeem trial code");
+      setTrialFeedback(toTrialFeedback(err, "Could not redeem trial code"));
     } finally {
       setRedeeming(false);
     }
@@ -141,7 +230,12 @@ export default function PreInterviewForm() {
       return;
     }
     if (trialModeEnabled && trialCodeEnforcement && !trialEntitlement) {
-      setTrialError("Redeem a valid trial code before starting.");
+      setTrialFeedback({
+        code: "TRIAL_CODE_REQUIRED",
+        message: "Redeem a valid trial code before starting.",
+        severity: "error",
+        retryable: false,
+      });
       return;
     }
     if (!skillCatalog && (selectedType === "technical" || selectedType === "mixed")) {
@@ -217,6 +311,11 @@ export default function PreInterviewForm() {
             {trialModeEnabled && (
               <Alert severity="info" sx={{ mb: 2.5 }}>
                 Free trial mode is active. Interview duration is capped at {freeTrialMinutes} minutes.
+              </Alert>
+            )}
+            {recoveryMessage && (
+              <Alert severity="warning" sx={{ mb: 2.5 }}>
+                {recoveryMessage}
               </Alert>
             )}
             {trialModeEnabled && trialCodeEnforcement && (
@@ -346,16 +445,19 @@ export default function PreInterviewForm() {
                     label="Trial Code"
                     placeholder="TRY-XXXXXXXX"
                     value={trialCode}
-                    onChange={(e) => setTrialCode(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      setTrialCode(e.target.value.toUpperCase());
+                      setTrialFeedback(EMPTY_TRIAL_FEEDBACK);
+                    }}
                   />
                   <Button variant="outlined" onClick={redeemTrialCode} disabled={redeeming}>
                     {redeeming ? "Redeeming..." : "Redeem"}
                   </Button>
                 </Stack>
-                {trialError && (
-                  <Typography variant="caption" color="error">
-                    {trialError}
-                  </Typography>
+                {trialFeedback.message && (
+                  <Alert severity={trialFeedback.severity} sx={{ mt: 1.25 }}>
+                    {trialFeedback.message}
+                  </Alert>
                 )}
               </Grid>
 

@@ -19,6 +19,7 @@ requests==2.31.0
 openai>=1.10.0,<2.0.0
 langchain-core>=0.1.0
 langchain-openai>=0.0.5
+langgraph>=0.2.0
 numpy>=1.26.0,<3.0.0
 opencv-python-headless>=4.10.0.84,<5.0.0
 
@@ -34,7 +35,6 @@ azure-identity==1.17.1
 
 # PDF generation
 reportlab==4.0.9
-xhtml2pdf>=0.2.16,<0.3.0
 
 # Database (Auth & user persistence)
 sqlalchemy>=2.0.0

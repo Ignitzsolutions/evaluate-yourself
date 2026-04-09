@@ -4,7 +4,7 @@ import { Navigate } from "react-router-dom";
 import { SignIn, useAuth, useClerk } from "@clerk/clerk-react";
 import AuthShell from "../components/AuthShell";
 import BackendUnavailableState from "../components/BackendUnavailableState";
-import { authFetch, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 import { defaultClerkAppearance } from "../utils/clerkAppearance";
@@ -39,15 +39,15 @@ export default function AdminLoginPage() {
         }
         const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
         if (!resp.ok) {
-          if (mounted) {
-            setState({
-              checking: false,
-              isAdmin: false,
-              errorKind: resp.status >= 500 ? "server_error" : "",
-              errorMessage: resp.status >= 500 ? "Admin verification failed. Check the backend and try again." : "",
-            });
+          if (!devBypass && resp.status === 401) {
+            if (mounted) {
+              setState({ checking: false, isAdmin: false, errorKind: "", errorMessage: "" });
+            }
+            return;
           }
-          return;
+          throw await buildApiErrorFromResponse(resp, {
+            defaultMessage: "Admin verification failed. Check the backend and try again.",
+          });
         }
         const data = await resp.json();
         if (mounted) {
@@ -58,7 +58,7 @@ export default function AdminLoginPage() {
           setState({
             checking: false,
             isAdmin: false,
-            errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : "generic",
+            errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : error?.status >= 500 ? "server_error" : "generic",
             errorMessage: getApiErrorMessage(error, {
               backendLabel: "admin access service",
               defaultMessage: "Unable to verify admin access.",
