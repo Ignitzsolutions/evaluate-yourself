@@ -19,49 +19,12 @@ import {
   Typography,
 } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
-import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
+import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 
-const trialModeEnabled = !["0", "false", "no", "off"].includes(
-  String(process.env.REACT_APP_TRIAL_MODE_ENABLED || "true").toLowerCase()
-);
-const trialCodeEnforcement = !["0", "false", "no", "off"].includes(
-  String(process.env.REACT_APP_TRIAL_CODE_ENFORCEMENT || "true").toLowerCase()
-);
-const freeTrialMinutes = Math.max(1, Number(process.env.REACT_APP_FREE_TRIAL_MINUTES || 5));
+const FREE_ACCESS_MODE = true;
 const API_BASE = getApiBaseUrl();
-const EMPTY_TRIAL_FEEDBACK = { code: "", message: "", severity: "error", retryable: false };
-
-function toTrialFeedback(error, fallbackMessage) {
-  if (!error) {
-    return EMPTY_TRIAL_FEEDBACK;
-  }
-  const code = String(error.code || "");
-  if (isBackendUnavailableError(error)) {
-    return {
-      code: code || "BACKEND_UNAVAILABLE",
-      message: getApiErrorMessage(error, {
-        backendLabel: "trial code service",
-        defaultMessage: fallbackMessage,
-      }),
-      severity: "warning",
-      retryable: true,
-    };
-  }
-
-  const message = getApiErrorMessage(error, {
-    backendLabel: "trial code service",
-    defaultMessage: fallbackMessage,
-  });
-  const severity = code === "TRIAL_CODE_BACKEND_ERROR" ? "warning" : "error";
-  return {
-    code,
-    message,
-    severity,
-    retryable: Boolean(error.retryable),
-  };
-}
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
@@ -70,10 +33,7 @@ export default function PreInterviewForm() {
 
   const [selectedType, setSelectedType] = useState(location.state?.type || "technical");
 
-  const durationOptions = useMemo(
-    () => (trialModeEnabled ? [freeTrialMinutes] : [10, 15, 20, 30]),
-    [],
-  );
+  const durationOptions = useMemo(() => [10, 15, 20, 30, 45, 60], []);
   const [duration, setDuration] = useState(durationOptions[0]);
   const [difficulty, setDifficulty] = useState("easy");
   const [role, setRole] = useState("");
@@ -82,11 +42,7 @@ export default function PreInterviewForm() {
   const [interviewStyle, setInterviewStyle] = useState("neutral");
   const [transcriptConsent, setTranscriptConsent] = useState(false);
   const [consentError, setConsentError] = useState(false);
-  const [trialCode, setTrialCode] = useState("");
-  const [trialEntitlement, setTrialEntitlement] = useState(null);
-  const [trialFeedback, setTrialFeedback] = useState(EMPTY_TRIAL_FEEDBACK);
   const [recoveryMessage, setRecoveryMessage] = useState("");
-  const [redeeming, setRedeeming] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState(null);
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [skillError, setSkillError] = useState("");
@@ -117,8 +73,6 @@ export default function PreInterviewForm() {
       setQuestionMix(parsed.questionMix || "balanced");
       setInterviewStyle(parsed.interviewStyle || "neutral");
       setTranscriptConsent(Boolean(parsed.transcriptConsent));
-      setTrialCode(String(parsed.trialCode || "").toUpperCase());
-      setTrialEntitlement(parsed.trialEntitlement || null);
       setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
     } catch {
       // ignore invalid saved config and use defaults
@@ -181,61 +135,11 @@ export default function PreInterviewForm() {
     });
   };
 
-  const redeemTrialCode = async () => {
-    setTrialFeedback(EMPTY_TRIAL_FEEDBACK);
-    setRecoveryMessage("");
-    if (!trialCode.trim()) {
-      setTrialFeedback({
-        code: "TRIAL_CODE_REQUIRED",
-        message: "Enter a trial code first.",
-        severity: "error",
-        retryable: false,
-      });
-      return;
-    }
-    setRedeeming(true);
-    try {
-      const token = await getToken();
-      const resp = await authFetch(`${API_BASE}/api/trial-codes/redeem`, token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trialCode.trim() }),
-      });
-      if (!resp.ok) {
-        throw await buildApiErrorFromResponse(resp, {
-          defaultMessage: "Failed to redeem trial code",
-        });
-      }
-      const data = await resp.json();
-      setTrialEntitlement(data);
-      setTrialFeedback({
-        code: "TRIAL_CODE_REDEEMED",
-        message: `Trial code redeemed. Limit: ${data.duration_minutes_effective} minutes.`,
-        severity: "success",
-        retryable: false,
-      });
-    } catch (err) {
-      setTrialEntitlement(null);
-      setTrialFeedback(toTrialFeedback(err, "Could not redeem trial code"));
-    } finally {
-      setRedeeming(false);
-    }
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
 
     if (!transcriptConsent) {
       setConsentError(true);
-      return;
-    }
-    if (trialModeEnabled && trialCodeEnforcement && !trialEntitlement) {
-      setTrialFeedback({
-        code: "TRIAL_CODE_REQUIRED",
-        message: "Redeem a valid trial code before starting.",
-        severity: "error",
-        retryable: false,
-      });
       return;
     }
     if (!skillCatalog && (selectedType === "technical" || selectedType === "mixed")) {
@@ -255,15 +159,13 @@ export default function PreInterviewForm() {
     const config = {
       type: selectedType,
       duration,
-      trialMode: trialModeEnabled,
+      trialMode: false,
       difficulty,
       role: role.trim() || undefined,
       company: company.trim() || undefined,
       questionMix,
       interviewStyle,
       transcriptConsent,
-      trialCode: trialCode.trim() || undefined,
-      trialEntitlement,
       selectedSkills,
     };
 
@@ -308,21 +210,14 @@ export default function PreInterviewForm() {
           </Stack>
 
           <Box component="form" onSubmit={handleSubmit}>
-            {trialModeEnabled && (
+            {FREE_ACCESS_MODE && (
               <Alert severity="info" sx={{ mb: 2.5 }}>
-                Free trial mode is active. Interview duration is capped at {freeTrialMinutes} minutes.
+                Free access is active. Trial codes are disabled and interviews are not capped.
               </Alert>
             )}
             {recoveryMessage && (
               <Alert severity="warning" sx={{ mb: 2.5 }}>
                 {recoveryMessage}
-              </Alert>
-            )}
-            {trialModeEnabled && trialCodeEnforcement && (
-              <Alert severity={trialEntitlement ? "success" : "warning"} sx={{ mb: 2.5 }}>
-                {trialEntitlement
-                  ? `Trial code redeemed. Plan: ${trialEntitlement.plan_tier}, limit: ${trialEntitlement.duration_minutes_effective} minutes.`
-                  : "A trial code is required to start interview sessions."}
               </Alert>
             )}
             <Grid container spacing={2.5}>
@@ -436,29 +331,6 @@ export default function PreInterviewForm() {
                     </Typography>
                   )}
                 </Box>
-              </Grid>
-
-              <Grid item xs={12}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1.2}>
-                  <TextField
-                    fullWidth
-                    label="Trial Code"
-                    placeholder="TRY-XXXXXXXX"
-                    value={trialCode}
-                    onChange={(e) => {
-                      setTrialCode(e.target.value.toUpperCase());
-                      setTrialFeedback(EMPTY_TRIAL_FEEDBACK);
-                    }}
-                  />
-                  <Button variant="outlined" onClick={redeemTrialCode} disabled={redeeming}>
-                    {redeeming ? "Redeeming..." : "Redeem"}
-                  </Button>
-                </Stack>
-                {trialFeedback.message && (
-                  <Alert severity={trialFeedback.severity} sx={{ mt: 1.25 }}>
-                    {trialFeedback.message}
-                  </Alert>
-                )}
               </Grid>
 
               <Grid item xs={12}>

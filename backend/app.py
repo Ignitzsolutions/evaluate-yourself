@@ -59,6 +59,7 @@ from services.interview.conversation_planner import (
 )
 from services.interview.persistence import (
     load_latest_evidence_artifact,
+    load_latest_memory_snapshot,
     persist_evidence_artifact,
     persist_interview_round,
     persist_session_memory_snapshot,
@@ -82,7 +83,9 @@ from services.interview.communication_analytics import (
     analyze_communication_metrics,
     compute_confidence_score,
 )
+from services.interview.memory_summary import build_round_memory_summary
 from services.interview.policy_guard import sanitize_context_text
+from services.interview.replay import build_report_replay_payload
 from services.interview.skill_tracks import (
     derive_profile_default_tracks,
     skill_selection_rules,
@@ -384,9 +387,10 @@ AZURE_OPENAI_WHISPER_DEPLOYMENT = os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
-TRIAL_MODE_ENABLED = os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+FREE_ACCESS_MODE = True
+TRIAL_MODE_ENABLED = False if FREE_ACCESS_MODE else os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 FREE_TRIAL_MINUTES = max(1, int(os.getenv("FREE_TRIAL_MINUTES", "5")))
-TRIAL_CODE_ENFORCEMENT = os.getenv("TRIAL_CODE_ENFORCEMENT", "true").strip().lower() in ("1", "true", "yes", "on")
+TRIAL_CODE_ENFORCEMENT = False if FREE_ACCESS_MODE else os.getenv("TRIAL_CODE_ENFORCEMENT", "true").strip().lower() in ("1", "true", "yes", "on")
 INTERVIEW_SERVER_CONTROL_ENABLED = os.getenv("INTERVIEW_SERVER_CONTROL_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 INTERVIEW_SKILL_TRACKS_ENABLED = os.getenv("INTERVIEW_SKILL_TRACKS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED = os.getenv("INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
@@ -1026,6 +1030,8 @@ def _get_active_user_entitlement(db: Session, clerk_user_id: str) -> Optional[mo
 
 
 def _resolve_plan_tier_for_user(db: Session, clerk_user_id: str) -> tuple[str, Optional[models.UserEntitlement]]:
+    if FREE_ACCESS_MODE:
+        return "free", None
     if DEV_AUTH_BYPASS:
         return "trial", None
     # Existing billing integration is not wired yet. Active trial entitlement is the current plan source.
@@ -1039,7 +1045,9 @@ def _resolve_plan_tier_for_user(db: Session, clerk_user_id: str) -> tuple[str, O
 
 
 def _effective_duration_minutes(requested: Optional[int], plan_tier: str, entitlement: Optional[models.UserEntitlement] = None) -> int:
-    requested_value = requested if requested and requested > 0 else FREE_TRIAL_MINUTES
+    requested_value = requested if requested and requested > 0 else 30
+    if plan_tier == "free":
+        return max(1, int(requested_value))
     if plan_tier == "trial":
         duration_cap = entitlement.duration_minutes_effective if entitlement else FREE_TRIAL_MINUTES
         return min(requested_value, max(1, int(duration_cap)))
@@ -4878,6 +4886,10 @@ async def get_interview_report(
             metrics_dict.setdefault("score_trust_level", "trusted")
             metrics_dict.setdefault("score_provenance", {})
             metrics_dict.setdefault("turn_evidence", [])
+            metrics_dict.setdefault("provider_trace", None)
+            metrics_dict.setdefault("agent_handoff_summary", {})
+            metrics_dict.setdefault("memory_summary", {})
+            metrics_dict.setdefault("replay_available", bool(report.transcript))
             explainability = metrics_dict.get("evaluation_explainability")
             if not isinstance(explainability, dict):
                 explainability = {}
@@ -4909,6 +4921,10 @@ async def get_interview_report(
                     "rubric_version": EVAL_RUBRIC_VERSION,
                     "scorer_version": EVAL_SCORER_VERSION,
                 },
+                "provider_trace": None,
+                "agent_handoff_summary": {},
+                "memory_summary": {},
+                "replay_available": bool(report.transcript),
                 "turn_evidence": [],
                 "evaluation_explainability": {
                     "rubric_version": EVAL_RUBRIC_VERSION,
@@ -4959,6 +4975,58 @@ async def get_interview_report(
     except Exception:
         logging.exception("Failed to get interview report")
         raise HTTPException(status_code=500, detail="Failed to fetch report")
+
+
+@app.get("/api/interview/reports/{report_id}/replay")
+async def get_interview_report_replay(
+    report_id: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    report = await get_interview_report(report_id, authorization=authorization, db=db)
+    metrics = report.metrics if isinstance(report.metrics, dict) else {}
+    latest_capture_artifact = None
+    if getattr(report, "session_id", None):
+        latest_capture_artifact = load_latest_evidence_artifact(db, session_id=report.session_id)
+        if not metrics.get("memory_summary"):
+            latest_round_summary = load_latest_memory_snapshot(
+                db,
+                session_id=report.session_id,
+                snapshot_kind="round_summary",
+            )
+            if latest_round_summary and isinstance(latest_round_summary.get("memory"), dict):
+                metrics["memory_summary"] = latest_round_summary.get("memory")
+
+    gaze_events = []
+    if getattr(report, "session_id", None):
+        gaze_rows = (
+            db.query(models.InterviewGazeEvent)
+            .filter(models.InterviewGazeEvent.session_id == report.session_id)
+            .order_by(models.InterviewGazeEvent.started_at.asc())
+            .all()
+        )
+        gaze_events = [
+            {
+                "event_type": row.event_type,
+                "description": row.description,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+                "duration_ms": row.duration_ms,
+                "confidence": row.confidence,
+            }
+            for row in gaze_rows
+        ]
+
+    replay_payload = build_report_replay_payload(
+        session_id=getattr(report, "session_id", None) or report_id,
+        report={
+            "transcript": report.transcript if isinstance(report.transcript, list) else [],
+        },
+        metrics=metrics,
+        latest_capture_artifact=latest_capture_artifact,
+        gaze_events=gaze_events,
+    )
+    return replay_payload
 
 @app.get("/api/interview/reports/{report_id}/download")
 async def download_interview_report(
@@ -5838,6 +5906,21 @@ async def save_interview_transcript(
             gaze_summary=gaze_summary_derived,
             turns_evaluated=len(clean_turn_evaluations),
         )
+        handoff_summary = _agent_handoff_summary_from_runtime(
+            runtime_session_data if isinstance(runtime_session_data, dict) else {},
+            round_index=int(runtime_session_data.get("round_index") or 0) if isinstance(runtime_session_data, dict) else 0,
+        )
+        round_memory_summary = build_round_memory_summary(
+            session_id=session_id,
+            round_index=int(runtime_session_data.get("round_index") or effective_questions_answered or 0) if isinstance(runtime_session_data, dict) else effective_questions_answered,
+            trusted_messages=trusted_ordered_messages,
+            selected_skills=runtime_session_data.get("selected_skills") if isinstance(runtime_session_data, dict) else [],
+            turn_evaluations=clean_turn_evaluations,
+            communication_metrics=communication_metrics,
+            handoff_summary=handoff_summary,
+            capture_integrity=capture_integrity,
+            score_trust_level=trust_level,
+        )
         derived_metrics = {
             "questions_answered": effective_questions_answered,
             "total_words": user_words_derived,
@@ -5877,10 +5960,9 @@ async def save_interview_transcript(
                 turns_evaluated=len(clean_turn_evaluations),
                 trust_level=trust_level,
             ),
-            "agent_handoff_summary": _agent_handoff_summary_from_runtime(
-                runtime_session_data if isinstance(runtime_session_data, dict) else {},
-                round_index=int(runtime_session_data.get("round_index") or 0) if isinstance(runtime_session_data, dict) else 0,
-            ),
+            "agent_handoff_summary": handoff_summary,
+            "memory_summary": round_memory_summary,
+            "replay_available": bool(ordered_messages),
             "confidence_score": confidence_score,
             "evaluation_explainability": {
                 "source": evaluation_source,
@@ -6313,6 +6395,30 @@ async def save_interview_transcript(
                 db.commit()
                 report_id = existing_report.id
                 print(f"ℹ️ Report already exists for session {session_id}, updated metrics/transcript (id={report_id})")
+
+            summary_round_index = int(runtime_session_data.get("round_index") or effective_questions_answered or 0) if isinstance(runtime_session_data, dict) else effective_questions_answered
+            persist_session_memory_snapshot(
+                db,
+                session_id=session_id,
+                clerk_user_id=user_id,
+                round_index=summary_round_index,
+                snapshot_kind="round_summary",
+                memory=round_memory_summary,
+                resume_token=runtime_session_data.get("resume_token") if isinstance(runtime_session_data, dict) else None,
+            )
+            persist_session_memory_snapshot(
+                db,
+                session_id=session_id,
+                clerk_user_id=user_id,
+                round_index=summary_round_index,
+                snapshot_kind="carry_forward_memory",
+                memory={
+                    "memory_summary": round_memory_summary,
+                    "agent_handoff_summary": handoff_summary,
+                    "provider_trace": derived_metrics.get("provider_trace"),
+                },
+                resume_token=runtime_session_data.get("resume_token") if isinstance(runtime_session_data, dict) else None,
+            )
         except Exception as report_err:
             # Don't fail the entire request if report generation fails; transcript is still saved
             print(f"⚠️ Failed to generate report (transcript still saved): {report_err}")

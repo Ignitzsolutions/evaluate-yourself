@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import PreInterviewForm from "../PreInterviewForm";
@@ -34,19 +34,13 @@ describe("PreInterviewForm", () => {
       "interviewConfig",
       JSON.stringify({
         type: "behavioral",
-        duration: 5,
+        duration: 30,
         difficulty: "medium",
         role: "Backend Engineer",
         company: "OpenAI",
         questionMix: "balanced",
         interviewStyle: "neutral",
         transcriptConsent: true,
-        trialCode: "TRY-READY",
-        trialEntitlement: {
-          plan_tier: "trial",
-          duration_minutes_effective: 5,
-          is_active: true,
-        },
         selectedSkills: ["algorithms"],
       }),
     );
@@ -67,7 +61,7 @@ describe("PreInterviewForm", () => {
             pathname: "/interview-config",
             state: {
               type: "behavioral",
-              recoveryMessage: "Redeem a valid trial code before starting.",
+              recoveryMessage: "Previous interview session ended unexpectedly.",
             },
           },
         ]}
@@ -79,36 +73,24 @@ describe("PreInterviewForm", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Redeem a valid trial code before starting.")).toBeInTheDocument();
+    expect(await screen.findByText("Previous interview session ended unexpectedly.")).toBeInTheDocument();
+    expect(screen.getByText(/Free access is active/i)).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("Target Role")).toHaveValue("Backend Engineer");
     });
     expect(screen.getByLabelText("Target Company")).toHaveValue("OpenAI");
-    expect(screen.getByLabelText("Trial Code")).toHaveValue("TRY-READY");
+    expect(screen.queryByLabelText("Trial Code")).not.toBeInTheDocument();
   });
 
-  test("renders structured redeem failures as inline feedback", async () => {
-    authFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          tracks: [],
-          suggested_defaults: [],
-          selection_rules: { min: 0, max: 0 },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        text: async () =>
-          JSON.stringify({
-            detail: {
-              code: "TRIAL_CODE_ALREADY_REDEEMED",
-              message: "Trial code already redeemed",
-              retryable: false,
-            },
-          }),
-      });
+  test("hides trial code controls in free access mode", async () => {
+    authFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        tracks: [],
+        suggested_defaults: [],
+        selection_rules: { min: 0, max: 0 },
+      }),
+    });
 
     render(
       <MemoryRouter
@@ -124,19 +106,7 @@ describe("PreInterviewForm", () => {
     await waitFor(() => {
       expect(authFetch).toHaveBeenCalled();
     });
-
-    fireEvent.change(await screen.findByLabelText("Trial Code"), {
-      target: { value: "TRY-TAKEN" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Redeem" }));
-
-    await waitFor(() => {
-      const redeemCall = authFetch.mock.calls.find(([url]) =>
-        String(url).includes("/api/trial-codes/redeem"),
-      );
-      expect(redeemCall).toBeTruthy();
-      expect(redeemCall[2]).toEqual(expect.objectContaining({ method: "POST" }));
-    });
-    expect(await screen.findByText("Trial code already redeemed")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Trial Code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Redeem" })).not.toBeInTheDocument();
   });
 });

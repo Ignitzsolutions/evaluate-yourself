@@ -1,0 +1,96 @@
+{
+  "version": "golden-bootstrap-v1",
+  "cases": [
+    {
+      "id": "trusted_technical_depth_gap",
+      "total_duration_minutes": 2,
+      "avg_response_time_seconds": 4.2,
+      "capture_status": "COMPLETE",
+      "transcript": [
+        {
+          "speaker": "ai",
+          "text": "How would you scale a distributed cache?",
+          "timestamp": "2026-04-09T09:00:00Z",
+          "trusted_for_evaluation": true
+        },
+        {
+          "speaker": "user",
+          "text": "I would shard by key and add replicas, but I would not go deeper into routing or rebalancing yet.",
+          "timestamp": "2026-04-09T09:00:08Z",
+          "trusted_for_evaluation": true
+        }
+      ],
+      "expected": {
+        "trust_level": "trusted",
+        "confidence_score_range": [60, 90],
+        "communication_flags": [],
+        "technical_omissions": ["consistent hashing"]
+      }
+    },
+    {
+      "id": "mixed_evidence_fallback_penalty",
+      "total_duration_minutes": 1,
+      "avg_response_time_seconds": 9.4,
+      "capture_status": "COMPLETE",
+      "transcript": [
+        {
+          "speaker": "ai",
+          "text": "Tell me about a project you shipped.",
+          "timestamp": "2026-04-09T09:05:00Z",
+          "trusted_for_evaluation": true
+        },
+        {
+          "speaker": "user",
+          "text": "I led a release and coordinated rollback plans.",
+          "timestamp": "2026-04-09T09:05:09Z",
+          "trusted_for_evaluation": true
+        },
+        {
+          "speaker": "ai",
+          "text": "What was the hardest part?",
+          "timestamp": "2026-04-09T09:05:20Z",
+          "trusted_for_evaluation": true
+        },
+        {
+          "speaker": "user",
+          "text": "Like, honestly, communicating risk quickly.",
+          "timestamp": "2026-04-09T09:05:28Z",
+          "trusted_for_evaluation": false,
+          "transcript_origin": "browser_speech_fallback"
+        }
+      ],
+      "expected": {
+        "trust_level": "mixed_evidence",
+        "confidence_score_range": [35, 75],
+        "communication_flags": ["PACE_TOO_SLOW"],
+        "technical_omissions": []
+      }
+    },
+    {
+      "id": "slow_filler_heavy_behavioral",
+      "total_duration_minutes": 1,
+      "avg_response_time_seconds": 13.2,
+      "capture_status": "COMPLETE",
+      "transcript": [
+        {
+          "speaker": "ai",
+          "text": "Tell me about a conflict with a teammate.",
+          "timestamp": "2026-04-09T09:10:00Z",
+          "trusted_for_evaluation": true
+        },
+        {
+          "speaker": "user",
+          "text": "Um, I had a disagreement and, like, I basically tried to calm things down before we agreed on a plan.",
+          "timestamp": "2026-04-09T09:10:14Z",
+          "trusted_for_evaluation": true
+        }
+      ],
+      "expected": {
+        "trust_level": "trusted",
+        "confidence_score_range": [45, 85],
+        "communication_flags": ["HIGH_FILLER_DENSITY", "SLOW_RESPONSE_LATENCY"],
+        "technical_omissions": []
+      }
+    }
+  ]
+}
