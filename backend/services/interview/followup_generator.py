@@ -7,7 +7,6 @@ context-aware follow-up questions generated from the candidate's actual answer.
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +18,14 @@ except Exception:
     except Exception:
         cache_get = lambda *a: None  # type: ignore
         cache_put = lambda *a: None  # type: ignore
+
+try:
+    from backend.services.llm.provider_adapter import create_chat_completion
+except Exception:
+    try:
+        from services.llm.provider_adapter import create_chat_completion  # type: ignore
+    except Exception:
+        create_chat_completion = None  # type: ignore
 
 
 # ─── Hardcoded template fallbacks (from original adaptive_engine) ─────────────
@@ -63,40 +70,6 @@ _FOLLOWUP_TEMPLATES: Dict[str, List[str]] = {
 }
 
 
-# ─── LLM client ───────────────────────────────────────────────────────────────
-
-def _get_llm_client():
-    try:
-        from openai import AzureOpenAI, OpenAI
-    except ImportError:
-        return None, None
-
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-
-    if azure_key and azure_endpoint and azure_key != "your-azure-openai-api-key-here":
-        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-        if not deployment:
-            return None, None
-        try:
-            return AzureOpenAI(
-                api_key=azure_key,
-                azure_endpoint=azure_endpoint.rstrip("/"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-            ), deployment
-        except Exception:
-            return None, None
-
-    if openai_key and openai_key != "your-openai-api-key-here":
-        try:
-            return OpenAI(api_key=openai_key), os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-        except Exception:
-            return None, None
-
-    return None, None
-
-
 _FOLLOWUP_PROMPT = """\
 You are an expert technical interviewer. Generate ONE concise follow-up question.
 
@@ -119,8 +92,6 @@ def _llm_followup(
     answer_snippet: str,
     probe_reason: str,
     interview_type: str,
-    client: Any,
-    model: str,
 ) -> Optional[str]:
     prompt = _FOLLOWUP_PROMPT.format(
         question=question[:200],
@@ -128,14 +99,16 @@ def _llm_followup(
         probe_reason=probe_reason,
         interview_type=interview_type,
     )
+    if create_chat_completion is None:
+        return None
     try:
-        response = client.chat.completions.create(
-            model=model,
+        response = create_chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            purpose="followup_generation",
             max_tokens=60,
             temperature=0.3,
         )
-        followup = (response.choices[0].message.content or "").strip()
+        followup = str(response.get("text") or "").strip()
         # Strip quotes if LLM wrapped in them
         followup = followup.strip('"').strip("'")
         # Sanity: must look like a question and be reasonable length
@@ -176,15 +149,12 @@ def generate_followup(
     if cached is not None:
         return cached
 
-    client, model = _get_llm_client()
-    if client and model:
+    if create_chat_completion is not None:
         followup = _llm_followup(
             question=question,
             answer_snippet=answer_snippet,
             probe_reason=probe_reason.replace("_", " "),
             interview_type=interview_type,
-            client=client,
-            model=model,
         )
         if followup:
             cache_put("followup", followup, *cache_key)

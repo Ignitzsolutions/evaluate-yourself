@@ -3,12 +3,15 @@ TranscriptSummaryChain: structured output {accent, grammar, interview_tips}.
 Uses openai package; interface is LangChain-ready for future swap.
 """
 
-import os
 import json
 import re
 from typing import Dict, Any, List, Optional
 
 from services.llm.prompt_registry import get_summary_prompt
+try:
+    from services.llm.provider_adapter import create_chat_completion
+except Exception:  # pragma: no cover
+    from backend.services.llm.provider_adapter import create_chat_completion  # type: ignore
 
 
 def _build_transcript_string(turns: List[Dict[str, Any]]) -> str:
@@ -23,30 +26,6 @@ def _build_transcript_string(turns: List[Dict[str, Any]]) -> str:
     return "\n\n".join(lines) if lines else "No transcript content."
 
 
-def _get_openai_client():
-    """Return (Azure OpenAI or OpenAI client, model_or_deployment_name) from env."""
-    try:
-        from openai import OpenAI, AzureOpenAI
-    except ImportError:
-        return None, None
-
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-
-    if azure_key and azure_endpoint and (azure_key != "your-azure-openai-api-key-here"):
-        deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-        client = AzureOpenAI(
-            api_key=azure_key,
-            azure_endpoint=azure_endpoint.rstrip("/"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-        )
-        return client, deployment
-    if api_key and api_key != "your-openai-api-key-here":
-        return OpenAI(api_key=api_key), os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-    return None, None
-
-
 def summarize_transcript(
     turns: List[Dict[str, Any]],
     prompt_key: str = "summary.candidate_speech.v1",
@@ -58,18 +37,17 @@ def summarize_transcript(
     template = get_summary_prompt(prompt_key)
     prompt = template.format(transcript=transcript_str)
 
-    client, model_or_deploy = _get_openai_client()
-    if not client:
+    if create_chat_completion is None:
         return None
 
     try:
-        resp = client.chat.completions.create(
-            model=model_or_deploy or "gpt-4o-mini",
+        resp = create_chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            purpose="summarize_transcript",
             temperature=0.3,
             max_tokens=800,
         )
-        raw = (resp.choices or [{}])[0].message.content or ""
+        raw = str(resp.get("text") or "")
     except Exception as e:
         print(f"TranscriptSummaryChain error: {e}")
         return None

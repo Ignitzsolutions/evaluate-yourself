@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import ReportPage from "../ReportPage";
@@ -41,6 +41,12 @@ describe("ReportPage", () => {
         return {
           ok: true,
           json: async () => ({ events: [], summary: {} }),
+        };
+      }
+      if (String(url).includes("/replay")) {
+        return {
+          ok: true,
+          json: async () => ({ replay_available: false, segments: [] }),
         };
       }
       return {
@@ -87,6 +93,12 @@ describe("ReportPage", () => {
         return {
           ok: true,
           json: async () => ({ events: [], summary: {} }),
+        };
+      }
+      if (String(url).includes("/replay")) {
+        return {
+          ok: true,
+          json: async () => ({ replay_available: false, segments: [] }),
         };
       }
       return {
@@ -137,6 +149,12 @@ describe("ReportPage", () => {
           json: async () => ({ events: [], summary: { eye_contact_pct: 87, total_events: 1 } }),
         };
       }
+      if (String(url).includes("/replay")) {
+        return {
+          ok: true,
+          json: async () => ({ replay_available: false, segments: [] }),
+        };
+      }
       return {
         ok: true,
         json: async () => ({
@@ -180,5 +198,72 @@ describe("ReportPage", () => {
     expect(screen.getByText("88")).toBeInTheDocument();
     expect(screen.getByText("ideal")).toBeInTheDocument();
     expect(screen.getByText("MODERATE_FILLER_DENSITY")).toBeInTheDocument();
+  });
+
+  it("renders replay overlay details when replay payload is available", async () => {
+    authFetch.mockImplementation(async (url) => {
+      if (String(url).includes("/gaze-events")) {
+        return {
+          ok: true,
+          json: async () => ({ events: [], summary: { eye_contact_pct: 90, total_events: 0 } }),
+        };
+      }
+      if (String(url).includes("/replay")) {
+        return {
+          ok: true,
+          json: async () => ({
+            replay_available: true,
+            provider_trace: { provider: "openai", failover_used: true },
+            segments: [
+              { speaker: "ai", text: "Question", start_ms: 0, end_ms: 4000, evidence_kind: "trusted" },
+              { speaker: "user", text: "Answer", start_ms: 5000, end_ms: 8000, evidence_kind: "trusted" },
+            ],
+            gaze_windows: [
+              { event_type: "LOOKING_DOWN", start_ms: 5500, end_ms: 6500, duration_ms: 1000 },
+            ],
+            filler_density_markers: [
+              { time_ms: 5000, filler_word_count: 2, filler_words_per_100: 7.5 },
+            ],
+            confidence_annotations: [{ confidence_score: 77 }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          id: "r4",
+          overall_score: 82,
+          metrics: {
+            capture_status: "COMPLETE",
+            score_trust_level: "mixed_evidence",
+            confidence_score: 77,
+            total_duration: 2,
+            total_words: 80,
+            questions_answered: 2,
+          },
+          transcript: [
+            { speaker: "ai", text: "Question", timestamp: "2026-02-14T00:00:00Z" },
+            { speaker: "user", text: "Answer", timestamp: "2026-02-14T00:00:08Z" },
+          ],
+          ai_feedback: null,
+        }),
+      };
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={["/report/session_4"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/report/:sessionId" element={<ReportPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Replay Overlay/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Replay timeline/i), { target: { value: 6000 } });
+    expect(screen.getByText(/Provider: openai \(failover used\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gaze: LOOKING_DOWN/i)).toBeInTheDocument();
   });
 });

@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from backend import app as app_module
 from backend.db import models
 from backend.services.interview.conversation_planner import build_bootstrap_conversation_plan
-from backend.services.interview.persistence import load_latest_evidence_artifact
+from backend.services.interview.persistence import load_latest_evidence_artifact, persist_session_memory_snapshot
 
 
 class FakeUser:
@@ -49,6 +49,49 @@ def test_bootstrap_plan_exposes_resume_and_evaluation_metadata():
     assert plan["evaluation_channels"]["technical_semantic"]["trusted_source"] == "server_transcript"
     assert plan["conversation_plan"]["resume_supported"] is True
     assert plan["conversation_plan"]["evaluation_channels"]["english_communication"]["enabled"] is True
+
+
+def test_bootstrap_plan_loads_prior_round_memory_summary():
+    db = _db()
+    persist_session_memory_snapshot(
+        db,
+        session_id="session_memory",
+        clerk_user_id="candidate_1",
+        round_index=0,
+        snapshot_kind="round_summary",
+        memory={
+            "skills_demonstrated": ["sql"],
+            "unresolved_follow_ups": ["Can you explain the tradeoff you skipped earlier?"],
+        },
+        resume_token="resume_1",
+    )
+
+    plan = build_bootstrap_conversation_plan(
+        session_id="session_memory",
+        interview_type="mixed",
+        difficulty="mid",
+        role="Backend Engineer",
+        company="Acme",
+        question_mix="balanced",
+        interview_style="neutral",
+        selected_skills=["sql"],
+        duration_minutes=15,
+        round_index=1,
+        db=db,
+    )
+
+    assert plan["conversation_plan"]["mcp_context"]["memory_summary_available"] is True
+    assert plan["memory_summary"]["skills_demonstrated"] == ["sql"]
+
+
+def test_free_access_mode_resolves_to_free_plan_without_entitlement():
+    db = _db()
+
+    plan_tier, entitlement = app_module._resolve_plan_tier_for_user(db, "candidate_1")
+
+    assert plan_tier == "free"
+    assert entitlement is None
+    assert app_module._effective_duration_minutes(90, plan_tier, entitlement) == 90
 
 
 @pytest.mark.asyncio

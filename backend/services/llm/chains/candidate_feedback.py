@@ -9,6 +9,11 @@ import re
 from typing import Dict, Any, List, Optional
 
 try:
+    from services.llm.provider_adapter import create_chat_completion
+except Exception:  # pragma: no cover
+    from backend.services.llm.provider_adapter import create_chat_completion  # type: ignore
+
+try:
     from langchain_openai import ChatOpenAI, AzureChatOpenAI
     from langchain_core.messages import HumanMessage
     LANGCHAIN_AVAILABLE = True
@@ -102,36 +107,6 @@ def _build_transcript_string(transcript: List[Dict[str, Any]]) -> str:
         if text:
             lines.append(f"{label}: {text}")
     return "\n\n".join(lines) if lines else "No transcript content available."
-
-
-def _get_openai_client():
-    """Return (Azure OpenAI or OpenAI client, model_or_deployment_name) from env."""
-    try:
-        from openai import OpenAI, AzureOpenAI
-    except ImportError:
-        return None, None
-
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-
-    if azure_key and azure_endpoint and (azure_key != "your-azure-openai-api-key-here"):
-        global _missing_chat_deployment_warned
-        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-        if not deployment:
-            if not _missing_chat_deployment_warned:
-                print("⚠️ AZURE_OPENAI_CHAT_DEPLOYMENT is not set; skipping Azure chat feedback generation.")
-                _missing_chat_deployment_warned = True
-            return None, None
-        client = AzureOpenAI(
-            api_key=azure_key,
-            azure_endpoint=azure_endpoint.rstrip("/"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-        )
-        return client, deployment
-    if api_key and api_key != "your-openai-api-key-here":
-        return OpenAI(api_key=api_key), os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-    return None, None
 
 
 def _get_langchain_client():
@@ -304,20 +279,19 @@ def _generate_legacy_feedback(
         overall_score=active_scores.get("overall_score", 50)
     )
 
-    client, model_or_deploy = _get_openai_client()
-    if not client:
+    if create_chat_completion is None:
         print("⚠️ No OpenAI client available for candidate feedback generation")
         return _generate_fallback_feedback(active_scores)
 
     try:
-        print(f"🤖 Generating AI candidate feedback using {model_or_deploy} (legacy)...")
-        resp = client.chat.completions.create(
-            model=model_or_deploy or "gpt-4o-mini",
+        print("🤖 Generating AI candidate feedback using provider adapter (legacy)...")
+        resp = create_chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            purpose="candidate_feedback",
             temperature=0.4,
             max_tokens=1200,
         )
-        raw = (resp.choices or [{}])[0].message.content or ""
+        raw = str(resp.get("text") or "")
     except TypeError as e:
         # Handle library version mismatches (e.g., unexpected keyword arguments)
         error_msg = str(e)
@@ -344,6 +318,8 @@ def _generate_legacy_feedback(
     try:
         feedback = json.loads(raw)
         feedback = _normalize_feedback_contract(feedback, active_scores, transcript_str)
+        if isinstance(resp.get("provider_trace"), dict):
+            feedback["_provider_trace"] = resp.get("provider_trace")
         print("✅ AI candidate feedback generated successfully (legacy)")
         return feedback
     except json.JSONDecodeError as e:

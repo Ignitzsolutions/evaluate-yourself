@@ -22,6 +22,7 @@ try:
     from backend.db import models
     from backend.mcp_servers.resume_context_server import get_candidate_context
     from backend.mcp_servers.rubric_server import get_rubric
+    from backend.services.interview.persistence import load_latest_memory_snapshot
 except Exception:  # pragma: no cover
     from agents.hr_agent import plan_hr_turn  # type: ignore
     from agents.technical_lead import plan_technical_turn  # type: ignore
@@ -30,6 +31,7 @@ except Exception:  # pragma: no cover
     from db import models  # type: ignore
     from mcp_servers.resume_context_server import get_candidate_context  # type: ignore
     from mcp_servers.rubric_server import get_rubric  # type: ignore
+    from services.interview.persistence import load_latest_memory_snapshot  # type: ignore
 
 
 class ConversationOrchestrator:
@@ -85,6 +87,8 @@ class ConversationOrchestrator:
         if state.context:
             plan.setdefault("resume_context", state.context.get("resume_context"))
             plan.setdefault("rubric", state.context.get("rubric"))
+            if state.context.get("memory_summary"):
+                plan.setdefault("memory_summary", state.context.get("memory_summary"))
         return plan
 
     def plan_next_turn(
@@ -135,6 +139,8 @@ class ConversationOrchestrator:
         if state.context:
             plan.setdefault("resume_context", state.context.get("resume_context"))
             plan.setdefault("rubric", state.context.get("rubric"))
+            if state.context.get("memory_summary"):
+                plan.setdefault("memory_summary", state.context.get("memory_summary"))
         return plan
 
     def summarize_handoff(self, transcript_history: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -212,6 +218,16 @@ class ConversationOrchestrator:
                 selected_skills=state.selected_skills,
             ),
         }
+        prior_memory = None
+        if db is not None and state.round_index:
+            prior_memory = load_latest_memory_snapshot(
+                db,
+                session_id=state.session_id,
+                snapshot_kind="round_summary",
+                before_round_index=state.round_index,
+            )
+        if prior_memory and isinstance(prior_memory.get("memory"), dict):
+            state.context["memory_summary"] = prior_memory.get("memory")
         return state
 
     def _conversation_plan(self, state: OrchestratorState, plan: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,7 +247,9 @@ class ConversationOrchestrator:
             "mcp_context": {
                 "resume_context_available": bool((state.context or {}).get("resume_context")),
                 "rubric_available": bool((state.context or {}).get("rubric")),
+                "memory_summary_available": bool((state.context or {}).get("memory_summary")),
             },
+            "memory_summary": (state.context or {}).get("memory_summary"),
         }
 
     def _route(self, state: OrchestratorState, config: Any = None) -> Dict[str, Any]:
@@ -243,6 +261,25 @@ class ConversationOrchestrator:
         interview_type = (state.interview_type or "mixed").strip().lower()
         phase = (state.current_phase or "intro").strip().lower()
         asked_count = len(state.asked_question_ids)
+        prior_memory = (state.context or {}).get("memory_summary") if isinstance(state.context, dict) else None
+        if phase in {"intro", "opening", "resume"} and asked_count == 0 and isinstance(prior_memory, dict):
+            unresolved = prior_memory.get("unresolved_follow_ups") or []
+            handoff_context = prior_memory.get("handoff_context") or {}
+            if unresolved:
+                return {
+                    "agent_owner": handoff_context.get("agent_owner") or "orchestrator",
+                    "speaker_strategy": "memory_resume",
+                    "filler_hint": "pivot",
+                    "next_question": (
+                        "Before we move on, I want to revisit something from your previous round. "
+                        f"{str(unresolved[0]).strip()}"
+                    ),
+                    "question_id": f"memory_resume_{state.round_index}",
+                    "policy_action": "NONE",
+                    "refusal_message": None,
+                    "recoverable_error": None,
+                    "memory_summary": prior_memory,
+                }
         if phase in {"intro", "opening", "resume"} or asked_count == 0:
             return plan_hr_turn(
                 interview_type=interview_type,

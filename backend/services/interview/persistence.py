@@ -153,3 +153,39 @@ def load_latest_evidence_artifact(
         "word_timestamps": word_timestamps,
         "capture_integrity": capture_integrity,
     }
+
+
+def load_latest_memory_snapshot(
+    db: Session,
+    *,
+    session_id: str,
+    snapshot_kind: Optional[str] = None,
+    before_round_index: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    query = db.query(models.SessionMemorySnapshot).filter(
+        models.SessionMemorySnapshot.session_id == session_id
+    )
+    if snapshot_kind:
+        query = query.filter(models.SessionMemorySnapshot.snapshot_kind == snapshot_kind)
+    if before_round_index is not None:
+        query = query.filter(models.SessionMemorySnapshot.round_index < int(before_round_index))
+    row = query.order_by(
+        models.SessionMemorySnapshot.round_index.desc(),
+        models.SessionMemorySnapshot.created_at.desc(),
+    ).first()
+    if not row:
+        return None
+    try:
+        memory = json.loads(row.memory_json or "{}")
+    except Exception:
+        memory = {}
+    return {
+        "snapshot_id": row.id,
+        "session_id": row.session_id,
+        "clerk_user_id": row.clerk_user_id,
+        "round_index": row.round_index,
+        "snapshot_kind": row.snapshot_kind,
+        "resume_token": row.resume_token,
+        "memory": memory,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
