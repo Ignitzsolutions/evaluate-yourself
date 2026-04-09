@@ -29,6 +29,8 @@
     "start:all": "./start-all.sh",
     "test:backend": "./backend/scripts/run_backend_tests.sh",
     "test:e2e": "playwright test tests/e2e/interview-smoke.spec.js",
+    "test:e2e:hosted": "playwright test tests/e2e/hosted-runtime-certification.spec.js --headed",
+    "eval:calibration": "python3 tests/evals/run_report_calibration.py",
     "smoke:backend": "./backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000",
     "build": "node ./scripts/ensure-mediapipe-sourcemap.js && react-scripts build",
     "test": "react-scripts test",

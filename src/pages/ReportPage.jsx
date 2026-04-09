@@ -84,6 +84,8 @@ export default function ReportPage() {
   const [postEndPromptHandled, setPostEndPromptHandled] = useState(false);
   const [gazeEvents, setGazeEvents] = useState([]);
   const [gazeSummary, setGazeSummary] = useState(null);
+  const [replayData, setReplayData] = useState(null);
+  const [replayTimeMs, setReplayTimeMs] = useState(0);
 
   const fetchReport = useCallback(async () => {
     if (!sessionId) {
@@ -122,12 +124,25 @@ export default function ReportPage() {
           setGazeEvents([]);
           setGazeSummary(null);
         }
+
+        const replayResponse = await authFetch(
+          `${API_BASE_URL}/api/interview/reports/${sessionKey}/replay`,
+          token,
+          { headers: { "Content-Type": "application/json" } },
+        );
+        if (replayResponse.ok) {
+          const replayPayload = await replayResponse.json();
+          setReplayData(replayPayload);
+        } else {
+          setReplayData(null);
+        }
       }
     } catch (err) {
       console.error("Error fetching report:", err);
       setError(err.message || "Unable to load report.");
       setGazeEvents([]);
       setGazeSummary(null);
+      setReplayData(null);
     } finally {
       setLoading(false);
     }
@@ -319,6 +334,49 @@ export default function ReportPage() {
   const confidenceScore = typeof metrics.confidence_score === "number"
     ? metrics.confidence_score
     : null;
+  const handoffSummary = metrics.agent_handoff_summary && typeof metrics.agent_handoff_summary === "object"
+    ? metrics.agent_handoff_summary
+    : (replayData?.agent_handoff_summary && typeof replayData.agent_handoff_summary === "object" ? replayData.agent_handoff_summary : {});
+  const memorySummary = metrics.memory_summary && typeof metrics.memory_summary === "object"
+    ? metrics.memory_summary
+    : (replayData?.memory_summary && typeof replayData.memory_summary === "object" ? replayData.memory_summary : {});
+  const replaySegments = useMemo(
+    () => (Array.isArray(replayData?.segments) ? replayData.segments : []),
+    [replayData],
+  );
+  const replayDurationMs = useMemo(() => {
+    const segmentEnd = replaySegments.reduce((max, segment) => {
+      const endMs = Number(segment?.end_ms || 0);
+      return Number.isFinite(endMs) ? Math.max(max, endMs) : max;
+    }, 0);
+    const gazeEnd = Array.isArray(replayData?.gaze_windows)
+      ? replayData.gaze_windows.reduce((max, window) => {
+        const endMs = Number(window?.end_ms || 0);
+        return Number.isFinite(endMs) ? Math.max(max, endMs) : max;
+      }, 0)
+      : 0;
+    return Math.max(segmentEnd, gazeEnd, totalDuration * 60 * 1000);
+  }, [replayData, replaySegments, totalDuration]);
+  const activeReplaySegment = useMemo(() => {
+    if (!replaySegments.length) return null;
+    return replaySegments.find((segment) => {
+      const startMs = Number(segment?.start_ms || 0);
+      const endMs = Number(segment?.end_ms || startMs);
+      return replayTimeMs >= startMs && replayTimeMs <= endMs;
+    }) || replaySegments[0];
+  }, [replaySegments, replayTimeMs]);
+  const activeGazeWindow = useMemo(() => {
+    const gazeWindows = Array.isArray(replayData?.gaze_windows) ? replayData.gaze_windows : [];
+    return gazeWindows.find((window) => {
+      const startMs = Number(window?.start_ms || 0);
+      const endMs = Number(window?.end_ms || startMs);
+      return replayTimeMs >= startMs && replayTimeMs <= endMs;
+    }) || null;
+  }, [replayData, replayTimeMs]);
+  const nearbyFillerMarkers = useMemo(() => {
+    const markers = Array.isArray(replayData?.filler_density_markers) ? replayData.filler_density_markers : [];
+    return markers.filter((marker) => Math.abs(Number(marker?.time_ms || 0) - replayTimeMs) <= 15000).slice(0, 3);
+  }, [replayData, replayTimeMs]);
 
   useEffect(() => {
     if (!sessionFeedback) return;
@@ -345,6 +403,7 @@ export default function ReportPage() {
     const secs = seconds % 60;
     return `${mins}:${String(secs).padStart(2, "0")}`;
   };
+  const formatMilliseconds = (value) => formatSeconds(Math.floor(Number(value || 0) / 1000));
   const formatDurationMs = (ms) => {
     if (!ms || Number.isNaN(ms)) return "0.0s";
     return `${(Number(ms) / 1000).toFixed(1)}s`;
@@ -536,6 +595,127 @@ export default function ReportPage() {
             </Typography>
           )}
         </Alert>
+      )}
+
+      {replayData?.replay_available && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Replay Overlay
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Scrub through the interview timeline to inspect pacing, gaze, filler density, and confidence annotations.
+            </Typography>
+            <Box sx={{ mb: 2 }}>
+              <input
+                aria-label="Replay timeline"
+                type="range"
+                min={0}
+                max={Math.max(replayDurationMs, 1)}
+                step={500}
+                value={Math.min(replayTimeMs, replayDurationMs)}
+                onChange={(event) => setReplayTimeMs(Number(event.target.value || 0))}
+                style={{ width: "100%" }}
+              />
+              <Box sx={{ display: "flex", justifyContent: "space-between", mt: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {formatMilliseconds(replayTimeMs)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {formatMilliseconds(replayDurationMs)}
+                </Typography>
+              </Box>
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="caption" color="text.secondary">Active Segment</Typography>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700, textTransform: "capitalize", mb: 1 }}>
+                      {activeReplaySegment?.speaker || "No segment"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                      {activeReplaySegment?.text || "Move the timeline to inspect transcript segments."}
+                    </Typography>
+                    {activeReplaySegment && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                        Evidence: {activeReplaySegment.evidence_kind} · {formatMilliseconds(activeReplaySegment.start_ms)} - {formatMilliseconds(activeReplaySegment.end_ms)}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="caption" color="text.secondary">Overlay Signals</Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Gaze: {activeGazeWindow ? `${activeGazeWindow.event_type} (${formatDurationMs(activeGazeWindow.duration_ms)})` : "No active gaze flag"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Confidence: {metrics.score_trust_level || replayData.score_trust_level} · {confidenceScore ?? replayData?.confidence_annotations?.[0]?.confidence_score ?? "n/a"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Provider: {replayData?.provider_trace?.provider || "n/a"} {replayData?.provider_trace?.failover_used ? "(failover used)" : ""}
+                    </Typography>
+                    {nearbyFillerMarkers.length > 0 && nearbyFillerMarkers.map((marker, index) => (
+                      <Typography key={`marker-${index}`} variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        Filler marker: {marker.filler_word_count} fillers / 100w={marker.filler_words_per_100} at {formatMilliseconds(marker.time_ms)}
+                      </Typography>
+                    ))}
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
+
+      {(Object.keys(handoffSummary).length > 0 || Object.keys(memorySummary).length > 0) && (
+        <Card sx={{ mb: 3, border: "1px solid", borderColor: "divider" }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Round Continuity
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Trusted carry-forward memory and agent ownership used to keep later rounds consistent.
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="caption" color="text.secondary">Agent Handoff</Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Owner: {handoffSummary.agent_owner || "orchestrator"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Round: {handoffSummary.round_index ?? "n/a"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Strategy: {handoffSummary.speaker_strategy || "n/a"}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="caption" color="text.secondary">Carry-Forward Memory</Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Skills demonstrated: {(memorySummary.skills_demonstrated || []).join(", ") || "n/a"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Weak areas: {(memorySummary.weak_areas || []).join(", ") || "n/a"}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      Unresolved follow-up: {(memorySummary.unresolved_follow_ups || [])[0] || "n/a"}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
       )}
 
       {contractWarningFromState?.message && (

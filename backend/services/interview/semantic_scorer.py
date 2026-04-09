@@ -8,7 +8,6 @@ Results are cached per (question, answer) pair to avoid redundant calls.
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Optional, Tuple
 
@@ -20,6 +19,14 @@ except Exception:
     except Exception:
         cache_get = lambda *a: None  # type: ignore
         cache_put = lambda *a: None  # type: ignore
+
+try:
+    from backend.services.llm.provider_adapter import create_chat_completion
+except Exception:
+    try:
+        from services.llm.provider_adapter import create_chat_completion  # type: ignore
+    except Exception:
+        create_chat_completion = None  # type: ignore
 
 # ─── Token-overlap fallback ───────────────────────────────────────────────────
 
@@ -54,42 +61,6 @@ def _token_overlap_score(question: str, answer: str) -> Tuple[int, str]:
     return (1 if len(answer_tokens) < 8 else 2), f"overlap_ratio={round(ratio, 3)}"
 
 
-# ─── LLM client helper ────────────────────────────────────────────────────────
-
-def _get_llm_client():
-    try:
-        from openai import AzureOpenAI, OpenAI
-    except ImportError:
-        return None, None
-
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-
-    if azure_key and azure_endpoint and azure_key != "your-azure-openai-api-key-here":
-        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-        if not deployment:
-            return None, None
-        try:
-            client = AzureOpenAI(
-                api_key=azure_key,
-                azure_endpoint=azure_endpoint.rstrip("/"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-            )
-            return client, deployment
-        except Exception:
-            return None, None
-
-    if openai_key and openai_key != "your-openai-api-key-here":
-        try:
-            client = OpenAI(api_key=openai_key)
-            return client, os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-        except Exception:
-            return None, None
-
-    return None, None
-
-
 _RELEVANCE_PROMPT = """\
 You are an expert interview evaluator. Rate how well the candidate's answer addresses the interview question.
 
@@ -109,21 +80,21 @@ Return ONLY a JSON object, nothing else:
 """
 
 
-def _llm_relevance(
-    question: str, answer: str, client: Any, model: str
-) -> Optional[Tuple[int, str]]:
+def _llm_relevance(question: str, answer: str) -> Optional[Tuple[int, str]]:
     prompt = _RELEVANCE_PROMPT.format(
         question=question[:400],
         answer=answer[:800],
     )
+    if create_chat_completion is None:
+        return None
     try:
-        response = client.chat.completions.create(
-            model=model,
+        response = create_chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            purpose="semantic_relevance",
             max_tokens=120,
             temperature=0,
         )
-        raw = (response.choices[0].message.content or "").strip()
+        raw = str(response.get("text") or "").strip()
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
         parsed = json.loads(raw)
@@ -152,9 +123,8 @@ def score_relevance(question: str, answer: str) -> Tuple[int, str]:
     if cached is not None:
         return cached
 
-    client, model = _get_llm_client()
-    if client and model:
-        result = _llm_relevance(question, answer, client, model)
+    if create_chat_completion is not None:
+        result = _llm_relevance(question, answer)
         if result is not None:
             cache_put("relevance", result, *cache_key)
             return result

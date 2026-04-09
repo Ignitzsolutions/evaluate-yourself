@@ -365,8 +365,8 @@ export default function InterviewSessionRoom() {
   const [questionMix, setQuestionMix] = useState('balanced');
   const [interviewStyle, setInterviewStyle] = useState('neutral');
   const [selectedSkills, setSelectedSkills] = useState([]);
-  const [planTier, setPlanTier] = useState('trial');
-  const [trialMode, setTrialMode] = useState(true);
+  const [planTier, setPlanTier] = useState('free');
+  const [trialMode, setTrialMode] = useState(false);
 
   useEffect(() => {
     const config = sessionStorage.getItem('interviewConfig');
@@ -2865,7 +2865,7 @@ export default function InterviewSessionRoom() {
             Interview Session
           </Typography>
           <span className="meet-subtle">
-            {interviewType} • {effectiveDurationMinutes}m limit {trialMode ? `(trial)` : `(${planTier})`}
+            {interviewType} • {effectiveDurationMinutes}m target ({planTier})
           </span>
         </div>
         <div className="meet-topbar-right" aria-hidden="true" />

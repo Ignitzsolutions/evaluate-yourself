@@ -229,6 +229,10 @@ def generate_report(
             print(f"⚠️ Failed to generate AI feedback: {e}")
         if not isinstance(ai_feedback, dict) or not ai_feedback:
             ai_feedback = _build_deterministic_feedback(scores_for_ai, evaluations=evaluations, interview_type=interview_type)
+    provider_trace = ai_feedback.get("_provider_trace") if isinstance(ai_feedback, dict) else None
+    if provider_trace:
+        metrics["provider_trace"] = provider_trace
+        metrics["provider_failover_used"] = bool(provider_trace.get("failover_used"))
 
     # Create report
     report = InterviewReport(
