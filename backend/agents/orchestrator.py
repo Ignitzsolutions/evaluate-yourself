@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency during local development
