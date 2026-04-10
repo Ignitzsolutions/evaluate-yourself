@@ -8,7 +8,10 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from backend.db import models
+try:
+    from backend.db import models
+except Exception:  # pragma: no cover
+    from db import models  # type: ignore
 
 
 def persist_interview_round(

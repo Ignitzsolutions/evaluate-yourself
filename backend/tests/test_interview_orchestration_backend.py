@@ -1,4 +1,8 @@
 from datetime import datetime
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import fakeredis
 import pytest
@@ -92,6 +96,29 @@ def test_free_access_mode_resolves_to_free_plan_without_entitlement():
     assert plan_tier == "free"
     assert entitlement is None
     assert app_module._effective_duration_minutes(90, plan_tier, entitlement) == 90
+
+
+def test_persistence_module_supports_backend_script_import_path():
+    repo_root = Path(__file__).resolve().parents[2]
+    backend_dir = repo_root / "backend"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(backend_dir)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from services.interview.persistence import load_latest_memory_snapshot; print(load_latest_memory_snapshot.__name__)",
+        ],
+        cwd=backend_dir,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "load_latest_memory_snapshot" in result.stdout
 
 
 @pytest.mark.asyncio
