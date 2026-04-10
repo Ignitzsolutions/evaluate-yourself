@@ -1284,7 +1284,7 @@ def _persist_gaze_tracking_results(
 def _plan_next_turn_response(
     *,
     session_id: str,
-    payload: AdaptiveTurnRequest,
+    payload: "AdaptiveTurnRequest",
     current_user: User,
     db: Session,
 ) -> Dict[str, Any]:
