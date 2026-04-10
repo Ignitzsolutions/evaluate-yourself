@@ -7,11 +7,13 @@ from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency during local development
     from langgraph.graph import END, StateGraph
+    from langchain_core.runnables import RunnableConfig
 
     LANGGRAPH_AVAILABLE = True
 except Exception:  # pragma: no cover
     END = "__end__"
     StateGraph = None
+    RunnableConfig = Any
     LANGGRAPH_AVAILABLE = False
 
 try:
@@ -178,12 +180,23 @@ class ConversationOrchestrator:
         hydrated = self._hydrate_context(state, {"db": db})
         return self._route(hydrated, {"db": db})
 
-    def _hydrate_context(self, state: OrchestratorState, config: Any = None) -> OrchestratorState:
-        db = None
+    @staticmethod
+    def _db_from_config(config: Optional[RunnableConfig]) -> Any:
         if isinstance(config, dict):
-            db = config.get("db")
-        elif isinstance(config, tuple) and len(config) > 1 and isinstance(config[1], dict):
-            db = config[1].get("db")
+            configurable = config.get("configurable")
+            if isinstance(configurable, dict) and "db" in configurable:
+                return configurable.get("db")
+            return config.get("db")
+        if isinstance(config, tuple) and len(config) > 1 and isinstance(config[1], dict):
+            return config[1].get("db")
+        return None
+
+    def _hydrate_context(
+        self,
+        state: OrchestratorState,
+        config: Optional[RunnableConfig] = None,
+    ) -> OrchestratorState:
+        db = self._db_from_config(config)
 
         candidate_profile = None
         if db is not None:
@@ -252,12 +265,12 @@ class ConversationOrchestrator:
             "memory_summary": (state.context or {}).get("memory_summary"),
         }
 
-    def _route(self, state: OrchestratorState, config: Any = None) -> Dict[str, Any]:
-        db = None
-        if isinstance(config, dict):
-            db = config.get("db")
-        elif isinstance(config, tuple) and len(config) > 1 and isinstance(config[1], dict):
-            db = config[1].get("db")
+    def _route(
+        self,
+        state: OrchestratorState,
+        config: Optional[RunnableConfig] = None,
+    ) -> Dict[str, Any]:
+        db = self._db_from_config(config)
         interview_type = (state.interview_type or "mixed").strip().lower()
         phase = (state.current_phase or "intro").strip().lower()
         asked_count = len(state.asked_question_ids)
