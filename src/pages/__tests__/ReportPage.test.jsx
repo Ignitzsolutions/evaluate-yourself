@@ -1,8 +1,9 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 
 import ReportPage from "../ReportPage";
+import { renderWithFutureRouter } from "../../testUtils/renderWithFutureRouter";
 
 const mockGetToken = jest.fn().mockResolvedValue("test-token");
 
@@ -12,9 +13,13 @@ jest.mock("@clerk/clerk-react", () => ({
   }),
 }));
 
-jest.mock("../../utils/apiClient", () => ({
-  authFetch: jest.fn(),
-}));
+jest.mock("../../utils/apiClient", () => {
+  const actual = jest.requireActual("../../utils/apiClient");
+  return {
+    ...actual,
+    authFetch: jest.fn(),
+  };
+});
 
 jest.mock("recharts", () => ({
   ResponsiveContainer: ({ children }) => <div>{children}</div>,
@@ -30,9 +35,16 @@ jest.mock("recharts", () => ({
 const { authFetch } = require("../../utils/apiClient");
 
 describe("ReportPage", () => {
+  let consoleErrorSpy;
+
   beforeEach(() => {
     authFetch.mockReset();
     mockGetToken.mockClear();
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   it("shows incomplete capture banner and hides AI feedback section", async () => {
@@ -69,15 +81,11 @@ describe("ReportPage", () => {
       };
     });
 
-    render(
-      <MemoryRouter
-        initialEntries={["/report/session_1"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/session_1"] },
     );
 
     await waitFor(() => {
@@ -125,15 +133,11 @@ describe("ReportPage", () => {
       };
     });
 
-    render(
-      <MemoryRouter
-        initialEntries={["/report/session_2"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/session_2"] },
     );
 
     expect(await screen.findByText(/Mixed transcript evidence detected/i)).toBeInTheDocument();
@@ -183,15 +187,11 @@ describe("ReportPage", () => {
       };
     });
 
-    render(
-      <MemoryRouter
-        initialEntries={["/report/session_3"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/session_3"] },
     );
 
     expect(await screen.findByText(/Communication Signals/i)).toBeInTheDocument();
@@ -250,20 +250,106 @@ describe("ReportPage", () => {
       };
     });
 
-    render(
-      <MemoryRouter
-        initialEntries={["/report/session_4"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/report/:sessionId" element={<ReportPage />} />
-        </Routes>
-      </MemoryRouter>,
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/session_4"] },
     );
 
     expect(await screen.findByText(/Replay Overlay/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Replay timeline/i), { target: { value: 6000 } });
     expect(screen.getByText(/Provider: openai \(failover used\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Gaze: LOOKING_DOWN/i)).toBeInTheDocument();
+  });
+
+  it("shows not-found recovery copy without a retry action", async () => {
+    authFetch.mockImplementation(async (url) => {
+      return {
+        ok: false,
+        status: 404,
+        headers: { get: () => "application/json" },
+        json: async () => ({ detail: { message: "missing report" } }),
+        text: async () => "",
+      };
+    });
+
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/report_404"] },
+    );
+
+    expect(await screen.findByText(/This report could not be found/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Error fetching report:", expect.any(Error));
+  });
+
+  it("keeps replay fetch keyed by the route report id even when session_id differs", async () => {
+    authFetch.mockImplementation(async (url) => {
+      if (String(url).includes("/gaze-events")) {
+        return {
+          ok: true,
+          json: async () => ({ events: [], summary: {} }),
+        };
+      }
+      if (String(url).includes("/api/interview/reports/report_55/replay")) {
+        return {
+          ok: true,
+          json: async () => ({ replay_available: false, segments: [] }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          id: "report_55",
+          session_id: "session_55",
+          metrics: {
+            capture_status: "COMPLETE",
+            total_duration: 1,
+            total_words: 12,
+            questions_answered: 1,
+          },
+          transcript: [
+            { speaker: "ai", text: "Question", timestamp: "2026-02-14T00:00:00Z" },
+            { speaker: "user", text: "Answer", timestamp: "2026-02-14T00:00:05Z" },
+          ],
+          ai_feedback: null,
+        }),
+      };
+    });
+
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/report_55"] },
+    );
+
+    expect(await screen.findByText(/Interview Analysis/i)).toBeInTheDocument();
+    expect(
+      authFetch.mock.calls.some(([url]) => String(url).includes("/api/interview/reports/report_55/replay")),
+    ).toBe(true);
+  });
+
+  it("renders report error recovery actions for missing reports", async () => {
+    authFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => JSON.stringify({ detail: { code: "HTTP_404", message: "Report not found" } }),
+    });
+
+    renderWithFutureRouter(
+      <Routes>
+        <Route path="/report/:sessionId" element={<ReportPage />} />
+      </Routes>,
+      { initialEntries: ["/report/missing-report"] },
+    );
+
+    expect(await screen.findByText(/Report not found/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Back to Interviews/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Error fetching report:", expect.any(Error));
   });
 });

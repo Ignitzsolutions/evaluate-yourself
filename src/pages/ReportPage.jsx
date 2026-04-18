@@ -1,6 +1,12 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { authFetch } from "../utils/apiClient";
+import {
+  authFetch,
+  buildApiErrorFromResponse,
+  getApiErrorMessage,
+  isAuthRequiredError,
+  isBackendUnavailableError,
+} from "../utils/apiClient";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 import {
   Alert,
@@ -64,6 +70,35 @@ function normalizeSpeaker(speaker = "") {
   return s;
 }
 
+function getReportErrorPresentation(errorKind) {
+  switch (errorKind) {
+    case "auth_required":
+      return {
+        title: "Sign in again to view this report.",
+        description: "Your session is no longer valid for report access.",
+        canRetry: false,
+      };
+    case "not_found":
+      return {
+        title: "This report could not be found.",
+        description: "The report link may be stale or the interview may not have finished saving.",
+        canRetry: false,
+      };
+    case "backend_unavailable":
+      return {
+        title: "The report service is unavailable.",
+        description: "The backend did not respond. Retry once the service is back.",
+        canRetry: true,
+      };
+    default:
+      return {
+        title: "The report could not be loaded.",
+        description: "A non-recoverable client or server error interrupted report loading.",
+        canRetry: true,
+      };
+  }
+}
+
 export default function ReportPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -73,6 +108,7 @@ export default function ReportPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorKind, setErrorKind] = useState("");
   const [downloadLoading, setDownloadLoading] = useState(false);
 
   const [experienceRating, setExperienceRating] = useState(0);
@@ -86,9 +122,10 @@ export default function ReportPage() {
   const [gazeSummary, setGazeSummary] = useState(null);
   const [replayData, setReplayData] = useState(null);
   const [replayTimeMs, setReplayTimeMs] = useState(0);
+  const reportKey = sessionId;
 
   const fetchReport = useCallback(async () => {
-    if (!sessionId) {
+    if (!reportKey) {
       setLoading(false);
       return;
     }
@@ -96,20 +133,23 @@ export default function ReportPage() {
     try {
       setLoading(true);
       setError("");
+      setErrorKind("");
 
       const token = await getToken();
-      const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}`, token, {
+      const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${reportKey}`, token, {
         headers: { "Content-Type": "application/json" },
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch report: ${response.status}`);
+        throw await buildApiErrorFromResponse(response, {
+          defaultMessage: `Failed to fetch report (${response.status}).`,
+        });
       }
 
       const data = await response.json();
       setReport(data);
 
-      const sessionKey = data?.session_id || sessionId;
+      const sessionKey = data?.session_id || reportKey;
       if (sessionKey) {
         const gazeResponse = await authFetch(
           `${API_BASE_URL}/api/interview/sessions/${sessionKey}/gaze-events?limit=500`,
@@ -126,7 +166,7 @@ export default function ReportPage() {
         }
 
         const replayResponse = await authFetch(
-          `${API_BASE_URL}/api/interview/reports/${sessionKey}/replay`,
+          `${API_BASE_URL}/api/interview/reports/${reportKey}/replay`,
           token,
           { headers: { "Content-Type": "application/json" } },
         );
@@ -139,14 +179,27 @@ export default function ReportPage() {
       }
     } catch (err) {
       console.error("Error fetching report:", err);
-      setError(err.message || "Unable to load report.");
+      const status = Number(err?.status || 0);
+      setErrorKind(
+        isBackendUnavailableError(err)
+          ? "backend_unavailable"
+          : isAuthRequiredError(err) || status === 401 || status === 403
+            ? "auth_required"
+            : status === 404
+              ? "not_found"
+              : "generic",
+      );
+      setError(getApiErrorMessage(err, {
+        backendLabel: "report service",
+        defaultMessage: "Unable to load report.",
+      }));
       setGazeEvents([]);
       setGazeSummary(null);
       setReplayData(null);
     } finally {
       setLoading(false);
     }
-  }, [sessionId, getToken]);
+  }, [getToken, reportKey]);
 
   useEffect(() => {
     fetchReport();
@@ -498,12 +551,33 @@ export default function ReportPage() {
   }
 
   if (error) {
+    const errorPresentation = getReportErrorPresentation(errorKind);
     return (
       <Box sx={{ p: 4, maxWidth: 900, mx: "auto" }}>
-        <Alert severity="error">{error}</Alert>
-        <Button sx={{ mt: 2 }} variant="contained" onClick={fetchReport}>
-          Retry
-        </Button>
+        <Alert severity="error">
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            {errorPresentation.title}
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            {errorPresentation.description}
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            {error}
+          </Typography>
+        </Alert>
+        <Box sx={{ mt: 2, display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+          {errorPresentation.canRetry && (
+            <Button variant="contained" onClick={fetchReport}>
+              Retry
+            </Button>
+          )}
+          <Button variant="outlined" onClick={() => navigate("/interviews")}>
+            Back to Interviews
+          </Button>
+          <Button variant="outlined" onClick={() => navigate("/dashboard")}>
+            Back to Dashboard
+          </Button>
+        </Box>
       </Box>
     );
   }
@@ -523,8 +597,8 @@ export default function ReportPage() {
           <Button variant="outlined" startIcon={<Download />} onClick={handleDownload} disabled={downloadLoading}>
             {downloadLoading ? "Preparing..." : "Download PDF"}
           </Button>
-          <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/")}>
-            Back to Home
+          <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/dashboard")}>
+            Back to Dashboard
           </Button>
         </Box>
       </Box>

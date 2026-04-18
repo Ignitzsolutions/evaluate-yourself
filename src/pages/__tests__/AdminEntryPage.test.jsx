@@ -50,4 +50,23 @@ describe("AdminEntryPage", () => {
     });
     expect(screen.queryByText("Admin login")).not.toBeInTheDocument();
   });
+
+  test("renders retryable state for generic verification failures", async () => {
+    authFetch.mockRejectedValueOnce(new Error("admin verification failed"));
+
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <Routes>
+          <Route path="/admin" element={<AdminEntryPage />} />
+          <Route path="/admin/dashboard" element={<div>Admin dashboard</div>} />
+          <Route path="/admin/login" element={<div>Admin login</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Admin Access Check Failed/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+  });
 });
