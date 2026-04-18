@@ -11,9 +11,9 @@ import urllib.request
 from typing import Iterable
 
 
-def _request(base_url: str, path: str, max_bytes: int | None = 600) -> tuple[int, str]:
+def _request(base_url: str, path: str, method: str = "GET", max_bytes: int | None = 600) -> tuple[int, str]:
     url = f"{base_url.rstrip('/')}{path}"
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(url, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read() if max_bytes is None else resp.read(max_bytes)
@@ -27,13 +27,13 @@ def _request(base_url: str, path: str, max_bytes: int | None = 600) -> tuple[int
         return 0, f"{type(exc).__name__}: {exc}"
 
 
-def _expect(base_url: str, path: str, allowed: Iterable[int]) -> bool:
-    code, body = _request(base_url, path)
+def _expect(base_url: str, path: str, allowed: Iterable[int], method: str = "GET") -> bool:
+    code, body = _request(base_url, path, method=method)
     allowed_set = set(allowed)
     if code in allowed_set:
-        print(f"✅ {path} -> {code}")
+        print(f"✅ {method} {path} -> {code}")
         return True
-    print(f"❌ {path} -> {code} (expected: {sorted(allowed_set)}) {body[:200]}")
+    print(f"❌ {method} {path} -> {code} (expected: {sorted(allowed_set)}) {body[:200]}")
     return False
 
 
@@ -43,20 +43,21 @@ def main() -> int:
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
+    post_only_probe_statuses = [404, 405]
     checks_ok = all(
         [
             _expect(base_url, "/health", [200]),
             _expect(base_url, "/api/profile/status", [200, 401]),
             _expect(base_url, "/api/interview/skill-catalog", [200, 401]),
+            # Some app/middleware combinations surface POST-only routes as 404 on GET probes.
+            # OpenAPI validation below keeps the route-registration contract strict.
+            _expect(base_url, "/api/realtime/webrtc", post_only_probe_statuses, method="GET"),
+            _expect(base_url, "/api/interview/test-session/next-turn", post_only_probe_statuses, method="GET"),
+            _expect(base_url, "/api/interview/test-session/capture", post_only_probe_statuses, method="GET"),
+            _expect(base_url, "/api/interview/reports/test-report/replay", [401, 403, 404]),
             _expect(base_url, "/openapi.json", [200]),
             _expect(base_url, "/api/admin/dashboard/overview", [200, 401, 403]),
             _expect(base_url, "/api/admin/question-bank/tracks?interview_type=technical", [200, 401, 403]),
-            _expect(base_url, "/api/admin/categories", [404]),
-            _expect(
-                base_url,
-                "/api/admin/sales/summary?page=1&pageSize=25&sortBy=created_at&sortDir=desc",
-                [404],
-            ),
         ]
     )
     if not checks_ok:
@@ -75,10 +76,14 @@ def main() -> int:
     required = [
         "/api/admin/dashboard/overview",
         "/api/admin/question-bank/tracks",
+        "/api/realtime/webrtc",
+        "/api/interview/{session_id}/next-turn",
+        "/api/interview/{session_id}/capture",
+        "/api/interview/reports/{report_id}/replay",
     ]
     missing = [path for path in required if path not in paths]
     if missing:
-        print(f"❌ Missing admin routes in OpenAPI: {', '.join(missing)}")
+        print(f"❌ Missing required v1 routes in OpenAPI: {', '.join(missing)}")
         return 1
 
     print("✅ Startup smoke complete.")

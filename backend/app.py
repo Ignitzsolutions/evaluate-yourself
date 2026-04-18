@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Dict, List, Any, Literal
+from typing import Optional, Dict, List, Any, Literal, Mapping
 import os
 import uuid
 from datetime import datetime, timezone
@@ -107,6 +107,11 @@ from config.eval_flags import EVAL_FLAGS
 from services.clerk_profile import (
     fetch_clerk_contact_fields,
     normalize_phone_e164 as normalize_clerk_phone_e164,
+)
+from services.clerk_auth_config import (
+    build_clerk_auth_summary,
+    resolve_clerk_auth_config,
+    validate_clerk_auth_config,
 )
 from services.gaze_monitor import (
     GazeSessionTracker,
@@ -368,11 +373,18 @@ if BACKEND_STATIC_DIR.exists():
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "build"
 FRONTEND_INDEX = FRONTEND_DIR / "index.html"
 FRONTEND_AVAILABLE = FRONTEND_INDEX.exists()
+FRONTEND_ASSETS_DIR = FRONTEND_DIR / "assets"
+FRONTEND_STATIC_DIR = FRONTEND_DIR / "static"
+FRONTEND_FAVICON = FRONTEND_DIR / "favicon.ico"
+PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+PUBLIC_ASSETS_DIR = PUBLIC_DIR / "assets"
+PUBLIC_FAVICON = PUBLIC_DIR / "favicon.ico"
 
 if FRONTEND_AVAILABLE:
-    frontend_static_dir = FRONTEND_DIR / "static"
-    if frontend_static_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(frontend_static_dir)), name="static")
+    if FRONTEND_STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(FRONTEND_STATIC_DIR)), name="static")
+    if FRONTEND_ASSETS_DIR.exists():
+        app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="assets")
 
 # Load environment variables
 AZURE_REALTIME_SCOPE = os.getenv(
@@ -383,11 +395,14 @@ AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")  # e.g., https://{resource}.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
-AZURE_OPENAI_WHISPER_DEPLOYMENT = os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "whisper")
+AZURE_OPENAI_WHISPER_DEPLOYMENT = os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "gpt-4o-mini-transcribe")
 # Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
-FREE_ACCESS_MODE = True
+INTERVIEW_ACCESS_MODE = os.getenv("INTERVIEW_ACCESS_MODE", "free").strip().lower()
+if INTERVIEW_ACCESS_MODE not in {"free", "trial"}:
+    INTERVIEW_ACCESS_MODE = "free"
+FREE_ACCESS_MODE = INTERVIEW_ACCESS_MODE == "free"
 TRIAL_MODE_ENABLED = False if FREE_ACCESS_MODE else os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 FREE_TRIAL_MINUTES = max(1, int(os.getenv("FREE_TRIAL_MINUTES", "5")))
 TRIAL_CODE_ENFORCEMENT = False if FREE_ACCESS_MODE else os.getenv("TRIAL_CODE_ENFORCEMENT", "true").strip().lower() in ("1", "true", "yes", "on")
@@ -489,7 +504,7 @@ def extract_azure_endpoint_info(endpoint: str) -> tuple:
     raise ValueError(f"Unknown endpoint format: {hostname}. Must be *.openai.azure.com or *.cognitiveservices.azure.com")
 
 # Environment variable validation on startup
-def validate_environment():
+def validate_environment(*, strict: bool = False):
     """Validate required environment variables and print warnings."""
     warnings = []
     errors = []
@@ -548,28 +563,128 @@ def validate_environment():
         print("2. Add your Azure OpenAI API key and endpoint")
         print("3. Restart the server")
         print("="*60 + "\n")
+        if strict:
+            raise RuntimeError("; ".join(errors))
 
 
-def validate_production_requirements() -> None:
+def _resolve_frontend_favicon_path(
+    *,
+    frontend_dir: Path = FRONTEND_DIR,
+    public_dir: Path = PUBLIC_DIR,
+) -> Optional[Path]:
+    candidates = (
+        frontend_dir / "favicon.ico",
+        frontend_dir / "assets" / "logo.png",
+        public_dir / "favicon.ico",
+        public_dir / "assets" / "logo.png",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def collect_startup_diagnostics(
+    *,
+    env: Optional[Mapping[str, str]] = None,
+    frontend_dir: Path = FRONTEND_DIR,
+    public_dir: Path = PUBLIC_DIR,
+) -> Dict[str, Any]:
+    env_map = env or os.environ
+    environment = (
+        env_map.get("ENV")
+        or env_map.get("APP_ENV")
+        or env_map.get("ENVIRONMENT")
+        or env_map.get("PYTHON_ENV")
+        or "development"
+    ).strip().lower()
+    is_prod_env = environment == "production"
+    database_url = str(env_map.get("DATABASE_URL", "") or "").strip()
+    redis_url = str(env_map.get("REDIS_URL", "") or "").strip()
+    allowed_origins = str(env_map.get("ALLOWED_ORIGINS", "") or "").strip()
+    clerk_config = resolve_clerk_auth_config(dict(env_map))
+    frontend_index = frontend_dir / "index.html"
+    frontend_static = frontend_dir / "static"
+    frontend_assets = frontend_dir / "assets"
+    favicon_path = _resolve_frontend_favicon_path(frontend_dir=frontend_dir, public_dir=public_dir)
+
+    missing_requirements: List[str] = []
+    if is_prod_env:
+        if not database_url:
+            missing_requirements.append("DATABASE_URL")
+        elif not database_url.startswith("postgresql"):
+            missing_requirements.append("DATABASE_URL(postgresql)")
+        if not redis_url:
+            missing_requirements.append("REDIS_URL")
+        if not allowed_origins:
+            missing_requirements.append("ALLOWED_ORIGINS")
+        elif allowed_origins == "*":
+            missing_requirements.append("ALLOWED_ORIGINS(explicit)")
+
+    return {
+        "environment": environment,
+        "is_production": is_prod_env,
+        "database_url_present": bool(database_url),
+        "database_backend": "postgresql" if database_url.startswith("postgresql") else ("sqlite" if database_url.startswith("sqlite") else "unknown"),
+        "redis_url_present": bool(redis_url),
+        "allowed_origins_present": bool(allowed_origins),
+        "allowed_origins_wildcard": allowed_origins == "*",
+        "clerk": {
+            "publishable_key_present": clerk_config.publishable_key_mode != "missing",
+            "secret_key_present": clerk_config.secret_key_mode != "missing",
+            "publishable_key_mode": clerk_config.publishable_key_mode,
+            "secret_key_mode": clerk_config.secret_key_mode,
+            "jwks_url_present": bool(clerk_config.jwks_url),
+            "uses_test_instance": clerk_config.uses_test_instance,
+            "summary": build_clerk_auth_summary(clerk_config),
+        },
+        "frontend": {
+            "build_dir": str(frontend_dir),
+            "build_dir_present": frontend_dir.exists(),
+            "index_present": frontend_index.exists(),
+            "static_dir_present": frontend_static.exists(),
+            "assets_dir_present": frontend_assets.exists(),
+            "favicon_present": favicon_path is not None,
+            "favicon_path": str(favicon_path) if favicon_path else None,
+            "public_dir": str(public_dir),
+            "public_dir_present": public_dir.exists(),
+        },
+        "missing_requirements": missing_requirements,
+    }
+
+
+def validate_production_requirements(
+    *,
+    env: Optional[Mapping[str, str]] = None,
+    frontend_dir: Path = FRONTEND_DIR,
+    public_dir: Path = PUBLIC_DIR,
+) -> None:
     """Fail fast in production if critical persistence config is missing."""
-    if not is_production:
+    diagnostics = collect_startup_diagnostics(
+        env=env,
+        frontend_dir=frontend_dir,
+        public_dir=public_dir,
+    )
+    print(f"🚦 Startup diagnostics: {json.dumps(diagnostics, sort_keys=True)}")
+
+    if not diagnostics["is_production"]:
         return
 
-    if not os.getenv("DATABASE_URL"):
-        raise RuntimeError("DATABASE_URL must be set in production.")
-    if not DATABASE_URL.startswith("postgresql"):
-        raise RuntimeError("Production requires PostgreSQL DATABASE_URL.")
-    if not os.getenv("REDIS_URL"):
-        raise RuntimeError("REDIS_URL must be set in production.")
-
-# Validate on import (will run when module loads)
-validate_environment()
+    missing_requirements = diagnostics["missing_requirements"]
+    if missing_requirements:
+        raise RuntimeError(
+            "Production boot requirements failed: "
+            + ", ".join(missing_requirements)
+        )
 
 # Run validation on startup
 @app.on_event("startup")
 async def startup_event():
-    validate_environment()
     validate_production_requirements()
+    validate_environment(strict=True)
+    clerk_auth_config = resolve_clerk_auth_config(os.environ)
+    validate_clerk_auth_config(clerk_auth_config)
+    print(f"🔐 {build_clerk_auth_summary(clerk_auth_config)}")
     # Log Clerk JWKS URL so /api/me auth issues are debuggable
     try:
         jwks_url = _clerk_jwks_url()
@@ -581,7 +696,6 @@ async def startup_event():
 # Configure CORS origins from ALLOWED_ORIGINS (comma-separated) environment variable.
 # If ALLOWED_ORIGINS is not set, fall back to a safe local development default.
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
-validate_production_requirements()
 local_dev_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -596,8 +710,8 @@ local_dev_origins = [
 if allowed_origins_env:
     if allowed_origins_env == "*":
         if is_production:
-            # Disallow wildcard in production — fail fast to avoid accidental open CORS
-            raise RuntimeError("ALLOWED_ORIGINS='*' is not allowed in production. Set ALLOWED_ORIGINS to the list of authorized origins.")
+            print("⚠️ WARNING: ALLOWED_ORIGINS='*' is not allowed in production. Set explicit origins before startup.")
+            allow_origins = local_dev_origins
         else:
             print("⚠️ WARNING: ALLOWED_ORIGINS='*' - this allows all origins. Use only for short-term debugging.")
             allow_origins = ["*"]
@@ -610,8 +724,7 @@ if allowed_origins_env:
 else:
     # Default local dev origins (safe for local development only)
     if is_production:
-        # In production we must not use permissive defaults — require explicit ALLOWED_ORIGINS
-        raise RuntimeError("ALLOWED_ORIGINS is not set and the environment indicates production. Set ALLOWED_ORIGINS to a comma-separated list of allowed origins.")
+        print("⚠️ ALLOWED_ORIGINS is not set for production. Startup validation will fail until explicit origins are configured.")
     allow_origins = local_dev_origins
     print("ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.")
 
@@ -814,6 +927,14 @@ def read_root():
     </html>
     """)
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+def read_favicon():
+    favicon_path = _resolve_frontend_favicon_path()
+    if favicon_path is None:
+        raise HTTPException(status_code=404, detail="Favicon not found")
+    return FileResponse(favicon_path)
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
@@ -947,6 +1068,13 @@ class CandidateProfileUpsertRequest(BaseModel):
 class TrialCodeRedeemRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
+
+
+class WaitlistSignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+    source_page: str = Field(min_length=1, max_length=64)
+    intent: str = Field(min_length=1, max_length=64)
 
 
 def _json_dumps_safe(value: Any) -> str:
@@ -1350,6 +1478,12 @@ def _plan_next_turn_response(
             selected_skills=validated_selected_skills,
             db=db,
         )
+        decision["recoverable_error"] = {
+            "code": "DEGRADED_PLANNER",
+            "message": "Adaptive planner unavailable; using fallback questioning.",
+            "retryable": True,
+        }
+        decision["degraded_planner"] = True
 
     question_id = decision.get("question_id")
     if question_id and not str(question_id).startswith("followup_") and question_id != "fallback_generic":
@@ -1373,6 +1507,7 @@ def _plan_next_turn_response(
     runtime_data["asked_question_ids"] = asked_ids
     runtime_data["turn_eval_history"] = turn_eval_history
     runtime_data["adaptive_last"] = decision
+    runtime_data["degraded_planner"] = bool(decision.get("degraded_planner"))
     runtime_data["selected_skills"] = validated_selected_skills
     runtime_data["conversation_plan"] = decision.get("conversation_plan") or runtime_data.get("conversation_plan") or {}
     runtime_data["round_index"] = len(asked_ids)
@@ -1442,6 +1577,7 @@ def _plan_next_turn_response(
         "speaker_strategy": decision.get("speaker_strategy"),
         "filler_hint": decision.get("filler_hint"),
         "recoverable_error": decision.get("recoverable_error"),
+        "degraded_planner": bool(decision.get("degraded_planner")),
         "conversation_plan": decision.get("conversation_plan", {}),
         "interrupt_policy": decision.get("interrupt_policy", {}),
         "resume_token": runtime_data["resume_token"],
@@ -1770,8 +1906,7 @@ async def webrtc_proxy(
             session_row.session_meta_json = json.dumps(runtime_payload)
             db.commit()
 
-        # Build session request per Azure OpenAI Realtime API spec
-        # Format: { expires_after: {...}, session: {...} }
+        # Build session request per the current GA Realtime schema.
         client_secrets_request = {
             "expires_after": {
                 "anchor": "created_at",
@@ -1780,36 +1915,22 @@ async def webrtc_proxy(
             "session": {
                 "type": "realtime",
                 "model": AZURE_OPENAI_DEPLOYMENT,
-                "audio": {
-                    "input": {
-                        "format": {
-                            "type": "audio/pcm",
-                            "rate": 24000
-                        },
-                        "turn_detection": {
-                            "type": "server_vad",
-                            "threshold": 0.55,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 500,
-                            "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
-                            "interrupt_response": True
-                        },
-                        "transcription": {
-                            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
-                            "language": "en"
-                        },
-                    },
-                    "output": {
-                        "voice": REALTIME_VOICE
-                    }
+                "voice": REALTIME_VOICE,
+                "input_audio_format": "pcm16",
+                "output_modalities": ["audio"],
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.55,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500,
+                    "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
+                    "interrupt_response": True
+                },
+                "input_audio_transcription": {
+                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
+                    "language": "en"
                 },
             }
-        }
-        
-        # Add legacy flat key for compatibility with older Azure Realtime API versions
-        client_secrets_request["session"]["input_audio_transcription"] = {
-            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
-            "language": "en"
         }
         
         # Add instructions if provided (can be disabled to reduce token creation latency)
@@ -1900,21 +2021,22 @@ async def webrtc_proxy(
                     "session": {
                         "type": "realtime",
                         "model": AZURE_OPENAI_DEPLOYMENT,
-                        "audio": {
-                            "input": {
-                                "format": {"type": "audio/pcm", "rate": 24000},
-                                "turn_detection": {
-                                    "type": "server_vad",
-                                    "threshold": 0.55,
-                                    "prefix_padding_ms": 300,
-                                    "silence_duration_ms": 600,
-                                    "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
-                                    "interrupt_response": True,
-                                },
-                            },
-                            "output": {"voice": REALTIME_VOICE},
+                        "voice": REALTIME_VOICE,
+                        "input_audio_format": "pcm16",
+                        "output_modalities": ["audio"],
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.55,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 600,
+                            "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
+                            "interrupt_response": True,
                         },
                     },
+                }
+                payload["session"]["input_audio_transcription"] = {
+                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
+                    "language": "en",
                 }
                 if include_instructions and system_prompt:
                     payload["session"]["instructions"] = system_prompt
@@ -2140,6 +2262,12 @@ async def webrtc_proxy(
         
         sdp_answer = sdp_resp.text
         
+        token_session = token_json.get("session") if isinstance(token_json, dict) else {}
+        transcription_available = bool(
+            (token_session or {}).get("input_audio_transcription")
+            or ((token_session or {}).get("audio") or {}).get("input", {}).get("transcription")
+        )
+
         return {
             "sdpAnswer": sdp_answer,
             "sessionId": session_id,
@@ -2147,6 +2275,7 @@ async def webrtc_proxy(
             "trialMode": plan_tier == "trial",
             "planTier": plan_tier,
             "voice": REALTIME_VOICE,
+            "transcriptionAvailable": transcription_available,
             "selectedSkills": selected_skills,
             "openingQuestion": opening_decision.get("next_question"),
             "openingQuestionId": opening_decision.get("question_id"),
@@ -4609,6 +4738,41 @@ async def list_interview_reports(
     return summaries
 
 
+@app.post("/api/waitlist")
+def join_waitlist(
+    payload: WaitlistSignupRequest,
+    db: Session = Depends(get_db),
+):
+    normalized_email = str(payload.email or "").strip().lower()
+    if "@" not in normalized_email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    source_page = str(payload.source_page or "").strip().lower()
+    intent = str(payload.intent or "").strip().lower()
+    existing = db.query(models.LaunchWaitlistSignup).filter(
+        models.LaunchWaitlistSignup.normalized_email == normalized_email
+    ).first()
+
+    already_joined = existing is not None
+    row = existing or models.LaunchWaitlistSignup(
+        email=str(payload.email or "").strip(),
+        normalized_email=normalized_email,
+    )
+    row.email = str(payload.email or "").strip()
+    row.source_page = source_page
+    row.intent = intent
+    row.status = "ACTIVE"
+    if not existing:
+        db.add(row)
+    db.commit()
+
+    return {
+        "message": "You are already on the waitlist." if already_joined else "You have been added to the waitlist.",
+        "already_joined": already_joined,
+        "email": normalized_email,
+    }
+
+
 @app.put("/api/interview/reports/{report_id}/feedback")
 async def upsert_report_feedback(
     report_id: str,
@@ -4645,6 +4809,10 @@ async def upsert_report_feedback(
     submitted_at = payload.get("submitted_at")
     if not submitted_at:
         submitted_at = datetime.utcnow().isoformat()
+    try:
+        submitted_at_dt = datetime.fromisoformat(str(submitted_at).replace("Z", "+00:00"))
+    except Exception:
+        submitted_at_dt = datetime.utcnow()
 
     metrics = {}
     try:
@@ -4659,6 +4827,24 @@ async def upsert_report_feedback(
     }
     metrics["session_feedback"] = session_feedback
     report.metrics = json.dumps(metrics)
+
+    feedback_row = db.query(models.TrialFeedback).filter(
+        models.TrialFeedback.report_id == report.id
+    ).first()
+    if not feedback_row:
+        feedback_row = models.TrialFeedback(
+            report_id=report.id,
+            session_id=report.session_id,
+            user_id=getattr(current_user, "id", None),
+            clerk_user_id=current_user.clerk_user_id,
+        )
+        db.add(feedback_row)
+    feedback_row.rating = int(rating)
+    feedback_row.comment = comment
+    feedback_row.plan_tier = metrics.get("plan_tier")
+    feedback_row.trial_mode = bool(metrics.get("trial_mode"))
+    feedback_row.submitted_at = submitted_at_dt
+
     db.commit()
 
     return {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
-import { CircularProgress, Box } from "@mui/material";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Alert, Box, Button, CircularProgress, Stack, Typography } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
 import BackendUnavailableState from "./BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
@@ -10,6 +10,8 @@ import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 const API_BASE = getApiBaseUrl();
 
 export default function AdminRoute({ children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [state, setState] = useState({
     loading: true,
@@ -20,6 +22,8 @@ export default function AdminRoute({ children }) {
   });
   const devBypass = isDevAuthBypassEnabled();
   const [retryTick, setRetryTick] = useState(0);
+
+  const loginState = { from: location };
 
   useEffect(() => {
     let mounted = true;
@@ -91,10 +95,55 @@ export default function AdminRoute({ children }) {
   }
 
   if (state.requireLogin) {
-    return <Navigate to="/admin/login" replace />;
+    return <Navigate to="/admin/login" replace state={loginState} />;
   }
 
-  if (state.errorKind === "backend_unavailable" || state.errorKind === "server_error") {
+  if (state.errorKind === "backend_unavailable" || state.errorKind === "server_error" || state.errorKind === "generic") {
+    if (state.errorKind === "generic") {
+      return (
+        <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center", p: 3 }}>
+          <Box
+            sx={{
+              width: "100%",
+              maxWidth: 560,
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              borderRadius: 2,
+              boxShadow: 1,
+              p: { xs: 3, sm: 4 },
+            }}
+          >
+            <Stack spacing={2.5}>
+              <Box>
+                <Typography variant="overline" sx={{ color: "text.secondary", letterSpacing: 1.6 }}>
+                  Admin Verification
+                </Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5 }}>
+                  We couldn&apos;t confirm admin access
+                </Typography>
+              </Box>
+              <Alert severity="warning" variant="outlined">
+                {state.errorMessage}
+              </Alert>
+              <Typography variant="body2" color="text.secondary">
+                This looks like a verification failure, not a confirmed “not an admin” result. Retry the check or return
+                to the main dashboard before attempting sign-in again.
+              </Typography>
+              <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+                <Button variant="contained" onClick={() => setRetryTick((prev) => prev + 1)}>
+                  Retry
+                </Button>
+                <Button variant="outlined" onClick={() => navigate("/dashboard")}>
+                  Back to Dashboard
+                </Button>
+              </Box>
+            </Stack>
+          </Box>
+        </Box>
+      );
+    }
+
     return (
       <BackendUnavailableState
         title="Admin Panel Unavailable"
@@ -105,7 +154,7 @@ export default function AdminRoute({ children }) {
   }
 
   if (!state.allowed) {
-    return <Navigate to="/admin/login" replace />;
+    return <Navigate to="/admin/login" replace state={{ ...loginState, reason: "not_admin" }} />;
   }
 
   return children;

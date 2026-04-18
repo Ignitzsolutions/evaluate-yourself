@@ -16,25 +16,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate production Clerk publishable key
+      - name: Validate production Clerk keys
         env:
           REACT_APP_CLERK_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_CLERK_PUBLISHABLE_KEY }}
-          ENFORCE_LIVE_CLERK_KEYS: ${{ vars.ENFORCE_LIVE_CLERK_KEYS }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         run: |
-          ENFORCE_LIVE_CLERK_KEYS="${ENFORCE_LIVE_CLERK_KEYS:-false}"
           if [ -z "${REACT_APP_CLERK_PUBLISHABLE_KEY}" ]; then
             echo "❌ Missing REACT_APP_CLERK_PUBLISHABLE_KEY secret"
             exit 1
           fi
-          if [[ "${REACT_APP_CLERK_PUBLISHABLE_KEY}" == pk_test_* ]]; then
-            if [[ "${ENFORCE_LIVE_CLERK_KEYS}" == "true" ]]; then
-              echo "❌ Production deploy cannot use Clerk test publishable key (ENFORCE_LIVE_CLERK_KEYS=true)"
-              exit 1
-            fi
-            echo "⚠️ Using Clerk test publishable key. Set repo variable ENFORCE_LIVE_CLERK_KEYS=true to block this."
-          else
-            echo "✓ Clerk publishable key looks production-safe"
+          if [ -z "${CLERK_SECRET_KEY}" ]; then
+            echo "❌ Missing CLERK_SECRET_KEY secret"
+            exit 1
           fi
+          if [[ "${REACT_APP_CLERK_PUBLISHABLE_KEY}" != pk_live_* ]]; then
+            echo "❌ Production deploy requires a Clerk live publishable key (pk_live_*)"
+            exit 1
+          fi
+          if [[ "${CLERK_SECRET_KEY}" != sk_live_* ]]; then
+            echo "❌ Production deploy requires a Clerk live secret key (sk_live_*)"
+            exit 1
+          fi
+          echo "✓ Clerk publishable and secret keys are live-mode"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -46,8 +49,10 @@ jobs:
         env:
           REACT_APP_API_URL: ""
           REACT_APP_CLERK_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_CLERK_PUBLISHABLE_KEY }}
+          REACT_APP_INTERVIEW_ACCESS_MODE: "free"
         run: |
           npm ci
+          CI=true npm test -- --runInBand --watch=false src/pages/__tests__/PreInterviewForm.test.jsx src/pages/__tests__/ReportPage.test.jsx src/components/__tests__/OnboardingGuard.test.jsx src/pages/__tests__/AdminEntryPage.test.jsx
           CI=false npm run build
 
       - name: Set up Python version
@@ -93,6 +98,30 @@ jobs:
           PY
           python -c "import jwt; print('✓ PyJWT (jwt) import successful')"
           cd backend && python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
+
+      - name: Run targeted backend release checks
+        run: |
+          source antenv/bin/activate
+          pytest -q \
+            backend/tests/test_interview_orchestration_backend.py \
+            backend/tests/test_replay_payload.py \
+            backend/tests/test_provider_adapter.py
+
+      - name: Run backend startup smoke against live local app
+        run: |
+          source antenv/bin/activate
+          cd backend
+          PYTHONPATH=. uvicorn app:app --host 127.0.0.1 --port 8000 > ../backend-smoke.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          cd ..
+          python backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
       # Note: The artifact includes the entire repo root (.), ensuring backend/ folder exists in deployment
@@ -142,6 +171,48 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}
 
+      - name: Validate required Azure app settings
+        run: |
+          SETTINGS_JSON=$(az webapp config appsettings list \
+            --resource-group projecte_group \
+            --name projecte \
+            --output json)
+          export SETTINGS_JSON
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          settings = {
+              item.get("name"): str(item.get("value") or "").strip()
+              for item in json.loads(os.environ["SETTINGS_JSON"])
+          }
+          missing = [
+              key for key in (
+                  "DATABASE_URL",
+                  "REDIS_URL",
+                  "ALLOWED_ORIGINS",
+                  "CLERK_PUBLISHABLE_KEY",
+                  "CLERK_SECRET_KEY",
+              )
+              if not settings.get(key)
+          ]
+          if missing:
+              print(f"Missing Azure app settings: {', '.join(missing)}", file=sys.stderr)
+              sys.exit(1)
+          print("✓ Required Azure app settings are present")
+          PY
+
+      - name: Set demo access defaults
+        run: |
+          az webapp config appsettings set \
+            --resource-group projecte_group \
+            --name projecte \
+            --settings \
+              INTERVIEW_ACCESS_MODE=free \
+              TRIAL_MODE_ENABLED=false \
+              TRIAL_CODE_ENFORCEMENT=false
+
       - name: Ensure startup command
         run: |
           az webapp config set \
@@ -176,11 +247,34 @@ jobs:
           echo "Deployment failed after 3 attempts"
           exit 1
 
-      - name: Verify deployed frontend bundle uses live Clerk key
-        env:
-          ENFORCE_LIVE_CLERK_KEYS: ${{ vars.ENFORCE_LIVE_CLERK_KEYS }}
+      - name: Smoke check deployed app routes
         run: |
-          ENFORCE_LIVE_CLERK_KEYS="${ENFORCE_LIVE_CLERK_KEYS:-false}"
+          APP_URL="https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
+
+          check_route() {
+            local path="$1"
+            local accepted_codes="$2"
+            local url="${APP_URL}${path}"
+            local code
+            code=$(curl -sS -o /tmp/deploy_route_check.out -w "%{http_code}" "${url}" || true)
+            for expected in ${accepted_codes}; do
+              if [ "${code}" = "${expected}" ]; then
+                echo "✓ ${path} -> ${code}"
+                return 0
+              fi
+            done
+            echo "❌ ${path} -> ${code} (expected one of: ${accepted_codes})"
+            head -c 200 /tmp/deploy_route_check.out || true
+            echo ""
+            exit 1
+          }
+
+          check_route "/" "200"
+          check_route "/health" "200"
+          check_route "/favicon.ico" "200 301 302 304"
+
+      - name: Verify deployed frontend bundle uses live Clerk key
+        run: |
           APP_URL="https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
           HTML=$(curl -fsSL "${APP_URL}" || true)
           if [ -z "${HTML}" ]; then
@@ -198,12 +292,28 @@ jobs:
             exit 1
           fi
           if echo "${BUNDLE}" | grep -q "pk_test_"; then
-            if [[ "${ENFORCE_LIVE_CLERK_KEYS}" == "true" ]]; then
-              echo "❌ Deployed frontend bundle still contains Clerk test key (ENFORCE_LIVE_CLERK_KEYS=true)"
-              exit 1
-            fi
-            echo "⚠️ Deployed frontend bundle contains Clerk test key."
-            exit 0
+            echo "❌ Deployed frontend bundle still contains Clerk test key"
+            exit 1
           fi
           echo "✓ Deployed frontend bundle does not contain Clerk test key"
+
+      - name: Run hosted Sonia certification
+        env:
+          PW_CERT_BASE_URL: "https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
+          PW_CERT_SESSION_URL: ${{ secrets.PW_CERT_SESSION_URL }}
+          PW_CERT_STORAGE_STATE_JSON: ${{ secrets.PW_CERT_STORAGE_STATE_JSON }}
+        run: |
+          if [ -z "${PW_CERT_SESSION_URL}" ]; then
+            echo "❌ Missing PW_CERT_SESSION_URL secret for hosted Sonia certification"
+            exit 1
+          fi
+          if [ -z "${PW_CERT_STORAGE_STATE_JSON}" ]; then
+            echo "❌ Missing PW_CERT_STORAGE_STATE_JSON secret for hosted Sonia certification"
+            exit 1
+          fi
+          STORAGE_STATE_PATH="${RUNNER_TEMP}/pw-cert-storage-state.json"
+          printf '%s' "${PW_CERT_STORAGE_STATE_JSON}" > "${STORAGE_STATE_PATH}"
+          npm install
+          npx playwright install --with-deps chromium
+          PW_CERT_STORAGE_STATE="${STORAGE_STATE_PATH}" npm run test:e2e:hosted
           

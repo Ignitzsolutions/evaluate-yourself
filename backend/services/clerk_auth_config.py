@@ -63,6 +63,8 @@ def validate_clerk_auth_config(config: ClerkAuthConfig) -> None:
         raise RuntimeError("Clerk key prefixes are not recognized. Expected pk_* and sk_* values.")
     if len(key_modes) > 1:
         raise RuntimeError("CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY must come from the same Clerk instance mode.")
+    if key_modes == {"test"}:
+        raise RuntimeError("Production requires Clerk live keys. Test keys are not allowed in production.")
 
 
 def build_clerk_auth_summary(config: ClerkAuthConfig) -> str:

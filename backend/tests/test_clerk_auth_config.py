@@ -5,7 +5,10 @@ from backend.services.clerk_auth_config import (
 )
 
 
-def test_validate_clerk_auth_config_accepts_matching_production_key_modes():
+import pytest
+
+
+def test_validate_clerk_auth_config_rejects_test_keys_in_production():
     config = resolve_clerk_auth_config(
         {
             "ENV": "production",
@@ -14,7 +17,8 @@ def test_validate_clerk_auth_config_accepts_matching_production_key_modes():
         }
     )
 
-    validate_clerk_auth_config(config)
+    with pytest.raises(RuntimeError, match="live keys"):
+        validate_clerk_auth_config(config)
     assert config.uses_test_instance is True
 
 
@@ -32,6 +36,19 @@ def test_validate_clerk_auth_config_rejects_mismatched_key_modes():
         assert False, "Expected RuntimeError for mismatched Clerk key families"
     except RuntimeError as exc:
         assert "same Clerk instance mode" in str(exc)
+
+
+def test_validate_clerk_auth_config_accepts_matching_live_keys_in_production():
+    config = resolve_clerk_auth_config(
+        {
+            "ENV": "production",
+            "CLERK_PUBLISHABLE_KEY": "pk_live_example",
+            "CLERK_SECRET_KEY": "sk_live_example",
+        }
+    )
+
+    validate_clerk_auth_config(config)
+    assert config.uses_test_instance is False
 
 
 def test_build_clerk_auth_summary_reports_key_modes():
