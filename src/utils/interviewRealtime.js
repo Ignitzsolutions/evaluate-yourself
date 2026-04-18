@@ -7,25 +7,32 @@ export function buildRealtimeSessionUpdateEvent({
     type: "session.update",
     session: {
       type: "realtime",
-      audio: {
-        input: {
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.55,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500,
-            create_response: !interviewServerControlEnabled,
-            interrupt_response: true,
-          },
-          transcription: {
-            model: transcriptionModel,
-            language: "en",
-          },
-        },
-        output: {
-          voice,
-        },
+      voice,
+      input_audio_format: "pcm16",
+      output_modalities: ["audio"],
+      turn_detection: {
+        type: "server_vad",
+        threshold: 0.55,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+        create_response: !interviewServerControlEnabled,
+        interrupt_response: true,
       },
+      input_audio_transcription: {
+        model: transcriptionModel,
+        language: "en",
+      },
+    },
+  };
+}
+
+export function buildRealtimeResponseCreateEvent({ instructions }) {
+  return {
+    type: "response.create",
+    response: {
+      conversation: "auto",
+      output_modalities: ["audio"],
+      instructions,
     },
   };
 }

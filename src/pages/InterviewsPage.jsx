@@ -18,6 +18,7 @@ import {
   PlayArrow,
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
+import { isInterviewFreeAccessMode } from "../utils/accessMode";
 import "../ui.css";
 
 const interviewTypes = [
@@ -53,6 +54,7 @@ const interviewTypes = [
 export default function InterviewsPage() {
   const navigate = useNavigate();
   const [selectedType, setSelectedType] = useState("");
+  const freeAccessMode = isInterviewFreeAccessMode();
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -62,7 +64,9 @@ export default function InterviewsPage() {
           Interviews
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Choose an interview type to start practicing
+          {freeAccessMode
+            ? "Start a live Sonia demo session immediately. No trial code is required for the hosted beta flow."
+            : "Choose an interview type to start practicing"}
         </Typography>
       </Box>
 
@@ -105,7 +109,7 @@ export default function InterviewsPage() {
                   }
                   fullWidth
                 >
-                  Start {type.title.split(" ")[0]}
+                  {freeAccessMode ? `Start Sonia ${type.title.split(" ")[0]} Demo` : `Start ${type.title.split(" ")[0]}`}
                 </Button>
               </CardActions>
             </Card>

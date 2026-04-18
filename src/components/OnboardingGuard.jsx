@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { Box, CircularProgress, Typography } from "@mui/material";
+import { Box, Button, CircularProgress, Typography } from "@mui/material";
 import BackendUnavailableState from "./BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, buildAuthRequiredError, getApiErrorMessage, isAuthRequiredError, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
@@ -10,8 +10,19 @@ import { classifyOnboardingGuardError } from "../utils/onboardingGuardState";
 
 const API_BASE_URL = getApiBaseUrl();
 
+function getRecoveryTarget(pathname) {
+  if (pathname.startsWith("/interview") || pathname.startsWith("/report")) {
+    return { to: "/interviews", label: "Back to Interviews" };
+  }
+  if (pathname.startsWith("/admin")) {
+    return { to: "/dashboard", label: "Back to Dashboard" };
+  }
+  return { to: "/dashboard", label: "Back to Dashboard" };
+}
+
 export default function OnboardingGuard({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { getToken, isLoaded } = useAuth();
   const devBypass = isDevAuthBypassEnabled();
   const [checking, setChecking] = useState(true);
@@ -92,9 +103,25 @@ export default function OnboardingGuard({ children }) {
   }
 
   if (errorState.message) {
+    const recoveryTarget = getRecoveryTarget(location.pathname);
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error">{errorState.message}</Typography>
+      <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center", p: 3 }}>
+        <Box sx={{ width: "100%", maxWidth: 560 }}>
+          <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
+            We couldn&apos;t verify your onboarding status
+          </Typography>
+          <Typography color="error" sx={{ mb: 2 }}>
+            {errorState.message}
+          </Typography>
+          <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+            <Button variant="contained" onClick={() => setRetryTick((prev) => prev + 1)}>
+              Retry
+            </Button>
+            <Button variant="outlined" onClick={() => navigate(recoveryTarget.to)}>
+              {recoveryTarget.label}
+            </Button>
+          </Box>
+        </Box>
       </Box>
     );
   }
