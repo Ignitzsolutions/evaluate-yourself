@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
 import { useAuth } from "@clerk/clerk-react";
 import BackendUnavailableState from "../components/BackendUnavailableState";
@@ -10,6 +10,7 @@ import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 const API_BASE = getApiBaseUrl();
 
 export default function AdminEntryPage() {
+  const location = useLocation();
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const devBypass = isDevAuthBypassEnabled();
   const [state, setState] = useState({
@@ -90,15 +91,15 @@ export default function AdminEntryPage() {
     );
   }
 
-  if (state.errorKind === "backend_unavailable" || state.errorKind === "server_error") {
+  if (state.errorKind === "backend_unavailable" || state.errorKind === "server_error" || state.errorKind === "generic") {
     return (
       <BackendUnavailableState
-        title="Admin Access Check Unavailable"
+        title={state.errorKind === "generic" ? "Admin Access Check Failed" : "Admin Access Check Unavailable"}
         message={state.errorMessage}
         onRetry={() => setRetryTick((prev) => prev + 1)}
       />
     );
   }
 
-  return <Navigate to={state.target} replace />;
+  return <Navigate to={state.target} replace state={state.target === "/admin/login" ? { from: location } : undefined} />;
 }

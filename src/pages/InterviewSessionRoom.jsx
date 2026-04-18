@@ -10,9 +10,15 @@ import { shouldAcceptBrowserSpeechResult } from '../utils/realtimeSpeechGuards';
 import { mapLiveGazeFlag } from '../utils/gazeDirection';
 import {
   buildAdaptiveTurnFallbackQuestion,
+  buildRealtimeResponseCreateEvent,
   buildRealtimeSessionUpdateEvent,
   canSendOpeningPrompt,
 } from '../utils/interviewRealtime';
+import {
+  getInterviewAccessMode,
+  isInterviewFreeAccessMode,
+  readSavedInterviewConfig,
+} from '../utils/accessMode';
 import { requestNextInterviewTurn } from '../utils/interviewNextTurn';
 import {
   annotateCaptureEntry,
@@ -59,8 +65,10 @@ const resolveSoniaAvatarSrc = () => {
 };
 const INTERVIEW_SERVER_CONTROL_ENABLED = String(process.env.REACT_APP_INTERVIEW_SERVER_CONTROL_ENABLED || 'true').toLowerCase() === 'true';
 const ENABLE_BROWSER_SR_FALLBACK = String(process.env.REACT_APP_ENABLE_BROWSER_SR_FALLBACK || 'true').toLowerCase() === 'true';
-const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'whisper').trim() || 'whisper';
+const TRANSCRIPTION_MODEL = (process.env.REACT_APP_REALTIME_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe';
 const REALTIME_DEBUG = String(process.env.REACT_APP_REALTIME_DEBUG || 'false').toLowerCase() === 'true';
+const FREE_ACCESS_MODE = isInterviewFreeAccessMode();
+const INTERVIEW_ACCESS_MODE = getInterviewAccessMode();
 const DEDUPE_TTL_MS = 8000;
 const BROWSER_SR_AI_AUDIO_COOLDOWN_MS = 1600;
 const BROWSER_SR_USER_SPEECH_WINDOW_MS = 5000;
@@ -367,32 +375,36 @@ export default function InterviewSessionRoom() {
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [planTier, setPlanTier] = useState('free');
   const [trialMode, setTrialMode] = useState(false);
+  const [configValidated, setConfigValidated] = useState(false);
 
   useEffect(() => {
-    const config = sessionStorage.getItem('interviewConfig');
-    if (config) {
-      try {
-        const parsed = JSON.parse(config);
-        setInterviewType(parsed.type || typeFromUrl || 'behavioral');
-        const configuredDuration = parsed.duration ? parseInt(parsed.duration, 10) : 15;
-        setDurationMinutes(configuredDuration);
-        setEffectiveDurationMinutes(configuredDuration);
-        setDifficulty(parsed.difficulty || 'easy');
-        setTargetRole(parsed.role || '');
-        setTargetCompany(parsed.company || '');
-        setQuestionMix(parsed.questionMix || 'balanced');
-        setInterviewStyle(parsed.interviewStyle || 'neutral');
-        setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
-        if (typeof parsed.trialMode === 'boolean') {
-          setTrialMode(parsed.trialMode);
-        }
-      } catch (e) {
-        console.error('Error parsing config:', e);
-      }
-    } else if (typeFromUrl) {
-      setInterviewType(typeFromUrl);
+    const savedConfig = readSavedInterviewConfig(sessionStorage);
+    if (!savedConfig.valid) {
+      navigate('/interview-config', {
+        replace: true,
+        state: {
+          type: typeFromUrl || 'technical',
+          recoveryMessage: 'Complete interview setup again before joining the session.',
+        },
+      });
+      return;
     }
-  }, [typeFromUrl]);
+    const parsed = savedConfig.config;
+    const resolvedType = parsed.type || typeFromUrl || 'behavioral';
+    setInterviewType(resolvedType);
+    const configuredDuration = parsed.duration ? parseInt(parsed.duration, 10) : 15;
+    setDurationMinutes(configuredDuration);
+    setEffectiveDurationMinutes(configuredDuration);
+    setDifficulty(parsed.difficulty || 'easy');
+    setTargetRole(parsed.role || '');
+    setTargetCompany(parsed.company || '');
+    setQuestionMix(parsed.questionMix || 'balanced');
+    setInterviewStyle(parsed.interviewStyle || 'neutral');
+    setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
+    setTrialMode(parsed.accessMode === 'trial');
+    setPlanTier(parsed.accessMode === 'trial' ? 'trial' : 'free');
+    setConfigValidated(true);
+  }, [navigate, typeFromUrl]);
 
   // WebRTC refs
   const pcRef = useRef(null);
@@ -733,14 +745,9 @@ export default function InterviewSessionRoom() {
         options?.refusalMessage || null,
         options,
       );
-    dcRef.current.send(
-      JSON.stringify({
-        type: 'response.create',
-        response: {
-          instructions: wrappedInstruction,
-        },
-      }),
-    );
+    dcRef.current.send(JSON.stringify(buildRealtimeResponseCreateEvent({
+      instructions: wrappedInstruction,
+    })));
     debugRealtime('[realtime] Sent interviewer prompt', {
       opening: Boolean(options?.opening),
       recovery: Boolean(options?.recovery),
@@ -1701,9 +1708,34 @@ export default function InterviewSessionRoom() {
     }
   }, [addTranscript, incrementDroppedEvent, isEchoOfAI, markUserSpeechSignal, rememberByTtl]);
 
+  const enableBrowserSpeechFallback = useCallback((reasonMessage) => {
+    if (!ENABLE_BROWSER_SR_FALLBACK) {
+      return;
+    }
+    if (!transcriptionFallbackNotifiedRef.current && reasonMessage) {
+      transcriptionFallbackNotifiedRef.current = true;
+      addTranscript('system', reasonMessage);
+    }
+    setCaptureWarning('fallback');
+    if (!browserSpeechRef.current) {
+      startBrowserSpeechRecognition();
+    }
+  }, [addTranscript, startBrowserSpeechRecognition]);
+
   // Connect to Realtime API (proven logic from RealtimeTestPage)
   const handleConnect = useCallback(async () => {
     if (status === 'connecting' || status === 'connected' || status === 'ready') {
+      return;
+    }
+
+    if (!configValidated) {
+      navigate('/interview-config', {
+        replace: true,
+        state: {
+          type: interviewType,
+          recoveryMessage: 'Complete interview setup before joining the session.',
+        },
+      });
       return;
     }
 
@@ -1965,8 +1997,20 @@ export default function InterviewSessionRoom() {
 
           if (msgType === 'session.created') {
             debugRealtime('[realtime] Session created');
+            const sessionTranscription = msg.session?.input_audio_transcription
+              || msg.session?.audio?.input?.transcription
+              || null;
+            if (!sessionTranscription) {
+              enableBrowserSpeechFallback('Realtime transcription is unavailable for this session, so browser speech fallback is active.');
+            }
           } else if (msgType === 'session.updated') {
             sessionConfiguredRef.current = true;
+            const sessionTranscription = msg.session?.input_audio_transcription
+              || msg.session?.audio?.input?.transcription
+              || null;
+            if (!sessionTranscription) {
+              enableBrowserSpeechFallback('Realtime transcription is unavailable for this session, so browser speech fallback is active.');
+            }
             tryStartOpeningTurn();
           } else if (msgType === 'error') {
             const errMsg = msg.error?.message || 'Azure API error';
@@ -1979,14 +2023,7 @@ export default function InterviewSessionRoom() {
             }
           } else if (msgType === 'conversation.item.input_audio_transcription.failed') {
             incrementDroppedEvent('input_audio_transcription_failed');
-            if (!transcriptionFallbackNotifiedRef.current) {
-              transcriptionFallbackNotifiedRef.current = true;
-              addTranscript('system', 'Realtime transcription failed, browser speech fallback is active.');
-              setCaptureWarning('fallback');
-            }
-            if (ENABLE_BROWSER_SR_FALLBACK && !browserSpeechRef.current) {
-              startBrowserSpeechRecognition();
-            }
+            enableBrowserSpeechFallback('Realtime transcription failed, browser speech fallback is active.');
           } else if (msgType === 'response.output_text.delta') {
             if (msg.delta) {
               setAiSpeakingState(true);
@@ -2163,7 +2200,7 @@ export default function InterviewSessionRoom() {
             : `HTTP ${resp.status} from backend`,
         });
 
-        if (apiError.code === 'TRIAL_CODE_REQUIRED') {
+        if (INTERVIEW_ACCESS_MODE === 'trial' && apiError.code === 'TRIAL_CODE_REQUIRED') {
           apiError.recoveryTarget = {
             pathname: '/interview-config',
             state: {
@@ -2222,6 +2259,9 @@ export default function InterviewSessionRoom() {
         pendingOpeningInstructionRef.current = String(data.openingQuestionInstruction || '').trim();
         tryStartOpeningTurn();
       }
+      if (data.transcriptionAvailable === false) {
+        enableBrowserSpeechFallback('Realtime transcription is unavailable for this session, so browser speech fallback is active.');
+      }
 
     } catch (err) {
       console.error('Connection error:', err);
@@ -2238,7 +2278,9 @@ export default function InterviewSessionRoom() {
       } else if (err.message && err.message.includes('NotFoundError')) {
         errorMessage = 'Camera or microphone was not found. Please connect both devices and try again.';
       } else if (isBackendUnavailableError(err)) {
-        errorMessage = 'Cannot reach the interview service. Start the backend server and reconnect.';
+        errorMessage = FREE_ACCESS_MODE
+          ? 'The hosted Sonia demo is temporarily unavailable. Please retry in a moment.'
+          : 'Cannot reach the interview service. Start the backend server and reconnect.';
       }
 
       const recoveryTarget = err?.recoveryTarget || null;
@@ -2272,6 +2314,7 @@ export default function InterviewSessionRoom() {
   }, [
     status,
     hasJoined,
+    configValidated,
     networkOnline,
     addTranscript,
     getToken,
@@ -2287,6 +2330,7 @@ export default function InterviewSessionRoom() {
     selectedSkills,
     navigate,
     sendRealtimeQuestion,
+    enableBrowserSpeechFallback,
     commitAiTranscript,
     commitUserTranscript,
     incrementQuestionCount,
@@ -2301,6 +2345,16 @@ export default function InterviewSessionRoom() {
     stopFiller,
     vad,
   ]);
+
+  const handleRetryPermissions = useCallback(async () => {
+    setShowPermissionModal(false);
+    setPermissionError(null);
+    setError(null);
+    if (!hasJoined) {
+      setHasJoined(true);
+    }
+    await handleConnect();
+  }, [handleConnect, hasJoined]);
 
   // Build canonical transcript payload (structured/hybrid/raw)
   const buildCanonicalTranscriptPayload = useCallback(() => {
@@ -2748,7 +2802,9 @@ export default function InterviewSessionRoom() {
 
   const stageAssistLabel = useMemo(() => {
     if (status === 'connecting' || status === 'idle') {
-      return 'Connecting Sonia and preparing the interview session.';
+      return FREE_ACCESS_MODE
+        ? 'Connecting Sonia and preparing your beta demo session.'
+        : 'Connecting Sonia and preparing the interview session.';
     }
     if (cameraOff) {
       return 'Camera is off. Turn it back on if you want gaze tracking and a full interview recording setup.';
@@ -2780,7 +2836,7 @@ export default function InterviewSessionRoom() {
     if (status === 'connected' || status === 'ready') {
       return 'Sonia is waiting. Answer directly, stay concrete, and stop once your point is made.';
     }
-    return 'Interview session ready.';
+    return FREE_ACCESS_MODE ? 'Sonia demo session ready.' : 'Interview session ready.';
   }, [aiSpeaking, cameraOff, captureWarning, currentFiller?.text, gazeMetrics.calibrationProgress, gazeMetrics.calibrationState, gazeMetrics.detectorReady, gazeMetrics.faceDetected, isThinking, micActive, status]);
 
   const stageStatusLabel = useMemo(() => {
@@ -2862,10 +2918,10 @@ export default function InterviewSessionRoom() {
       <div className="session-topbar meet-topbar">
         <div className="meet-topbar-left">
           <Typography style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
-            Interview Session
+            {FREE_ACCESS_MODE ? 'Sonia Demo Session' : 'Interview Session'}
           </Typography>
           <span className="meet-subtle">
-            {interviewType} • {effectiveDurationMinutes}m target ({planTier})
+            {FREE_ACCESS_MODE ? 'Open beta demo' : interviewType} • {effectiveDurationMinutes}m target ({planTier})
           </span>
         </div>
         <div className="meet-topbar-right" aria-hidden="true" />
@@ -3023,7 +3079,7 @@ export default function InterviewSessionRoom() {
                 setHasJoined(true);
                 handleConnect();
               }}
-              disabled={hasJoined || !networkOnline || status === 'connecting' || status === 'connected' || status === 'ready'}
+                disabled={!configValidated || hasJoined || !networkOnline || status === 'connecting' || status === 'connected' || status === 'ready'}
               sx={{ minWidth: { xs: '170px', md: '200px' }, borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: { xs: '14px', md: '15px' }, fontWeight: 600, padding: { xs: '10px 22px', md: '10px 30px' }, textTransform: 'none' }}
             >
               Join Interview
@@ -3090,8 +3146,22 @@ export default function InterviewSessionRoom() {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowPermissionModal(false)}>Close</Button>
-          <Button onClick={() => setShowPermissionModal(false)} variant="contained">
+          <Button
+            onClick={() => {
+              setShowPermissionModal(false);
+              setPermissionError(null);
+              setHasJoined(false);
+              navigate('/interview-config', {
+                state: {
+                  type: interviewType,
+                  recoveryMessage: 'Enable camera and microphone access, then restart the interview.',
+                },
+              });
+            }}
+          >
+            Back to Setup
+          </Button>
+          <Button onClick={handleRetryPermissions} variant="contained">
             Try Again
           </Button>
         </DialogActions>

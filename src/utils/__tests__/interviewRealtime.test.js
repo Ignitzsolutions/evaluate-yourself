@@ -1,5 +1,6 @@
 import {
   buildAdaptiveTurnFallbackQuestion,
+  buildRealtimeResponseCreateEvent,
   buildRealtimeSessionUpdateEvent,
   canSendOpeningPrompt,
 } from "../interviewRealtime";
@@ -16,24 +17,20 @@ describe("buildRealtimeSessionUpdateEvent", () => {
       type: "session.update",
       session: {
         type: "realtime",
-        audio: {
-          input: {
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.55,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-              create_response: false,
-              interrupt_response: true,
-            },
-            transcription: {
-              model: "whisper",
-              language: "en",
-            },
-          },
-          output: {
-            voice: "alloy",
-          },
+        voice: "alloy",
+        input_audio_format: "pcm16",
+        output_modalities: ["audio"],
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.55,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+          create_response: false,
+          interrupt_response: true,
+        },
+        input_audio_transcription: {
+          model: "whisper",
+          language: "en",
         },
       },
     });
@@ -46,9 +43,26 @@ describe("buildRealtimeSessionUpdateEvent", () => {
       interviewServerControlEnabled: false,
     });
 
-    expect(event.session.audio.input.turn_detection.create_response).toBe(true);
-    expect(event.session.audio.output.voice).toBe("nova");
-    expect(event.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
+    expect(event.session.turn_detection.create_response).toBe(true);
+    expect(event.session.voice).toBe("nova");
+    expect(event.session.input_audio_transcription.model).toBe("gpt-4o-mini-transcribe");
+  });
+});
+
+describe("buildRealtimeResponseCreateEvent", () => {
+  it("requests an audio response on the active conversation", () => {
+    const event = buildRealtimeResponseCreateEvent({
+      instructions: "Ask the candidate one concise opening question.",
+    });
+
+    expect(event).toEqual({
+      type: "response.create",
+      response: {
+        conversation: "auto",
+        output_modalities: ["audio"],
+        instructions: "Ask the candidate one concise opening question.",
+      },
+    });
   });
 });
 

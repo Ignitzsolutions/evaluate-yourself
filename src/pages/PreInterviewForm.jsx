@@ -22,9 +22,16 @@ import { useAuth } from "@clerk/clerk-react";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
+import {
+  buildInterviewConfig,
+  isInterviewFreeAccessMode,
+  readSavedInterviewConfig,
+  saveInterviewConfig,
+} from "../utils/accessMode";
 
-const FREE_ACCESS_MODE = true;
+const FREE_ACCESS_MODE = isInterviewFreeAccessMode();
 const API_BASE = getApiBaseUrl();
+const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
@@ -47,6 +54,8 @@ export default function PreInterviewForm() {
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [skillError, setSkillError] = useState("");
   const [skillLoading, setSkillLoading] = useState(false);
+  const [skillRetryTick, setSkillRetryTick] = useState(0);
+  const requiresSkillCatalog = INTERVIEW_TYPES_REQUIRING_SKILLS.has(selectedType);
 
   useEffect(() => {
     const locationType = location.state?.type;
@@ -58,29 +67,33 @@ export default function PreInterviewForm() {
       setRecoveryMessage(locationRecoveryMessage);
     }
 
-    const config = sessionStorage.getItem("interviewConfig");
-    if (!config) {
+    const savedConfig = readSavedInterviewConfig(sessionStorage);
+    if (!savedConfig.valid) {
       return;
     }
-
-    try {
-      const parsed = JSON.parse(config);
-      setSelectedType(locationType || parsed.type || "technical");
-      setDuration(Number(parsed.duration) || durationOptions[0]);
-      setDifficulty(parsed.difficulty || "easy");
-      setRole(parsed.role || "");
-      setCompany(parsed.company || "");
-      setQuestionMix(parsed.questionMix || "balanced");
-      setInterviewStyle(parsed.interviewStyle || "neutral");
-      setTranscriptConsent(Boolean(parsed.transcriptConsent));
-      setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
-    } catch {
-      // ignore invalid saved config and use defaults
-    }
+    const parsed = savedConfig.config;
+    setSelectedType(locationType || parsed.type || "technical");
+    setDuration(Number(parsed.duration) || durationOptions[0]);
+    setDifficulty(parsed.difficulty || "easy");
+    setRole(parsed.role || "");
+    setCompany(parsed.company || "");
+    setQuestionMix(parsed.questionMix || "balanced");
+    setInterviewStyle(parsed.interviewStyle || "neutral");
+    setTranscriptConsent(Boolean(parsed.transcriptConsent));
+    setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
   }, [durationOptions, location.state?.recoveryMessage, location.state?.type]);
 
   useEffect(() => {
     let mounted = true;
+    if (!requiresSkillCatalog) {
+      setSkillCatalog(null);
+      setSelectedSkills([]);
+      setSkillError("");
+      setSkillLoading(false);
+      return () => {
+        mounted = false;
+      };
+    }
     const loadSkillCatalog = async () => {
       setSkillLoading(true);
       setSkillError("");
@@ -120,7 +133,7 @@ export default function PreInterviewForm() {
     return () => {
       mounted = false;
     };
-  }, [getToken, selectedType]);
+  }, [getToken, requiresSkillCatalog, selectedType, skillRetryTick]);
 
   const toggleSkill = (skillId) => {
     setSkillError("");
@@ -142,8 +155,8 @@ export default function PreInterviewForm() {
       setConsentError(true);
       return;
     }
-    if (!skillCatalog && (selectedType === "technical" || selectedType === "mixed")) {
-      setSkillError("Stream catalog is required before starting. Please reload and try again.");
+    if (!skillCatalog && requiresSkillCatalog) {
+      setSkillError("Stream catalog is required before starting. Retry loading the catalog and try again.");
       return;
     }
     if (skillCatalog?.selection_rules) {
@@ -156,10 +169,9 @@ export default function PreInterviewForm() {
     }
 
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const config = {
+    const config = buildInterviewConfig({
       type: selectedType,
       duration,
-      trialMode: false,
       difficulty,
       role: role.trim() || undefined,
       company: company.trim() || undefined,
@@ -167,9 +179,9 @@ export default function PreInterviewForm() {
       interviewStyle,
       transcriptConsent,
       selectedSkills,
-    };
+    });
 
-    sessionStorage.setItem("interviewConfig", JSON.stringify(config));
+    saveInterviewConfig(config, sessionStorage);
     navigate(`/interview/session/${sessionId}`);
   };
 
@@ -197,10 +209,12 @@ export default function PreInterviewForm() {
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} sx={{ mb: 4 }}>
             <Box>
               <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                Interview Configuration
+                {FREE_ACCESS_MODE ? "Sonia Demo Setup" : "Interview Configuration"}
               </Typography>
               <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-                Quick setup for a focused, production-ready session.
+                {FREE_ACCESS_MODE
+                  ? "Quick setup for a live Sonia beta demo. Confirm the basics, then join the interview immediately."
+                  : "Quick setup for a focused, production-ready session."}
               </Typography>
               <Chip label={`Type: ${formatInterviewTypeLabel(selectedType)}`} size="small" color="primary" sx={{ mt: 1.5 }} />
             </Box>
@@ -212,7 +226,7 @@ export default function PreInterviewForm() {
           <Box component="form" onSubmit={handleSubmit}>
             {FREE_ACCESS_MODE && (
               <Alert severity="info" sx={{ mb: 2.5 }}>
-                Free access is active. Trial codes are disabled and interviews are not capped.
+                Free access is active for the hosted beta demo. Start Sonia directly from this screen without redeeming a trial code.
               </Alert>
             )}
             {recoveryMessage && (
@@ -285,53 +299,65 @@ export default function PreInterviewForm() {
                 </FormControl>
               </Grid>
 
-              <Grid item xs={12}>
-                <Box
-                  sx={{
-                    p: 2,
-                    borderRadius: 2,
-                    border: "1px solid",
-                    borderColor: "divider",
-                    bgcolor: "background.paper",
-                  }}
-                >
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.8 }}>
-                    Stream Selection
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.4 }}>
-                    {skillCatalog?.mixed_rule ||
-                      `Select ${skillCatalog?.selection_rules?.min ?? 0}${skillCatalog?.selection_rules?.min === skillCatalog?.selection_rules?.max ? "" : `-${skillCatalog?.selection_rules?.max ?? 0}`} stream(s).`}
-                  </Typography>
-                  {skillLoading && (
-                    <Typography variant="body2" color="text.secondary">
-                      Loading interview streams...
+              {requiresSkillCatalog && (
+                <Grid item xs={12}>
+                  <Box
+                    sx={{
+                      p: 2,
+                      borderRadius: 2,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      bgcolor: "background.paper",
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.8 }}>
+                      Stream Selection
                     </Typography>
-                  )}
-                  {!skillLoading && Array.isArray(skillCatalog?.tracks) && (
-                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                      {skillCatalog.tracks.map((track) => {
-                        const selected = selectedSkills.includes(track.id);
-                        return (
-                          <Chip
-                            key={track.id}
-                            label={track.label}
-                            clickable
-                            color={selected ? "primary" : "default"}
-                            variant={selected ? "filled" : "outlined"}
-                            onClick={() => toggleSkill(track.id)}
-                            sx={{ borderRadius: "10px", mb: 0.5 }}
-                          />
-                        );
-                      })}
-                    </Stack>
-                  )}
-                  {skillError && (
-                    <Typography variant="caption" color="error">
-                      {skillError}
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.4 }}>
+                      {skillCatalog?.mixed_rule ||
+                        `Select ${skillCatalog?.selection_rules?.min ?? 0}${skillCatalog?.selection_rules?.min === skillCatalog?.selection_rules?.max ? "" : `-${skillCatalog?.selection_rules?.max ?? 0}`} stream(s).`}
                     </Typography>
-                  )}
-                </Box>
-              </Grid>
+                    {skillLoading && (
+                      <Typography variant="body2" color="text.secondary">
+                        Loading interview streams...
+                      </Typography>
+                    )}
+                    {!skillLoading && Array.isArray(skillCatalog?.tracks) && (
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                        {skillCatalog.tracks.map((track) => {
+                          const selected = selectedSkills.includes(track.id);
+                          return (
+                            <Chip
+                              key={track.id}
+                              label={track.label}
+                              clickable
+                              color={selected ? "primary" : "default"}
+                              variant={selected ? "filled" : "outlined"}
+                              onClick={() => toggleSkill(track.id)}
+                              sx={{ borderRadius: "10px", mb: 0.5 }}
+                            />
+                          );
+                        })}
+                      </Stack>
+                    )}
+                    {skillError && (
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
+                        <Typography variant="caption" color="error">
+                          {skillError}
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => setSkillRetryTick((prev) => prev + 1)}
+                          disabled={skillLoading}
+                        >
+                          Retry catalog
+                        </Button>
+                      </Stack>
+                    )}
+                  </Box>
+                </Grid>
+              )}
 
               <Grid item xs={12}>
                 <Box
@@ -371,8 +397,8 @@ export default function PreInterviewForm() {
               <Button variant="outlined" onClick={() => navigate("/interviews")}>
                 Cancel
               </Button>
-              <Button type="submit" variant="contained">
-                Start Interview
+              <Button type="submit" variant="contained" disabled={requiresSkillCatalog && skillLoading}>
+                {FREE_ACCESS_MODE ? "Start Sonia Demo" : "Start Interview"}
               </Button>
             </Stack>
           </Box>
