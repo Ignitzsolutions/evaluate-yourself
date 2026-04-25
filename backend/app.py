@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -684,14 +685,24 @@ async def startup_event():
     validate_environment(strict=True)
     clerk_auth_config = resolve_clerk_auth_config(os.environ)
     validate_clerk_auth_config(clerk_auth_config)
-    print(f"🔐 {build_clerk_auth_summary(clerk_auth_config)}")
-    # Log Clerk JWKS URL so /api/me auth issues are debuggable
+    logging.info("🔐 %s", build_clerk_auth_summary(clerk_auth_config))
     try:
         jwks_url = _clerk_jwks_url()
         has_pk = bool(os.getenv("CLERK_PUBLISHABLE_KEY", "").strip())
-        print(f"🔐 Clerk JWKS URL: {jwks_url} (CLERK_PUBLISHABLE_KEY set: {has_pk})")
+        logging.info("🔐 Clerk JWKS URL: %s (CLERK_PUBLISHABLE_KEY set: %s)", jwks_url, has_pk)
     except Exception as e:
-        print(f"🔐 Clerk JWKS log skip: {e}")
+        logging.warning("🔐 Clerk JWKS log skip: %s", e)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Graceful shutdown: close Redis connection pool."""
+    try:
+        from db.redis_client import close_redis_client
+        close_redis_client()
+        logging.info("Redis client closed on shutdown")
+    except Exception as e:
+        logging.warning("Error closing Redis on shutdown: %s", e)
 
 # Configure CORS origins from ALLOWED_ORIGINS (comma-separated) environment variable.
 # If ALLOWED_ORIGINS is not set, fall back to a safe local development default.
@@ -736,6 +747,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+try:
+    from middleware.security import SecurityHeadersMiddleware
+    app.add_middleware(SecurityHeadersMiddleware)
+    logging.info("✅ Security headers middleware registered")
+except Exception as _e:
+    logging.warning("Could not load security headers middleware: %s", _e)
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # ============================================================================
 # Register WebSocket Realtime Router (PHASE 3)
 # ============================================================================
@@ -759,6 +779,26 @@ except Exception as e:
     logging.warning(f"⚠️ Could not register admin router: {e}")
 
 #D
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc: Exception):
+    """Catch-all handler: log the full traceback server-side, return sanitized error to client."""
+    logging.exception(
+        "Unhandled exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+    )
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+            }
+        },
+    )
 
 @app.get("/", include_in_schema=False)
 def read_root():
@@ -939,12 +979,8 @@ def read_favicon():
 def health_check():
     return {"status": "healthy"}
 
-@app.get("/api/key")
-def get_api_key():
-    key = os.environ.get("AZURE_COGNITIVE_KEY") or os.environ.get("AZURE_API_KEY") or os.environ.get("COGNITIVE_SERVICE_KEY")
-    if not key:
-        raise HTTPException(status_code=500, detail="API key not configured. Set AZURE_COGNITIVE_KEY in environment.")
-    return {"key": key}
+# GET /api/key was removed — it exposed server-side API keys without authentication.
+# Use the authenticated /api/realtime/webrtc endpoint for interview sessions.
 
 azure_credential: Optional[DefaultAzureCredential] = None
 
@@ -2308,47 +2344,98 @@ async def webrtc_proxy(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error. Please try again.")
 
-@app.get("/api/token")
-async def realtime_token():
-    # Check if OpenAI API key is configured (for direct OpenAI API)
-    if OPENAI_REALTIME_API_KEY and OPENAI_REALTIME_API_KEY != "your-openai-api-key-here":
-        return {
-            "api_key": OPENAI_REALTIME_API_KEY,
-            "endpoint": OPENAI_REALTIME_ENDPOINT,
-            "model": OPENAI_REALTIME_MODEL,
-            "provider": "openai"
-        }
-    
-    # Fallback to Azure OpenAI (using DefaultAzureCredential)
+@app.post("/api/realtime/sessions")
+async def create_realtime_session(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Create an ephemeral OpenAI Realtime session (authenticated).
+
+    Returns a short-lived client_secret that the browser uses to connect
+    directly to OpenAI Realtime via WebRTC — the server API key is never exposed.
+    """
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI Realtime API is not configured on this server. Use Azure via /api/realtime/webrtc."
+        )
+
     try:
-        credential = get_azure_credential()
-        access_token = credential.get_token(AZURE_REALTIME_SCOPE)
+        resp = requests.post(
+            "https://api.openai.com/v1/realtime/sessions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_REALTIME_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENAI_REALTIME_MODEL,
+                "voice": REALTIME_VOICE,
+                "modalities": ["audio", "text"],
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.55,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500,
+                },
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        session_data = resp.json()
+        client_secret = session_data.get("client_secret", {})
         return {
-            "token": access_token.token,
-            "expires_on": access_token.expires_on,
-            "scope": AZURE_REALTIME_SCOPE,
-            "provider": "azure"
+            "clientSecret": client_secret.get("value"),
+            "expiresAt": client_secret.get("expires_at"),
+            "model": OPENAI_REALTIME_MODEL,
+            "provider": "openai",
         }
-    except CredentialUnavailableError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Azure credential unavailable: {exc}. Please ensure Azure CLI is installed and run 'az login'."
-        ) from exc
+    except requests.HTTPError as exc:
+        logging.error("OpenAI session creation failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to create realtime session with OpenAI.") from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unable to acquire realtime token: {exc}"
-        ) from exc
+        logging.error("Unexpected error creating OpenAI session: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to create realtime session.") from exc
+
+
+# Legacy GET /api/token removed — it returned the raw API key without authentication.
+# Use POST /api/realtime/sessions for OpenAI or POST /api/realtime/webrtc for Azure.
 
 @app.websocket("/api/realtime/ws")
-async def realtime_websocket_proxy(websocket: WebSocket):
+async def realtime_websocket_proxy(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None),
+):
+    """WebSocket proxy to OpenAI Realtime API (requires Clerk auth token)."""
     await websocket.accept()
-    
+
+    # Authenticate via query-param token (WebSocket upgrade can't carry Authorization header easily)
+    auth_token = token
+    if not auth_token:
+        auth_header = websocket.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            auth_token = auth_header[7:]
+
+    if not auth_token:
+        await websocket.close(code=4401, reason="Unauthorized: no token provided")
+        return
+
+    try:
+        _verify_clerk_token_jwks(auth_token)
+    except HTTPException:
+        await websocket.close(code=4401, reason="Unauthorized: invalid or expired token")
+        return
+
     # Check if OpenAI API key is configured (for direct OpenAI API)
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
         await websocket.close(
-            code=1008, 
-            reason="OpenAI API key not configured. This endpoint requires OPENAI_REALTIME_API_KEY environment variable. Use /api/realtime/webrtc for Azure OpenAI."
+            code=1008,
+            reason="OpenAI API key not configured. Use /api/realtime/webrtc for Azure OpenAI."
         )
         return
     
