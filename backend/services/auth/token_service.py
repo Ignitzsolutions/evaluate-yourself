@@ -2,9 +2,7 @@
 
 import os
 import logging
-import secrets
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
@@ -31,8 +29,8 @@ class TokenService:
         Raises RuntimeError in production if JWT_SECRET_KEY is missing or too short.
         """
         resolved = secret_key or os.getenv("JWT_SECRET_KEY")
-        env = os.getenv("ENV", os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development"))).strip().lower()
-        is_prod = env == "production"
+        from db.redis_client import is_production_env
+        is_prod = is_production_env()
 
         if not resolved:
             if is_prod:
@@ -64,10 +62,6 @@ class TokenService:
         self.token_lifetime_seconds = token_lifetime_hours * 3600
         self.algorithm = "HS256"
         self._redis = redis_client
-
-    # ------------------------------------------------------------------
-    # Token creation
-    # ------------------------------------------------------------------
 
     def create_session_token(
         self,
@@ -130,10 +124,6 @@ class TokenService:
             logger.error("Error creating refresh token: %s", e)
             raise
 
-    # ------------------------------------------------------------------
-    # Token validation
-    # ------------------------------------------------------------------
-
     def validate_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Validate and decode JWT token. Checks JTI revocation list in Redis."""
         try:
@@ -161,10 +151,6 @@ class TokenService:
         except jwt.InvalidTokenError as e:
             logger.warning("Invalid token: %s", e)
             return None
-
-    # ------------------------------------------------------------------
-    # Token revocation
-    # ------------------------------------------------------------------
 
     def revoke_token(self, token: str) -> bool:
         """Revoke a token by adding its JTI to the Redis blocklist."""

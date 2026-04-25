@@ -1,10 +1,14 @@
 """Interview scoring service — computes and persists scorecards from transcripts."""
 
+import json
 import logging
 import re
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+# Compiled once at module level — reused across all scoring calls
+_WORD_RE = re.compile(r'\b\w+\b')
 
 # Scoring weights per competency (must sum to 1.0)
 _COMPETENCY_WEIGHTS = {
@@ -28,26 +32,23 @@ _NEGATIVE_KEYWORDS: List[str] = ["um", "uh", "like", "you know", "basically", "s
 
 
 def _count_words(text: str) -> int:
-    return len(re.findall(r'\b\w+\b', text.lower())) if text else 0
+    return len(_WORD_RE.findall(text)) if text else 0
 
 
-def _keyword_score(text: str, keywords: List[str]) -> float:
-    """Returns fraction of keywords found in the text (0.0–1.0)."""
-    if not text or not keywords:
+def _keyword_score(lower_text: str, keywords: List[str]) -> float:
+    """Returns fraction of keywords found in pre-lowercased text (0.0–1.0)."""
+    if not lower_text or not keywords:
         return 0.0
-    lower = text.lower()
-    hits = sum(1 for kw in keywords if kw in lower)
+    hits = sum(1 for kw in keywords if kw in lower_text)
     return min(1.0, hits / max(1, len(keywords) * 0.4))  # 40% hit rate → full score
 
 
-def _fluency_penalty(text: str) -> float:
+def _fluency_penalty(lower_text: str, word_count: int) -> float:
     """Returns a penalty (0.0–0.2) based on filler word density."""
-    words = _count_words(text)
-    if words < 10:
+    if word_count < 10:
         return 0.0
-    filler_count = sum(text.lower().count(f) for f in _NEGATIVE_KEYWORDS)
-    filler_rate = filler_count / max(1, words)
-    return min(0.2, filler_rate * 2)
+    filler_count = sum(lower_text.count(f) for f in _NEGATIVE_KEYWORDS)
+    return min(0.2, (filler_count / max(1, word_count)) * 2)
 
 
 def _compute_scores_from_transcript(candidate_turns: List[str]) -> Dict[str, int]:
@@ -61,32 +62,24 @@ def _compute_scores_from_transcript(candidate_turns: List[str]) -> Dict[str, int
     - Fluency penalty: up to -10 points for filler word density
     """
     full_text = " ".join(candidate_turns)
-    word_count = _count_words(full_text)
+    # Lowercase once — reused by all keyword and fluency checks
+    lower_text = full_text.lower()
+    word_count = _count_words(lower_text)
 
     if word_count < 20:
-        # Insufficient response — score below average
         return {k: 45 for k in _COMPETENCY_WEIGHTS}
 
-    # Word count bonus (plateaus at ~300 words)
     word_bonus = min(15, int(word_count / 20))
+    penalty = int(_fluency_penalty(lower_text, word_count) * 50)
 
-    # Fluency penalty
-    penalty = int(_fluency_penalty(full_text) * 50)
-
-    scores: Dict[str, int] = {}
-    for competency, keywords in _POSITIVE_KEYWORDS.items():
-        kw_score = _keyword_score(full_text, keywords)
-        raw = 55 + word_bonus + int(kw_score * 25) - penalty
-        scores[competency] = max(30, min(99, raw))
-
-    return scores
+    return {
+        competency: max(30, min(99, 55 + word_bonus + int(_keyword_score(lower_text, keywords) * 25) - penalty))
+        for competency, keywords in _POSITIVE_KEYWORDS.items()
+    }
 
 
 def _weighted_overall(scores: Dict[str, int]) -> int:
-    total = sum(
-        scores.get(comp, 65) * weight
-        for comp, weight in _COMPETENCY_WEIGHTS.items()
-    )
+    total = sum(scores.get(comp, 65) * weight for comp, weight in _COMPETENCY_WEIGHTS.items())
     return max(30, min(99, int(total)))
 
 
@@ -104,20 +97,7 @@ class ScoringService:
         interview_type: str = "mixed",
         duration_minutes: int = 0,
     ) -> Dict[str, Any]:
-        """
-        Score an interview session and persist the result.
-
-        Args:
-            session_id: Interview session identifier.
-            candidate_id: Clerk user ID of the candidate.
-            transcript_turns: List of {"role": "user"|"assistant", "content": str} dicts.
-            interview_type: Type of interview (behavioral, technical, mixed).
-            duration_minutes: Duration of the interview in minutes.
-
-        Returns:
-            Dict with competency scores, overall score, and grade.
-        """
-        # Extract candidate speech turns only
+        """Score an interview session and persist the result."""
         candidate_turns: List[str] = []
         if transcript_turns:
             for turn in transcript_turns:
@@ -145,7 +125,7 @@ class ScoringService:
             "scores": scores,
             "overall_score": overall,
             "grade": grade,
-            "word_count": sum(_count_words(t) for t in candidate_turns),
+            "word_count": sum(_count_words(t.lower()) for t in candidate_turns),
             "turn_count": len(candidate_turns),
         }
 
@@ -161,28 +141,22 @@ class ScoringService:
             )
             return
 
+        session_id = scorecard["session_id"]
         try:
-            session_id = scorecard["session_id"]
-            # Try to update existing InterviewReport row if present
-            try:
-                from db import models
-                report = (
-                    self.db.query(models.InterviewReport)
-                    .filter(models.InterviewReport.session_id == session_id)
-                    .first()
-                )
-                if report:
-                    import json
-                    report.score_breakdown = json.dumps(scorecard.get("scores", {}))
-                    report.overall_score = scorecard.get("overall_score")
-                    self.db.commit()
-                    logger.info("Persisted scorecard for session %s (overall=%s)", session_id, scorecard.get("overall_score"))
-                    return
-            except Exception as inner_e:
-                logger.warning("Could not persist scorecard to InterviewReport: %s", inner_e)
-                self.db.rollback()
+            from db import models
+            report = (
+                self.db.query(models.InterviewReport)
+                .filter(models.InterviewReport.session_id == session_id)
+                .first()
+            )
+            if report:
+                report.score_breakdown = json.dumps(scorecard.get("scores", {}))
+                report.overall_score = scorecard.get("overall_score")
+                self.db.commit()
+                logger.info("Persisted scorecard for session %s (overall=%s)", session_id, scorecard.get("overall_score"))
         except Exception as e:
-            logger.error("Unexpected error persisting scorecard: %s", e)
+            logger.warning("Could not persist scorecard for session %s: %s", session_id, e)
+            self.db.rollback()
 
     def get_scorecard(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve scorecard from DB."""
@@ -190,7 +164,6 @@ class ScoringService:
             return None
         try:
             from db import models
-            import json
             report = (
                 self.db.query(models.InterviewReport)
                 .filter(models.InterviewReport.session_id == session_id)

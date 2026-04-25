@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, List, Any, Literal, Mapping
@@ -453,15 +453,8 @@ OPENAI_REALTIME_API_KEY = os.getenv("OPENAI_REALTIME_API_KEY")
 OPENAI_REALTIME_ENDPOINT = os.getenv("OPENAI_REALTIME_ENDPOINT", "wss://api.openai.com/v1/realtime")
 OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 
-# #region agent log
 import json as json_module
 
-try:
-    with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-        f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:72","message":"Environment variables loaded","data":{"AZURE_OPENAI_API_VERSION":AZURE_OPENAI_API_VERSION,"AZURE_OPENAI_DEPLOYMENT":AZURE_OPENAI_DEPLOYMENT,"AZURE_OPENAI_ENDPOINT":AZURE_OPENAI_ENDPOINT[:50] if AZURE_OPENAI_ENDPOINT else None,"has_api_key":bool(AZURE_OPENAI_API_KEY)},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
-except Exception:  # noqa: BLE001
-    pass  # intentional: non-critical path
-# #endregion
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
 def extract_azure_endpoint_info(endpoint: str) -> tuple:
@@ -789,7 +782,6 @@ async def global_exception_handler(request, exc: Exception):
         request.url.path,
         exc,
     )
-    from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=500,
         content={
@@ -1984,15 +1976,7 @@ async def webrtc_proxy(
             ),
         )
         
-        # #region agent log
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:427","message":"Request body constructed","data":{"has_instructions":bool(system_prompt),"model":AZURE_OPENAI_DEPLOYMENT,"session_type":"realtime","request_keys":list(client_secrets_request.keys())},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
-        except Exception:  # noqa: BLE001
-            pass  # intentional: non-critical path
-        # #endregion
-        
-        # Step 1: Create ephemeral token
+# Step 1: Create ephemeral token
         # Azure Realtime API requires openai.azure.com format (extract_azure_endpoint_info now converts cognitiveservices to this)
         # Build endpoint: {resource-region}.openai.azure.com (preserves full resource-region identifier, e.g., ignit-mk7zvb02-swedencentral.openai.azure.com)
         base_endpoint = f"{resource_name}.openai.azure.com"
@@ -2007,30 +1991,9 @@ async def webrtc_proxy(
         else:
             token_url = f"https://{base_endpoint}/openai/v1/realtime/client_secrets?api-version={api_version}"
         
-        # #region agent log
-        try:
-            log_entry = json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:492","message":"Token request preparation","data":{"base_endpoint":base_endpoint,"resource_name":resource_name,"api_version":api_version,"token_url":token_url,"deployment":AZURE_OPENAI_DEPLOYMENT,"original_endpoint":AZURE_OPENAI_ENDPOINT},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n"
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(log_entry)
-                f.flush()
-            print(f"DEBUG: Token request prep - base_endpoint={base_endpoint}, api_version={api_version}")
-        except Exception as log_err:
-            print(f"DEBUG LOG ERROR: {log_err}")
-        # #endregion
+print(f"🔗 Creating ephemeral token: {token_url}")
         
-        print(f"🔗 Creating ephemeral token: {token_url}")
-        
-        # #region agent log
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                request_body_safe = {k: (v[:100] + "..." if isinstance(v, str) and len(v) > 100 else v) for k, v in client_secrets_request.items()}
-                f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:502","message":"Token request sent","data":{"url":token_url,"headers":{"api-key":"***","content-type":"application/json"},"request_body":request_body_safe,"deployment":AZURE_OPENAI_DEPLOYMENT},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
-                f.flush()
-        except Exception as log_err:
-            print(f"DEBUG LOG ERROR: {log_err}")
-        # #endregion
-        
-        try:
+try:
             def _extract_activity_id(resp: Optional[requests.Response]) -> Optional[str]:
                 if not resp:
                     return None
@@ -2189,48 +2152,16 @@ async def webrtc_proxy(
                     detail=f"Realtime token creation failed after retries.{activity_text} {detail_text}{retry_hint}".strip(),
                 )
             
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    full_response_body = token_resp.text if token_resp.text else ""
-                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:515","message":"Token response received","data":{"status_code":token_resp.status_code,"response_body":full_response_body,"response_headers":dict(token_resp.headers)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
-                    f.flush()
-            except Exception as log_err:
-                print(f"DEBUG LOG ERROR: {log_err}")
-            # #endregion
-            
-            print(f"✅ Token created successfully")
+    print(f"✅ Token created successfully")
             token_resp.raise_for_status()
                 
         except requests.Timeout:
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:541","message":"Request timeout","data":{"token_url":token_url,"timeout":20.0},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
-            raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
+    raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
         except requests.HTTPError as e:
             error_body = e.response.text[:500] if e.response.text else ""
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:545","message":"HTTPError exception","data":{"status_code":e.response.status_code if e.response else None,"error_body":error_body,"token_url":token_url},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
-            raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}")
+    raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}")
         except Exception as ex:
-            # #region agent log
-            try:
-
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:550","message":"Unexpected exception in token creation","data":{"exception_type":type(ex).__name__,"exception_message":str(ex),"token_url":token_url,"base_endpoint":base_endpoint,"api_version":api_version,"traceback":traceback.format_exc()},"sessionId":"debug-session","runId":"run1","hypothesisId":"E"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(ex)[:200]}")
+    raise HTTPException(status_code=500, detail=f"Unexpected error: {str(ex)[:200]}")
         
         token_json = token_resp.json()
         print(f"🔑 Token response keys: {list(token_json.keys())}")  # Debug log
@@ -2323,24 +2254,9 @@ async def webrtc_proxy(
         }
         
     except HTTPException as http_ex:
-        # #region agent log
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:636","message":"HTTPException raised","data":{"status_code":http_ex.status_code,"detail":str(http_ex.detail)[:500]},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n")
-        except Exception:  # noqa: BLE001
-            pass  # intentional: non-critical path
-        # #endregion
-        raise
+raise
     except Exception as e:
-        # #region agent log
-        try:
-
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(json.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:642","message":"Unexpected exception in WebRTC proxy","data":{"exception_type":type(e).__name__,"exception_message":str(e),"traceback":traceback.format_exc()},"sessionId":"debug-session","runId":"run1","hypothesisId":"F"}) + "\n")
-        except Exception:  # noqa: BLE001
-            pass  # intentional: non-critical path
-        # #endregion
-        print(f"Unexpected error in WebRTC proxy: {e}")
+print(f"Unexpected error in WebRTC proxy: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error. Please try again.")
 
@@ -2365,27 +2281,25 @@ async def create_realtime_session(
         )
 
     try:
-        resp = requests.post(
-            "https://api.openai.com/v1/realtime/sessions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_REALTIME_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENAI_REALTIME_MODEL,
-                "voice": REALTIME_VOICE,
-                "modalities": ["audio", "text"],
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.55,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500,
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/realtime/sessions",
+                headers={"Authorization": f"Bearer {OPENAI_REALTIME_API_KEY}"},
+                json={
+                    "model": OPENAI_REALTIME_MODEL,
+                    "voice": REALTIME_VOICE,
+                    "modalities": ["audio", "text"],
+                    "input_audio_format": "pcm16",
+                    "output_audio_format": "pcm16",
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.55,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 500,
+                    },
                 },
-            },
-            timeout=10,
-        )
+            )
         resp.raise_for_status()
         session_data = resp.json()
         client_secret = session_data.get("client_secret", {})
@@ -2395,7 +2309,7 @@ async def create_realtime_session(
             "model": OPENAI_REALTIME_MODEL,
             "provider": "openai",
         }
-    except requests.HTTPError as exc:
+    except httpx.HTTPStatusError as exc:
         logging.error("OpenAI session creation failed: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to create realtime session with OpenAI.") from exc
     except Exception as exc:
@@ -2597,23 +2511,7 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         return
     
     try:
-        # #region agent log
-        import json as json_module
-
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:494","message":"Before websockets.connect","data":{"ws_url":ws_url,"headers_keys":list(headers.keys()) if headers else None,"headers_type":str(type(headers))},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
-        except Exception:  # noqa: BLE001
-            pass  # intentional: non-critical path
-        # #endregion
-        # #region agent log
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:502","message":"Calling websockets.connect","data":{"ws_url":ws_url[:150],"headers_keys":list(headers.keys()) if headers else None,"subprotocols":["realtime"],"using_additional_headers":True},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
-        except Exception:  # noqa: BLE001
-            pass  # intentional: non-critical path
-        # #endregion
-        print(f"🔗 Connecting to Azure OpenAI Realtime: {ws_url[:100]}...")
+        logging.info("Connecting to Azure OpenAI Realtime: %s", ws_url[:100])
         
         # Send status update: starting Azure connection
         await websocket.send_text(json.dumps({
@@ -2697,15 +2595,7 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         
         try:
             async with azure_ws:
-                # #region agent log
-                try:
-                    with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                        f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:503","message":"WebSocket connection successful","data":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
-                except Exception:  # noqa: BLE001
-                    pass  # intentional: non-critical path
-                # #endregion
-                
-                # Session initialization
+        # Session initialization
                 system_prompt = _build_interviewer_system_prompt(
                     session_state.interview_type,
                     session_state.difficulty,
@@ -3002,42 +2892,11 @@ Interview behavior:
                 except Exception as e:
                     await websocket.close(code=1011, reason=f"Connection error: {str(e)}")
         except websockets.exceptions.InvalidURI as e:
-            # #region agent log
-            import json as json_module
-
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:695","message":"InvalidURI exception","data":{"error":str(e),"error_type":"InvalidURI"},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
-            await websocket.close(code=1008, reason=f"Invalid endpoint: {str(e)}")
+    await websocket.close(code=1008, reason=f"Invalid endpoint: {str(e)}")
         except websockets.exceptions.InvalidHandshake as e:
-            # #region agent log
-            try:
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:697","message":"InvalidHandshake exception","data":{"error":str(e),"error_type":"InvalidHandshake"},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
-            except Exception:  # noqa: BLE001
-                pass  # intentional: non-critical path
-            # #endregion
-            await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+    await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
         except Exception as e:
-            # #region agent log
-            import json as json_module
-
-            try:
-                error_trace = traceback.format_exc()
-                error_str = str(e)
-                # Log full error details
-                with open(os.path.join(os.path.dirname(__file__), 'debug.log'), 'a') as f:
-                    f.write(json_module.dumps({"id":f"log_{int(datetime.now().timestamp()*1000)}","timestamp":int(datetime.now().timestamp()*1000),"location":"app.py:699","message":"General exception in WebSocket connection","data":{"error":error_str,"error_type":type(e).__name__,"traceback":error_trace,"ws_url":ws_url[:100] if 'ws_url' in locals() else None,"headers":str(headers) if 'headers' in locals() else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
-                # Also print to console for immediate visibility
-                print(f"ERROR in interview_realtime_websocket: {error_str}")
-                print(f"Traceback: {error_trace}")
-            except Exception as log_err:
-                print(f"Failed to log error: {log_err}")
-            # #endregion
-            await websocket.close(code=1011, reason=f"Connection failed: {str(e)}")
+    await websocket.close(code=1011, reason=f"Connection failed: {str(e)}")
     finally:
         # Clean up session if interview ended
         state = load_interview_state(session_id)
