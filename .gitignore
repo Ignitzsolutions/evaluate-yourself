@@ -60,3 +60,14 @@ frontend.run.log
 azure-master-doc.pdf
 .python-version
 .env.development
+
+# App Service deployment logs — should never be committed
+appservice-logs*/
+
+# Debug logs generated at runtime
+backend/debug.log
+debug.log
+
+# Backup files with sensitive data
+*.backup
+.env.backup
