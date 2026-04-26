@@ -1990,10 +1990,8 @@ async def webrtc_proxy(
             token_url = f"https://{base_endpoint}/openai/v1/realtime/client_secrets"
         else:
             token_url = f"https://{base_endpoint}/openai/v1/realtime/client_secrets?api-version={api_version}"
-        
-print(f"🔗 Creating ephemeral token: {token_url}")
-        
-try:
+
+        try:
             def _extract_activity_id(resp: Optional[requests.Response]) -> Optional[str]:
                 if not resp:
                     return None
@@ -2151,34 +2149,26 @@ try:
                     status_code=502,
                     detail=f"Realtime token creation failed after retries.{activity_text} {detail_text}{retry_hint}".strip(),
                 )
-            
-    print(f"✅ Token created successfully")
-            token_resp.raise_for_status()
-                
+
         except requests.Timeout:
-    raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
+            raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
         except requests.HTTPError as e:
             error_body = e.response.text[:500] if e.response.text else ""
-    raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}")
+            raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}")
         except Exception as ex:
-    raise HTTPException(status_code=500, detail=f"Unexpected error: {str(ex)[:200]}")
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(ex)[:200]}")
         
         token_json = token_resp.json()
-        print(f"🔑 Token response keys: {list(token_json.keys())}")  # Debug log
-        print(f"🔑 Token response (sanitized): {json.dumps({k: (v[:50] + '...' if isinstance(v, str) and len(v) > 50 else v) for k, v in token_json.items()}, indent=2)}")  # Debug log
-        
+
         # Azure Realtime API client_secrets endpoint returns "value" field
         # Response format: { "value": "ek_...", "expires_at": ..., "session": {...} }
         ephemeral_token = token_json.get("value")
         
         if not ephemeral_token:
-            print(f"❌ Token response structure: {json.dumps(token_json, indent=2)[:500]}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Ephemeral token missing in response. Response keys: {list(token_json.keys())}"
             )
-        
-        print(f"✅ Ephemeral token extracted (length: {len(ephemeral_token)})")  # Debug log
         
         # Step 2: SDP negotiation
         # Azure Realtime API: Use same API version as token creation (from env var)
@@ -2189,10 +2179,6 @@ try:
             calls_url = f"https://{base_endpoint}/openai/v1/realtime/calls"
         else:
             calls_url = f"https://{base_endpoint}/openai/v1/realtime/calls?api-version={calls_api_version}"
-        
-        print(f"🔗 Calls URL: {calls_url}")  # Debug log
-        print(f"📤 SDP offer length: {len(request.sdpOffer)} chars")
-        print(f"📤 SDP offer preview: {request.sdpOffer[:200]}...")
         
         try:
             sdp_resp = None
@@ -2212,7 +2198,6 @@ try:
                     if attempt == 2:
                         raise
                     time.sleep(0.5 * (attempt + 1))
-            print(f"📥 SDP response status: {sdp_resp.status_code}")  # Debug log
             sdp_resp.raise_for_status()
         except requests.Timeout:
             raise HTTPException(status_code=504, detail="SDP negotiation timeout. Please try again.")
@@ -2223,8 +2208,6 @@ try:
             elif e.response.status_code == 429:
                 error_detail = "Rate limit exceeded. Please wait."
             # Log response code and first 200 chars of error body
-            error_body = e.response.text[:200] if e.response.text else ""
-            print(f"SDP negotiation failed: {e.response.status_code}, error: {error_body}")
             raise HTTPException(status_code=e.response.status_code, detail=error_detail)
         
         sdp_answer = sdp_resp.text
@@ -2254,9 +2237,8 @@ try:
         }
         
     except HTTPException as http_ex:
-raise
+        raise
     except Exception as e:
-print(f"Unexpected error in WebRTC proxy: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error. Please try again.")
 
@@ -2892,11 +2874,11 @@ Interview behavior:
                 except Exception as e:
                     await websocket.close(code=1011, reason=f"Connection error: {str(e)}")
         except websockets.exceptions.InvalidURI as e:
-    await websocket.close(code=1008, reason=f"Invalid endpoint: {str(e)}")
+            await websocket.close(code=1008, reason=f"Invalid endpoint: {str(e)}")
         except websockets.exceptions.InvalidHandshake as e:
-    await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+            await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
         except Exception as e:
-    await websocket.close(code=1011, reason=f"Connection failed: {str(e)}")
+            await websocket.close(code=1011, reason=f"Connection failed: {str(e)}")
     finally:
         # Clean up session if interview ended
         state = load_interview_state(session_id)
