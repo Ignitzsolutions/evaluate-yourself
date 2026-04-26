@@ -1,4 +1,5 @@
-import { RedirectToSignIn, useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../context/AuthContext";
+import { Navigate } from "react-router-dom";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 
@@ -18,5 +19,5 @@ export default function PrivateRoute({ children, signInUrl = "/login" }) {
     );
   }
   if (isSignedIn) return children;
-  return <RedirectToSignIn signInUrl={signInUrl} />;
+  return <Navigate to={signInUrl || "/login"} replace />;
 }

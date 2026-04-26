@@ -105,15 +105,6 @@ from services.interview.evaluation_contract import (
     apply_evaluation_contract,
 )
 from config.eval_flags import EVAL_FLAGS
-from services.clerk_profile import (
-    fetch_clerk_contact_fields,
-    normalize_phone_e164 as normalize_clerk_phone_e164,
-)
-from services.clerk_auth_config import (
-    build_clerk_auth_summary,
-    resolve_clerk_auth_config,
-    validate_clerk_auth_config,
-)
 from services.gaze_monitor import (
     GazeSessionTracker,
     aggregate_gaze_events,
@@ -144,223 +135,7 @@ from db.users import (
     candidate_profile_completeness_for_user,
 )
 
-# Clerk token verification imports
-from jose import jwt as jose_jwt
-
 import logging
-
-# Prefer explicit URL; else derive from CLERK_PUBLISHABLE_KEY (pk_*_<base64> decodes to <instance>.clerk.accounts.dev)
-def _clerk_jwks_url():
-    url = os.getenv("CLERK_JWKS_URL", "").strip()
-    if url:
-        return url
-    pk = os.getenv("CLERK_PUBLISHABLE_KEY", "").strip()
-    if pk and "_" in pk:
-        parts = pk.split("_", 2)
-        if len(parts) >= 3 and parts[2]:
-            try:
-                import base64
-                raw = base64.urlsafe_b64decode(parts[2] + "==")
-                domain = raw.decode("utf-8").strip().rstrip("$")
-                if domain:
-                    return f"https://{domain}/.well-known/jwks.json"
-            except Exception:
-                pass
-    return "https://api.clerk.dev/v1/jwks"
-
-_jwks_cache = None
-
-#region Clerk Token Verification
-def get_clerk_jwks():
-    global _jwks_cache
-    if _jwks_cache is not None:
-        return _jwks_cache
-    urls = [_clerk_jwks_url()]
-    secret = os.getenv("CLERK_SECRET_KEY", "").strip()
-    if secret:
-        urls.append("https://api.clerk.com/v1/jwks")
-    for url in urls:
-        try:
-            headers = {"Authorization": f"Bearer {secret}"} if secret and "api.clerk.com" in url else {}
-            resp = requests.get(url, timeout=5, headers=headers or None)
-            resp.raise_for_status()
-            _jwks_cache = resp.json()
-            if _jwks_cache and _jwks_cache.get("keys"):
-                return _jwks_cache
-        except requests.exceptions.RequestException as e:
-            logging.warning("Clerk JWKS fetch failed for %s: %s", url, e)
-            continue
-    logging.exception("❌ Failed to fetch Clerk JWKS from any URL")
-    raise HTTPException(status_code=503, detail="Unable to fetch Clerk public keys")
-
-#endregion
-def _verify_clerk_token_jwks(token: str) -> dict:
-    """Verify Clerk JWT using Frontend API JWKS (correct URL from CLERK_PUBLISHABLE_KEY)."""
-    try:
-        jwks = get_clerk_jwks()
-
-        try:
-            unverified_header = jose_jwt.get_unverified_header(token)
-        except Exception:
-            logging.exception("❌ Invalid JWT header")
-            raise HTTPException(status_code=401, detail="Invalid JWT header")
-
-        kid = unverified_header.get("kid")
-        if not kid:
-            raise HTTPException(status_code=401, detail="Missing kid in token header")
-
-        key = None
-        for jwk in jwks.get("keys", []):
-            if jwk.get("kid") == kid:
-                key = jwk
-                break
-
-        if not key:
-            logging.error("❌ No matching JWK found for kid=%s (JWKS URL: %s)", kid, _clerk_jwks_url())
-            raise HTTPException(status_code=401, detail="Invalid token signing key")
-
-        try:
-            payload = jose_jwt.decode(
-                token,
-                key,
-                algorithms=["RS256"],
-                options={
-                    "verify_aud": False,
-                    "verify_exp": True,
-                },
-            )
-        except jose_jwt.ExpiredSignatureError:
-            logging.warning("❌ Clerk token expired")
-            raise HTTPException(status_code=401, detail="Token expired")
-        except jose_jwt.JWTError as e:
-            logging.exception("❌ Clerk token decode failed: %s", e)
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        return payload
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.exception("❌ Unexpected error verifying Clerk token: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal error verifying authentication token"
-        )
-# Helper to extract user ID from Authorization header
-def get_user_id_from_auth(authorization: Optional[str]) -> Optional[str]:
-    """Extract Clerk user id from Authorization header.
-
-    - Returns the Clerk user id string, or None if verification fails.
-    - For local development, if the environment variable `DEV_USER_ID` is set,
-      it will be returned when no valid token is presented (convenience only).
-    """
-    # Dev-time convenience: allow overriding user for local testing
-    dev_user = os.getenv("DEV_USER_ID")
-
-    if not authorization:
-        if dev_user:
-            logging.info("DEV_USER_ID active - returning dev user id for unauthenticated request")
-            return dev_user
-        return None
-
-    try:
-        token = authorization.replace("Bearer ", "")
-        decoded = verify_clerk_token(token)
-
-        # Defensive: verify_clerk_token may return None on verification failure
-        if not decoded:
-            logging.warning("Clerk token verification failed: token could not be decoded/validated")
-            return None
-
-        return decoded.get("sub") or decoded.get("user_id")
-
-    except HTTPException:
-        return None
-    except Exception as e:
-        # Provide a more actionable log message for common causes
-        logging.exception("Unexpected auth error: %s", e)
-        if "iat" in str(e) or "not yet valid" in str(e):
-            logging.warning("Token 'iat' validation failed - check server clock/ntp sync on the backend host")
-        if "public key" in str(e) or "JWKS" in str(e):
-            logging.warning("Failed to fetch/parse Clerk JWKS - verify CLERK_JWKS_URL and CLERK_PUBLISHABLE_KEY env variables")
-        # As a safe default, return None (unauthenticated)
-        return None
-
-
-def _normalize_phone_e164(raw_phone: Optional[str]) -> Optional[str]:
-    return normalize_clerk_phone_e164(raw_phone)
-
-
-def _extract_phone_from_claims(decoded: Dict[str, Any]) -> Optional[str]:
-    candidates = [
-        decoded.get("phone_number"),
-        decoded.get("phone"),
-        decoded.get("primary_phone_number"),
-        decoded.get("phoneNumber"),
-    ]
-    for value in candidates:
-        normalized = _normalize_phone_e164(value)
-        if normalized:
-            return normalized
-    return None
-
-
-def _extract_email_from_claims(decoded: Dict[str, Any]) -> Optional[str]:
-    candidates = [
-        decoded.get("email"),
-        decoded.get("email_address"),
-        decoded.get("primary_email_address"),
-        decoded.get("primaryEmailAddress"),
-    ]
-    for value in candidates:
-        if value and isinstance(value, str):
-            return value.strip().lower()
-    return None
-
-
-def _extract_full_name_from_claims(decoded: Dict[str, Any]) -> Optional[str]:
-    direct = decoded.get("name") or decoded.get("full_name")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    first = (decoded.get("first_name") or decoded.get("given_name") or "").strip()
-    last = (decoded.get("last_name") or decoded.get("family_name") or "").strip()
-    joined = f"{first} {last}".strip()
-    return joined or None
-
-
-def _extract_external_id_from_claims(decoded: Dict[str, Any]) -> Optional[str]:
-    candidates = [
-        decoded.get("external_id"),
-        decoded.get("externalId"),
-        decoded.get("app_user_id"),
-        decoded.get("user_external_id"),
-    ]
-    for value in candidates:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    unsafe_meta = decoded.get("unsafe_metadata")
-    if isinstance(unsafe_meta, dict):
-        for key in ("external_id", "externalId", "app_user_id", "user_id"):
-            value = unsafe_meta.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
-
-
-def _extract_email_verified_from_claims(decoded: Dict[str, Any]) -> bool:
-    for key in ("email_verified", "emailVerified", "verified_email"):
-        value = decoded.get(key)
-        if isinstance(value, bool):
-            return value
-    return False
-
-
-def _extract_phone_verified_from_claims(decoded: Dict[str, Any]) -> bool:
-    for key in ("phone_number_verified", "phone_verified", "phoneVerified"):
-        value = decoded.get(key)
-        if isinstance(value, bool):
-            return value
-    return False
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -596,7 +371,6 @@ def collect_startup_diagnostics(
     database_url = str(env_map.get("DATABASE_URL", "") or "").strip()
     redis_url = str(env_map.get("REDIS_URL", "") or "").strip()
     allowed_origins = str(env_map.get("ALLOWED_ORIGINS", "") or "").strip()
-    clerk_config = resolve_clerk_auth_config(dict(env_map))
     frontend_index = frontend_dir / "index.html"
     frontend_static = frontend_dir / "static"
     frontend_assets = frontend_dir / "assets"
@@ -623,15 +397,7 @@ def collect_startup_diagnostics(
         "redis_url_present": bool(redis_url),
         "allowed_origins_present": bool(allowed_origins),
         "allowed_origins_wildcard": allowed_origins == "*",
-        "clerk": {
-            "publishable_key_present": clerk_config.publishable_key_mode != "missing",
-            "secret_key_present": clerk_config.secret_key_mode != "missing",
-            "publishable_key_mode": clerk_config.publishable_key_mode,
-            "secret_key_mode": clerk_config.secret_key_mode,
-            "jwks_url_present": bool(clerk_config.jwks_url),
-            "uses_test_instance": clerk_config.uses_test_instance,
-            "summary": build_clerk_auth_summary(clerk_config),
-        },
+        "auth": "self-hosted (JWT + bcrypt)",
         "frontend": {
             "build_dir": str(frontend_dir),
             "build_dir_present": frontend_dir.exists(),
@@ -676,15 +442,7 @@ def validate_production_requirements(
 async def startup_event():
     validate_production_requirements()
     validate_environment(strict=True)
-    clerk_auth_config = resolve_clerk_auth_config(os.environ)
-    validate_clerk_auth_config(clerk_auth_config)
-    logging.info("🔐 %s", build_clerk_auth_summary(clerk_auth_config))
-    try:
-        jwks_url = _clerk_jwks_url()
-        has_pk = bool(os.getenv("CLERK_PUBLISHABLE_KEY", "").strip())
-        logging.info("🔐 Clerk JWKS URL: %s (CLERK_PUBLISHABLE_KEY set: %s)", jwks_url, has_pk)
-    except Exception as e:
-        logging.warning("🔐 Clerk JWKS log skip: %s", e)
+    logging.info("🔐 Auth: self-hosted JWT (HS256) + bcrypt")
 
 
 @app.on_event("shutdown")
@@ -760,11 +518,24 @@ except Exception as e:
     logging.warning(f"⚠️ Could not register realtime router: {e}")
 
 try:
+    from api.auth import router as auth_router, configure_auth_dependencies
+    from services.auth.password_service import PasswordService
+    from services.auth.token_service import TokenService
+    from db.redis_client import get_redis_client
+
+    _auth_token_service = TokenService(redis_client=get_redis_client())
+    configure_auth_dependencies(_auth_token_service, PasswordService())
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    logging.info("✅ Auth router registered at /api/auth")
+except Exception as e:
+    logging.warning(f"⚠️ Could not register auth router: {e}")
+
+try:
     from api.admin import router as admin_router, configure_admin_dependencies
 
     configure_admin_dependencies(
         get_current_user_func=lambda authorization, db: get_current_user(authorization=authorization, db=db),
-        is_admin_func=lambda clerk_user_id: _is_admin_user(clerk_user_id),
+        is_admin_func=lambda user_or_id: _is_admin_user(user_or_id),
     )
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
     logging.info("✅ Admin router registered at /api/admin")
@@ -1168,12 +939,17 @@ def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
             raise HTTPException(status_code=400, detail="domainExpertise is required for professional profile.")
 
 
-def _is_admin_user(clerk_user_id: str) -> bool:
-    if not clerk_user_id:
-        return False
+def _is_admin_user(user_or_id) -> bool:
+    """Check admin status. Accepts a User object or a clerk_user_id string for backward compat."""
     if ADMIN_ALLOW_ALL_LOCAL:
         return True
-    return clerk_user_id in ADMIN_CLERK_USER_IDS
+    # If given a User ORM object, check the DB column
+    if hasattr(user_or_id, "is_admin"):
+        return bool(user_or_id.is_admin)
+    # Legacy: string clerk_user_id check against env allowlist
+    if not user_or_id:
+        return False
+    return user_or_id in ADMIN_CLERK_USER_IDS
 
 
 def _get_active_user_entitlement(db: Session, clerk_user_id: str) -> Optional[models.UserEntitlement]:
@@ -3319,15 +3095,13 @@ def get_or_create_user_db(
         print("❌ Error in get_or_create_user_db:", e)
         raise HTTPException(status_code=500, detail="User database error")
 
-# Dependency to get current user
 def get_current_user(
     authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db)
 ):
-    """
-    Verifies Clerk token and ensures user exists in local DB.
-    Returns User ORM object or raises HTTPException 401.
-    """
+    """Validate self-hosted JWT and return the User ORM object."""
+    from api.auth import _token_service as auth_ts
+
     if not authorization or not authorization.strip():
         if DEV_AUTH_BYPASS:
             dev_user_id = (os.getenv("DEV_USER_ID", "dev-local-admin") or "").strip() or "dev-local-admin"
@@ -3339,8 +3113,6 @@ def get_current_user(
                 email=dev_user_email,
                 full_name=dev_user_name,
             )
-            setattr(user, "auth_provider_user_id", dev_user_id)
-            setattr(user, "auth_external_id", None)
             if user.is_deleted:
                 raise HTTPException(status_code=403, detail="Account deleted")
             if not user.is_active:
@@ -3352,147 +3124,27 @@ def get_current_user(
     if not token:
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
-    try:
-        decoded = _verify_clerk_token_jwks(token)
-        clerk_user_id = decoded.get("sub") or decoded.get("user_id")
-        external_id = _extract_external_id_from_claims(decoded)
-        email = _extract_email_from_claims(decoded)
-        full_name = _extract_full_name_from_claims(decoded)
-        phone_e164 = _extract_phone_from_claims(decoded)
-        email_verified = _extract_email_verified_from_claims(decoded)
-        phone_verified = _extract_phone_verified_from_claims(decoded)
+    if not auth_ts:
+        raise HTTPException(status_code=500, detail="Auth service not initialized")
 
-        if not clerk_user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: missing sub")
-
-        user = resolve_user_by_clerk_identity(
-            db=db,
-            clerk_user_id=clerk_user_id,
-            external_id=external_id,
-        )
-        if user:
-            # Preserve legacy clerk_user_id in current users table for backward-compatible joins.
-            # Existing business tables still use legacy clerk_user_id until cutover migration completes.
-            user = get_or_create_user(
-                db=db,
-                clerk_user_id=user.clerk_user_id,
-                email=email or user.email,
-                full_name=full_name or user.full_name,
-                phone_e164=phone_e164 or user.phone_e164,
-            )
-        else:
-            user = get_or_create_user(
-                db=db,
-                clerk_user_id=clerk_user_id,
-                email=email,
-                full_name=full_name,
-                phone_e164=phone_e164,
-            )
-
-        # Clerk session claims may not always include email/full_name. Backfill once from Clerk Users API.
-        if not user.email or not user.full_name:
-            clerk_profile = fetch_clerk_contact_fields(clerk_user_id)
-            enriched_email = user.email or email or clerk_profile.get("email")
-            enriched_full_name = user.full_name or full_name or clerk_profile.get("full_name")
-            enriched_phone = user.phone_e164 or phone_e164 or clerk_profile.get("phone_e164")
-            user = get_or_create_user(
-                db=db,
-                clerk_user_id=clerk_user_id,
-                email=enriched_email,
-                full_name=enriched_full_name,
-                phone_e164=enriched_phone,
-            )
-
-        sync_user_identity_graph(
-            db=db,
-            user=user,
-            clerk_user_id=clerk_user_id,
-            external_id=external_id,
-            legacy_provider_user_id=user.clerk_user_id if user.clerk_user_id != clerk_user_id else None,
-            email=user.email or email,
-            email_verified=email_verified,
-            phone_e164=user.phone_e164 or phone_e164,
-            phone_verified=phone_verified,
-            raw_claims=decoded,
-        )
-        db.commit()
-        db.refresh(user)
-        # Attach runtime auth identity for admin checks during cutover (new Clerk ID may differ from legacy column).
-        setattr(user, "auth_provider_user_id", clerk_user_id)
-        setattr(user, "auth_external_id", external_id)
-
-        if user.is_deleted:
-            raise HTTPException(status_code=403, detail="Account deleted")
-        if not user.is_active:
-            raise HTTPException(status_code=403, detail="Account deactivated")
-        return user
-
-    except HTTPException:
-        raise
-    except OperationalError as e:
-        logging.exception("get_current_user database operational failure: %s", e)
-        raise HTTPException(status_code=500, detail="Database schema or connectivity error")
-    except Exception as e:
-        logging.exception("get_current_user failed: %s", e)
+    payload = auth_ts.validate_token(token)
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
-# def get_current_user(
-#     authorization: Optional[str] = Header(None),
-#     db: Session = Depends(get_db)
-# ):
-    
-#     if not authorization or not authorization.startswith("Bearer "):
-#         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
-#     token = authorization.replace("Bearer ", "").strip()
-#     decoded = verify_clerk_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: missing sub")
 
-#     clerk_user_id = decoded.get("sub")
-#     email = decoded.get("email")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
 
-#     if not clerk_user_id:
-#         raise HTTPException(status_code=401, detail="Invalid Clerk token")
+    if user.is_deleted:
+        raise HTTPException(status_code=403, detail="Account deleted")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account deactivated")
 
-#     user = get_or_create_user_db(db, clerk_user_id, email)
-
-#     print(f"✅ Auth user DB: {user.id} {user.email}")
-
-#     return user
-
-# # Dependency to get current user
-# def get_current_user(
-#     authorization: str = Header(None),
-#     db: Session = Depends(get_db),
-# ):
-#     try:
-#         if not authorization:
-#             raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-#         if not authorization.startswith("Bearer "):
-#             raise HTTPException(status_code=401, detail="Invalid Authorization format")
-
-#         token = authorization.replace("Bearer ", "").strip()
-#         if not token:
-#             raise HTTPException(status_code=401, detail="Empty token")
-
-#         decoded = verify_clerk_token(token)
-#         user = get_or_create_user(db, decoded)
-
-#         # TEMP DEBUG (remove later)
-#         print("✅ Clerk sub:", decoded.get("sub"))
-#         print("✅ SQLite user:", user.id, user.email)
-
-#         return user
-
-#     except HTTPException:
-#         raise
-
-#     except Exception as e:
-#         logging.exception("❌ Unexpected error in get_current_user")
-#         raise HTTPException(
-#             status_code=500,
-#             detail="Authentication processing failed"
-#         )
+    return user
 
 personality_reports: Dict[str, PersonalityReport] = {}
 interview_reports: Dict[str, InterviewReport] = {}
@@ -3734,19 +3386,13 @@ def get_me(current_user: User = Depends(get_current_user)):
         "id": current_user.id,
         "user_id": current_user.id,
         "clerk_user_id": current_user.clerk_user_id,
-        "auth_provider": "clerk",
-        "auth_provider_user_id": getattr(current_user, "auth_provider_user_id", current_user.clerk_user_id),
-        "auth_external_id": getattr(current_user, "auth_external_id", None),
         "email": current_user.email,
         "phone_e164": current_user.phone_e164,
         "full_name": current_user.full_name,
         "is_active": current_user.is_active,
         "is_deleted": current_user.is_deleted,
-        "is_admin": bool(
-            _is_admin_user(current_user.clerk_user_id)
-            or _is_admin_user(str(getattr(current_user, "auth_provider_user_id", "") or ""))
-        ),
-        "email_verified": completeness.get("email_verified", False),
+        "is_admin": _is_admin_user(current_user),
+        "email_verified": bool(getattr(current_user, "email_verified", False)),
         "phone_verified": completeness.get("phone_verified", False),
         "profile_completed": completeness.get("profile_completed", False),
         "profile_completion_score": completeness.get("profile_completion_score", 0),
@@ -3768,11 +3414,8 @@ def get_me_users(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "full_name": current_user.full_name,
         "phone_e164": current_user.phone_e164,
-        "is_admin": bool(
-            _is_admin_user(current_user.clerk_user_id)
-            or _is_admin_user(str(getattr(current_user, "auth_provider_user_id", "") or ""))
-        ),
-        "email_verified": completeness.get("email_verified", False),
+        "is_admin": _is_admin_user(current_user),
+        "email_verified": bool(getattr(current_user, "email_verified", False)),
         "phone_verified": completeness.get("phone_verified", False),
         "profile_completed": completeness.get("profile_completed", False),
         "profile_completion_score": completeness.get("profile_completion_score", 0),
