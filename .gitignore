@@ -6,6 +6,7 @@ node_modules
 # Environment variables - NEVER commit these files
 .env
 .env.local
+.env.development
 .env.development.local
 .env.test.local
 .env.production.local
@@ -21,6 +22,8 @@ node_modules
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+backend/debug.log
+debug.log
 
 # Editor specific
 .idea/
@@ -44,6 +47,7 @@ __pycache__/
 venv/
 backend/venv/
 *.db
+
 # Local logs and deployment artifacts
 appservice-logs*/
 appservice-logs*.zip
@@ -53,21 +57,12 @@ deploy.zip
 backend.log
 backend.restart.log
 backend.run.log
-backend/debug.log
 frontend.log
 frontend.restart.log
 frontend.run.log
 azure-master-doc.pdf
 .python-version
-.env.development
 
-# App Service deployment logs — should never be committed
-appservice-logs*/
-
-# Debug logs generated at runtime
-backend/debug.log
-debug.log
-
-# Backup files with sensitive data
+# Backup files — may contain sensitive data
 *.backup
 .env.backup
