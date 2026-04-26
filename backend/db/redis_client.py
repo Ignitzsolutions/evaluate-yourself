@@ -64,7 +64,8 @@ def get_redis_client() -> redis.Redis:
                 socket_connect_timeout=5,
                 socket_keepalive=True,
                 health_check_interval=30,
-                retry_on_timeout=True
+                retry_on_timeout=True,
+                max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "20")),
             )
     
     return _redis_client
