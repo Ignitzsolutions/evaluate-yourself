@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../../context/AuthContext";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import {
   Alert,

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-// import { useAuth } from "../context/AuthContext";
-import { useUser, useClerk } from "@clerk/clerk-react";
+import { useUser, useClerk } from "../context/AuthContext";
 import { Box, Container, Typography, Button, Card, Grid } from "@mui/material";
 import { PlayArrow, Assessment, Settings, CheckRounded } from "@mui/icons-material";
 import { Divider, Stack, Paper } from "@mui/material";

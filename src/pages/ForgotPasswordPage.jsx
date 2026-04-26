@@ -1,33 +1,25 @@
-import { SignIn } from "@clerk/clerk-react";
+import React from "react";
+import { Link } from "react-router-dom";
+import { Typography, Button, Box } from "@mui/material";
 import AuthShell from "../components/AuthShell";
-import { defaultClerkAppearance } from "../utils/clerkAppearance";
 import "../ui.css";
 
 export default function ForgotPasswordPage() {
   return (
     <AuthShell
-      eyebrow="Account recovery"
-      title="Reset access without guessing what comes next."
-      subtitle="Enter your email, complete the verification step, and return to onboarding or your dashboard once the account is secure again."
-      highlights={[
-        { title: "Clear recovery flow", body: "Email verification and password reset in one guided path." },
-        { title: "No lost progress", body: "Your interview history and reports stay attached to the same account." },
-        { title: "Same secure workspace", body: "Once you’re back in, your interview setup, reports, and admin access stay connected to one account." },
-      ]}
+      eyebrow="Password Recovery"
+      title="Reset your password"
+      subtitle="We're working on self-service password reset. For now, please contact your administrator."
     >
-      <p className="clerk-form-caption">
-        Reset your password here. Once recovery is complete, Clerk brings you back into the standard sign-in flow.
-      </p>
-      <SignIn
-        path="/forgot-password"
-        routing="path"
-        initialStep="forgot-password"
-        oauthFlow="popup"
-        forceRedirectUrl="/onboarding"
-        fallbackRedirectUrl="/onboarding"
-        signUpUrl="/register"
-        appearance={defaultClerkAppearance}
-      />
+      <Typography variant="body2" sx={{ color: "#475569", mb: 3 }}>
+        If you forgot your password, please contact an administrator to reset it for you.
+        Self-service password reset via email will be available soon.
+      </Typography>
+      <Box sx={{ textAlign: "center" }}>
+        <Button component={Link} to="/login" variant="outlined" sx={{ mr: 1 }}>
+          Back to Sign In
+        </Button>
+      </Box>
     </AuthShell>
   );
 }

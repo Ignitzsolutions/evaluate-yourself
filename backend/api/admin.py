@@ -24,7 +24,6 @@ try:
     from db import models
     from db.database import get_db
     from config.eval_flags import EVAL_FLAGS
-    from services.clerk_profile import fetch_clerk_contact_fields
     from services.interview.admin_question_bank import (
         builtin_question_exists,
         get_effective_track_map,
@@ -37,7 +36,6 @@ except Exception:  # pragma: no cover
     from backend.db import models  # type: ignore
     from backend.db.database import get_db  # type: ignore
     from backend.config.eval_flags import EVAL_FLAGS  # type: ignore
-    from backend.services.clerk_profile import fetch_clerk_contact_fields  # type: ignore
     from backend.services.interview.admin_question_bank import (  # type: ignore
         builtin_question_exists,
         get_effective_track_map,
@@ -388,34 +386,8 @@ def _profile_to_payload(profile: Optional[models.UserProfile]) -> Optional[Dict[
 
 
 def _sync_user_from_clerk_if_missing(db: Session, user: models.User) -> bool:
-    if user.email and user.full_name and user.phone_e164:
-        return False
-
-    profile = fetch_clerk_contact_fields(user.clerk_user_id)
-    if not profile:
-        return False
-
-    changed = False
-    email = profile.get("email")
-    full_name = profile.get("full_name")
-    phone_e164 = profile.get("phone_e164")
-
-    if not user.email and email:
-        user.email = email
-        changed = True
-    if not user.full_name and full_name:
-        user.full_name = full_name
-        changed = True
-    if not user.phone_e164 and phone_e164:
-        existing_phone = db.query(models.User).filter(
-            models.User.phone_e164 == phone_e164,
-            models.User.clerk_user_id != user.clerk_user_id,
-        ).first()
-        if not existing_phone:
-            user.phone_e164 = phone_e164
-            changed = True
-
-    return changed
+    """No-op: Clerk profile sync removed. User data is self-managed now."""
+    return False
 
 
 class TrialCodeCreateRequest(BaseModel):

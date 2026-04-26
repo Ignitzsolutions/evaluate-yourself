@@ -8,10 +8,13 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    clerk_user_id = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, index=True)
+    clerk_user_id = Column(String, unique=True, index=True, nullable=True)
+    email = Column(String, unique=True, index=True)
     phone_e164 = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String)
+    password_hash = Column(String(255), nullable=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    email_verified = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
     is_deleted = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
-import { useAuth } from '@clerk/clerk-react';
+import { useUser } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from '../utils/apiClient';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { isDevAuthBypassEnabled } from '../utils/devAuthBypass';

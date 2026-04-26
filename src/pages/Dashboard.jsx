@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper, Alert, CircularProgress } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
-import { useUser, useAuth } from "@clerk/clerk-react";
+import { useUser, useAuth } from "../context/AuthContext";
 import { authFetch, throwForResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
