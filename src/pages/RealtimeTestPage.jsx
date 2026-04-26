@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Button, Box, Typography, Paper, Divider } from '@mui/material';
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
