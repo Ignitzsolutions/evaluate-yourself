@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
@@ -771,10 +771,24 @@ try:
 except Exception as e:
     logging.warning(f"⚠️ Could not register admin router: {e}")
 
-#D
+def _error_json(code: str, message: str, status_code: int) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code") or f"HTTP_{exc.status_code}"
+        message = detail.get("message") or str(detail)
+    else:
+        code = f"HTTP_{exc.status_code}"
+        message = str(detail) if detail else f"HTTP {exc.status_code}"
+    return _error_json(code, message, exc.status_code)
+
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc: Exception):
+async def global_exception_handler(request: Request, exc: Exception):
     """Catch-all handler: log the full traceback server-side, return sanitized error to client."""
     logging.exception(
         "Unhandled exception on %s %s: %s",
@@ -782,14 +796,10 @@ async def global_exception_handler(request, exc: Exception):
         request.url.path,
         exc,
     )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": "An unexpected error occurred. Please try again.",
-            }
-        },
+    return _error_json(
+        "INTERNAL_ERROR",
+        "An unexpected error occurred. Please try again.",
+        500,
     )
 
 @app.get("/", include_in_schema=False)

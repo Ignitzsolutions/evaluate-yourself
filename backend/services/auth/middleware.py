@@ -29,7 +29,7 @@ class AuthMiddleware:
         
         return None
 
-    def validate_and_extract(self, authorization_header: Optional[str], query_token: Optional[str]) -> Tuple[str, str, str]:
+    def validate_and_extract(self, authorization_header: Optional[str], query_token: Optional[str]) -> Tuple[str, str, Optional[str]]:
         """Validate token and extract claims."""
         token = self.extract_token(authorization_header, query_token)
         
