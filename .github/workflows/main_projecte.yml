@@ -59,6 +59,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       # 🛠️ Local Build Section (Optional)
       # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
@@ -80,6 +81,13 @@ jobs:
           # Upgrade pip, setuptools, wheel first (ensures reliable builds)
           pip install --upgrade pip>=24.0 setuptools>=70.0 wheel>=0.41.0
           pip install -r backend/requirements.txt
+
+      - name: Run mypy on cleaned service modules
+        run: |
+          source antenv/bin/activate
+          pip install mypy
+          cd backend
+          mypy --ignore-missing-imports services/auth/ services/interview/scoring_service.py
 
       - name: Validate imports and app module
         run: |

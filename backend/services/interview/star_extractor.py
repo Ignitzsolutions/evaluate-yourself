@@ -12,14 +12,7 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-try:
-    from services.interview.llm_cache import get as cache_get, put as cache_put
-except Exception:
-    try:
-        from backend.services.interview.llm_cache import get as cache_get, put as cache_put
-    except Exception:
-        cache_get = lambda *a: None  # type: ignore
-        cache_put = lambda *a: None  # type: ignore
+from services.interview.llm_cache import get as cache_get, put as cache_put
 
 # ─── Keyword fallback (original heuristics) ───────────────────────────────────
 

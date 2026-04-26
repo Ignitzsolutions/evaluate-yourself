@@ -3,7 +3,7 @@ import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Div
 import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
 import { useUser, useAuth } from "@clerk/clerk-react";
-import { authFetch } from "../utils/apiClient";
+import { authFetch, throwForResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 
@@ -32,24 +32,12 @@ export default function Dashboard() {
     setSyncStatus("syncing");
     try {
       const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
-      if (!resp.ok) {
-        const text = await resp.text();
-        let msg = `Backend returned ${resp.status}`;
-        try {
-          const data = JSON.parse(text);
-          msg = data.detail || msg;
-        } catch {
-          if (text) msg = text.slice(0, 120);
-        }
-        setSyncError(msg);
-        setSyncStatus("error");
-        return;
-      }
+      await throwForResponse(resp, { defaultMessage: "Failed to sync user with backend." });
       const data = await resp.json();
       setBackendUser(data);
       setSyncStatus("ok");
     } catch (err) {
-      setSyncError(err.message || "Failed to sync user with backend");
+      setSyncError(getApiErrorMessage(err, { defaultMessage: "Failed to sync user with backend." }));
       setSyncStatus("error");
     }
   }, [getToken, isLoaded]);
@@ -69,14 +57,11 @@ export default function Dashboard() {
         return;
       }
       const resp = await authFetch(`${API_BASE}/api/interview/reports`, token, { method: "GET" });
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || `Failed to fetch history (${resp.status})`);
-      }
+      await throwForResponse(resp, { defaultMessage: "Failed to fetch interview history." });
       const data = await resp.json();
       setHistoryReports(Array.isArray(data) ? data : []);
     } catch (err) {
-      setHistoryError(err.message || "Failed to load interview history");
+      setHistoryError(getApiErrorMessage(err, { defaultMessage: "Failed to load interview history." }));
     } finally {
       setHistoryLoading(false);
     }
