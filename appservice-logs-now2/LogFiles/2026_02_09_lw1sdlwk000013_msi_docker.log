@@ -1,4 +1,0 @@
-2026-02-09T15:40:21.695572503Z cp: cannot stat '/usr/local/azure/certs/*.crt': No such file or directory
-2026-02-09T15:40:27.125261045Z Updated CA certificates
-2026-02-09T15:40:32.285246454Z {"EventId":0,"LogLevel":"Information","Category":"Program","Message":"Entering app startup."}
-

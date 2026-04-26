@@ -1,9 +1,0 @@
-2026-02-09T16:01:04  Startup Request, url: /dump, method: GET, type: request, pid: 776,1,15, ScmType: None, SCM_DO_BUILD_DURING_DEPLOYMENT: true
-2026-02-09T16:02:07    Error occurred, type: error, text: Unable to open /home/LogFiles/kudu/trace/2026-02-09T16-01-21_0d9fb7_003_GET_api-deployments_pending.xml, System.IO.FileNotFoundException: Could not find file '/home/LogFiles/kudu/trace/2026-02-09T16-01-21_0d9fb7_003_GET_api-deployments_pending.xml'.
-File name: '/home/LogFiles/kudu/trace/2026-02-09T16-01-21_0d9fb7_003_GET_api-deployments_pending.xml'
-   at Interop.ThrowExceptionForIoErrno(ErrorInfo errorInfo, String path, Boolean isDirError)
-   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String path, OpenFlags flags, Int32 mode, Boolean failForSymlink, Boolean& wasSymlink, Func`4 createOpenException)
-   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, UnixFileMode openPermissions, Int64& fileLength, UnixFileMode& filePermissions, Boolean failForSymlink, Boolean& wasSymlink, Func`4 createOpenException)
-   at System.IO.Strategies.OSFileStreamStrategy..ctor(String path, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, Nullable`1 unixCreateMode)
-   at System.IO.FileInfo.OpenRead()
-   at Kudu.Core.Infrastructure.ZipArchiveExtensions.AddFileAsync(ZipArchive zipArchive, FileInfoBase file, ITracer tracer, String directoryNameInArchive) in /tmp/KuduLite/Kudu.Core/Infrastructure/ZipArchiveExtensions.cs:line 165
