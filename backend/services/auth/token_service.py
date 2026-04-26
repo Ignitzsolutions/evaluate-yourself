@@ -63,6 +63,48 @@ class TokenService:
         self.algorithm = "HS256"
         self._redis = redis_client
 
+    # ── User auth tokens (self-hosted login/register) ───────────────────
+
+    def create_user_token(self, user_id: str, email: str, is_admin: bool = False) -> str:
+        """Create JWT access token for authenticated user."""
+        now = datetime.now(timezone.utc)
+        jti = str(uuid.uuid4())
+        payload = {
+            "iss": self.issuer,
+            "aud": self.audience,
+            "sub": user_id,
+            "jti": jti,
+            "email": email,
+            "is_admin": is_admin,
+            "type": "access",
+            "iat": now,
+            "exp": now + timedelta(seconds=self.token_lifetime_seconds),
+        }
+        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+    def create_user_refresh_token(self, user_id: str) -> str:
+        """Create 7-day refresh token for authenticated user."""
+        now = datetime.now(timezone.utc)
+        jti = str(uuid.uuid4())
+        payload = {
+            "iss": self.issuer,
+            "aud": self.audience,
+            "sub": user_id,
+            "jti": jti,
+            "type": "refresh",
+            "iat": now,
+            "exp": now + timedelta(days=7),
+        }
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        if self._redis:
+            try:
+                self._redis.setex(f"refresh_jti:{jti}", 7 * 86400, user_id)
+            except Exception as e:
+                logger.warning("Could not store refresh JTI in Redis: %s", e)
+        return token
+
+    # ── Interview session tokens ──────────────────────────────────────
+
     def create_session_token(
         self,
         session_id: str,

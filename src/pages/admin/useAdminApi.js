@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../../context/AuthContext";
 import { authFetch, throwForResponse } from "../../utils/apiClient";
 import { getApiBaseUrl } from "../../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../../utils/devAuthBypass";

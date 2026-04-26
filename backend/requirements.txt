@@ -46,8 +46,7 @@ redis>=5.0.0
 
 # Security
 PyJWT>=2.8.0  # Package name is PyJWT, imports as 'jwt'
-python-jose[cryptography]>=3.3.0  # Clerk JWT verification (jose_jwt)
-cryptography==41.0.7
+bcrypt>=4.0.0
 
 # Testing
 pytest>=7.4.0

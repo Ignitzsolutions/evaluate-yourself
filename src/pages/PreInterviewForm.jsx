@@ -18,7 +18,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";

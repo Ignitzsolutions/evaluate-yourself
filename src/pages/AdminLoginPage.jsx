@@ -1,141 +1,99 @@
-import React, { useEffect, useState } from "react";
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
-import { Navigate } from "react-router-dom";
-import { SignIn, useAuth, useClerk } from "@clerk/clerk-react";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { TextField, Button, Alert, CircularProgress, Typography, Box } from "@mui/material";
 import AuthShell from "../components/AuthShell";
-import BackendUnavailableState from "../components/BackendUnavailableState";
-import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
+import { useAuth, useAuthActions } from "../context/AuthContext";
+import { authFetch } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
-import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
-import { defaultClerkAppearance } from "../utils/clerkAppearance";
+import "../ui.css";
 
 const API_BASE = getApiBaseUrl();
 
 export default function AdminLoginPage() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-  const { signOut } = useClerk();
-  const [state, setState] = useState({
-    checking: true,
-    isAdmin: false,
-    errorKind: "",
-    errorMessage: "",
-  });
-  const devBypass = isDevAuthBypassEnabled();
-  const [retryTick, setRetryTick] = useState(0);
+  const navigate = useNavigate();
+  const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { login } = useAuthActions();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(null);
 
   useEffect(() => {
-    let mounted = true;
-    const run = async () => {
-      if (!isLoaded && !devBypass) return;
-      if (!devBypass && !isSignedIn) {
-        if (mounted) setState({ checking: false, isAdmin: false, errorKind: "", errorMessage: "" });
-        return;
-      }
+    if (!isLoaded || !isSignedIn) return;
+    let cancelled = false;
+    setCheckingAdmin(true);
+    (async () => {
       try {
-        const token = await getToken().catch(() => null);
-        if (!token && !devBypass) {
-          if (mounted) setState({ checking: false, isAdmin: false, errorKind: "", errorMessage: "" });
-          return;
-        }
+        const token = await getToken();
+        if (!token) { setCheckingAdmin(false); return; }
         const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
-        if (!resp.ok) {
-          if (!devBypass && resp.status === 401) {
-            if (mounted) {
-              setState({ checking: false, isAdmin: false, errorKind: "", errorMessage: "" });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (!cancelled) {
+            if (data.is_admin) {
+              navigate("/admin/dashboard", { replace: true });
+            } else {
+              setIsAdmin(false);
             }
-            return;
           }
-          throw await buildApiErrorFromResponse(resp, {
-            defaultMessage: "Admin verification failed. Check the backend and try again.",
-          });
         }
-        const data = await resp.json();
-        if (mounted) {
-          setState({ checking: false, isAdmin: Boolean(data?.is_admin), errorKind: "", errorMessage: "" });
-        }
-      } catch (error) {
-        if (mounted) {
-          setState({
-            checking: false,
-            isAdmin: false,
-            errorKind: isBackendUnavailableError(error) ? "backend_unavailable" : error?.status >= 500 ? "server_error" : "generic",
-            errorMessage: getApiErrorMessage(error, {
-              backendLabel: "admin access service",
-              defaultMessage: "Unable to verify admin access.",
-            }),
-          });
-        }
-      }
-    };
-    run();
-    return () => {
-      mounted = false;
-    };
-  }, [devBypass, isLoaded, isSignedIn, getToken, retryTick]);
+      } catch { /* ignore */ }
+      if (!cancelled) setCheckingAdmin(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isLoaded, isSignedIn, getToken, navigate]);
 
-  if ((!isLoaded && !devBypass) || state.checking) {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const data = await login(email, password);
+      if (data.user?.is_admin) {
+        navigate("/admin/dashboard");
+      } else {
+        setIsAdmin(false);
+      }
+    } catch (err) {
+      setError(err?.message || err?.detail || "Login failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (checkingAdmin) {
     return (
-      <Box sx={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
+      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
         <CircularProgress />
       </Box>
     );
   }
 
-  if ((state.errorKind === "backend_unavailable" || state.errorKind === "server_error") && (isSignedIn || devBypass)) {
+  if (isSignedIn && isAdmin === false) {
     return (
-      <BackendUnavailableState
-        title="Admin Login Check Unavailable"
-        message={state.errorMessage}
-        onRetry={() => setRetryTick((prev) => prev + 1)}
-      />
-    );
-  }
-
-  if ((isSignedIn || devBypass) && state.isAdmin) {
-    return <Navigate to="/admin/dashboard" replace />;
-  }
-
-  if (isSignedIn && !state.isAdmin) {
-    return (
-      <Box sx={{ minHeight: "100%", display: "grid", placeItems: "center", p: 2 }}>
-        <Box sx={{ maxWidth: 520, textAlign: "center" }}>
-          <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
-            Admin Access Required
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            You are currently signed in with a non-admin account. Sign out and continue with an allowlisted admin account.
-          </Typography>
-          <Button variant="contained" onClick={() => signOut({ redirectUrl: "/admin/login" })}>
-            Sign Out and Switch Account
-          </Button>
-        </Box>
-      </Box>
+      <AuthShell eyebrow="Admin Portal" title="Admin Access Required" subtitle="Your account does not have admin privileges.">
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          The account you signed in with does not have admin access. Please sign out and use an admin account.
+        </Alert>
+        <Button variant="outlined" fullWidth onClick={() => { signOut(); setIsAdmin(null); }}>
+          Sign Out & Try Again
+        </Button>
+      </AuthShell>
     );
   }
 
   return (
-    <AuthShell
-      eyebrow="Admin Access"
-      title="Sign in with an allowlisted admin account."
-      subtitle="This entry point is for support, reporting, trials, question-bank operations, and release controls. Non-admin accounts stay on the standard user flow."
-      highlights={[
-        { title: "Operations Console", body: "Candidates, interviews, trials, exports, and question-bank workflows live behind this login." },
-        { title: "Protected Access", body: "Only Clerk user IDs on the backend admin allowlist can continue into the dashboard." },
-        { title: "Same Identity Layer", body: "Admin verification still happens through the same Clerk identity and backend `/api/me` contract." },
-      ]}
-    >
-      <p className="clerk-form-caption">
-        Use the same organization identity you expect to ship in production. The backend will verify admin access before loading the dashboard.
-      </p>
-      <SignIn
-        routing="path"
-        path="/admin/login"
-        oauthFlow="popup"
-        signUpUrl="/register"
-        forceRedirectUrl="/admin/dashboard"
-        fallbackRedirectUrl="/admin/dashboard"
-        appearance={defaultClerkAppearance}
-      />
+    <AuthShell eyebrow="Admin Portal" title="Admin Sign In" subtitle="Sign in with your admin credentials.">
+      <form onSubmit={handleSubmit}>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        <TextField label="Email" type="email" fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Password" type="password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ py: 1.2 }}>
+          {loading ? <CircularProgress size={20} color="inherit" /> : "Sign In as Admin"}
+        </Button>
+      </form>
     </AuthShell>
   );
 }

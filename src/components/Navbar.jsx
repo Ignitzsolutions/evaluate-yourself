@@ -26,7 +26,7 @@ import {
   Close as CloseIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useClerk } from "@clerk/clerk-react";
+import { useClerk } from "../context/AuthContext";
 
 const baseNavItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },

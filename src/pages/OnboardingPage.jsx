@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {

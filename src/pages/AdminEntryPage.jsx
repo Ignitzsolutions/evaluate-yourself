@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "../context/AuthContext";
 import BackendUnavailableState from "../components/BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";

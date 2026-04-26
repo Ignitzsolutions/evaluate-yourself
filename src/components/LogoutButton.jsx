@@ -1,7 +1,7 @@
 import React from "react";
 import { Button } from "@mui/material";
 import { Logout } from "@mui/icons-material";
-import { useClerk } from "@clerk/clerk-react";
+import { useClerk } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 export default function LogoutButton({ variant = "outlined", size = "small" }) {
