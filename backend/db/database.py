@@ -2,6 +2,7 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.engine import Engine
+from typing import Any, Dict
 import os
 import logging
 
@@ -19,9 +20,9 @@ def is_production_env() -> bool:
     return ENV == "production"
 
 # Azure PostgreSQL readiness configuration
-def _get_engine_config(database_url: str) -> dict:
+def _get_engine_config(database_url: str) -> Dict[str, Any]:
     """Get SQLAlchemy engine configuration based on database type."""
-    config = {}
+    config: Dict[str, Any] = {}
     
     if database_url.startswith("sqlite"):
         # SQLite-specific settings
