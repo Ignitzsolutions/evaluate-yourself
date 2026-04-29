@@ -123,6 +123,7 @@ from reportlab.graphics.shapes import Drawing, Rect, String
 from db.database import DATABASE_URL, SessionLocal, engine
 from db import models
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from db.models import User
 from fastapi import Depends
@@ -448,6 +449,24 @@ def run_startup_migrations_if_enabled() -> None:
         return
 
     try:
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            if inspector.has_table("users"):
+                user_columns = {column["name"] for column in inspector.get_columns("users")}
+                if "password_hash" not in user_columns:
+                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)"))
+                if "is_admin" not in user_columns:
+                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+                if "email_verified" not in user_columns:
+                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE"))
+                if "clerk_user_id" in user_columns:
+                    connection.execute(text("ALTER TABLE users ALTER COLUMN clerk_user_id DROP NOT NULL"))
+                connection.execute(text("UPDATE users SET email_verified = TRUE WHERE email IS NOT NULL"))
+
+            if not inspector.has_table("alembic_version"):
+                logging.warning("Skipping full Alembic upgrade because alembic_version is absent on an existing database")
+                return
+
         from alembic import command
         from alembic.config import Config
 
