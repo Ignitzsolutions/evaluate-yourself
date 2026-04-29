@@ -16,20 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate production JWT secret
-        env:
-          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-        run: |
-          if [ -z "${JWT_SECRET_KEY}" ]; then
-            echo "❌ Missing JWT_SECRET_KEY secret"
-            exit 1
-          fi
-          if [ ${#JWT_SECRET_KEY} -lt 32 ]; then
-            echo "❌ JWT_SECRET_KEY must be at least 32 characters"
-            exit 1
-          fi
-          echo "✓ JWT_SECRET_KEY is set and meets minimum length"
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -101,6 +87,8 @@ jobs:
         run: |
           source antenv/bin/activate
           pytest -q \
+            backend/tests/test_schema_smoke.py \
+            backend/tests/test_auth_migration_smoke.py \
             backend/tests/test_interview_orchestration_backend.py \
             backend/tests/test_replay_payload.py \
             backend/tests/test_provider_adapter.py
@@ -191,11 +179,20 @@ jobs:
                   "REDIS_URL",
                   "ALLOWED_ORIGINS",
                   "JWT_SECRET_KEY",
+                  "AZURE_OPENAI_API_KEY",
+                  "AZURE_OPENAI_ENDPOINT",
               )
               if not settings.get(key)
           ]
           if missing:
               print(f"Missing Azure app settings: {', '.join(missing)}", file=sys.stderr)
+              sys.exit(1)
+          if len(settings["JWT_SECRET_KEY"]) < 32:
+              print("JWT_SECRET_KEY must be at least 32 characters", file=sys.stderr)
+              sys.exit(1)
+          endpoint = settings["AZURE_OPENAI_ENDPOINT"]
+          if "openai.azure.com" not in endpoint and "cognitiveservices.azure.com" not in endpoint:
+              print("AZURE_OPENAI_ENDPOINT must be an Azure OpenAI endpoint", file=sys.stderr)
               sys.exit(1)
           print("✓ Required Azure app settings are present")
           PY
@@ -206,9 +203,52 @@ jobs:
             --resource-group projecte_group \
             --name projecte \
             --settings \
+              ENV=production \
               INTERVIEW_ACCESS_MODE=free \
               TRIAL_MODE_ENABLED=false \
-              TRIAL_CODE_ENFORCEMENT=false
+              TRIAL_CODE_ENFORCEMENT=false \
+              DEV_AUTH_BYPASS=false
+          az webapp config appsettings delete \
+            --resource-group projecte_group \
+            --name projecte \
+            --setting-names DEV_USER_ID DEV_USER_EMAIL DEV_USER_NAME \
+            --output none || true
+
+      - name: Validate production auth posture
+        run: |
+          SETTINGS_JSON=$(az webapp config appsettings list \
+            --resource-group projecte_group \
+            --name projecte \
+            --output json)
+          export SETTINGS_JSON
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          settings = {
+              item.get("name"): str(item.get("value") or "").strip()
+              for item in json.loads(os.environ["SETTINGS_JSON"])
+          }
+          if settings.get("DEV_AUTH_BYPASS", "").lower() in {"1", "true", "yes", "on"}:
+              print("DEV_AUTH_BYPASS must be disabled for production deploys", file=sys.stderr)
+              sys.exit(1)
+          stale_dev_users = [
+              key for key in ("DEV_USER_ID", "DEV_USER_EMAIL", "DEV_USER_NAME")
+              if settings.get(key)
+          ]
+          if stale_dev_users:
+              print(f"Remove stale dev user app settings: {', '.join(stale_dev_users)}", file=sys.stderr)
+              sys.exit(1)
+          print("✓ Production auth posture is locked")
+          PY
+
+      - name: Ensure health check path
+        run: |
+          az webapp update \
+            --resource-group projecte_group \
+            --name projecte \
+            --set siteConfig.healthCheckPath=/health
 
       - name: Ensure startup command
         run: |
@@ -269,6 +309,7 @@ jobs:
           check_route "/" "200"
           check_route "/health" "200"
           check_route "/favicon.ico" "200 301 302 304"
+          check_route "/api/me" "401 403"
 
       - name: Run hosted Sonia certification
         env:
@@ -288,5 +329,5 @@ jobs:
           printf '%s' "${PW_CERT_STORAGE_STATE_JSON}" > "${STORAGE_STATE_PATH}"
           npm install
           npx playwright install --with-deps chromium
-          PW_CERT_STORAGE_STATE="${STORAGE_STATE_PATH}" npm run test:e2e:hosted
+          PW_CERT_STORAGE_STATE="${STORAGE_STATE_PATH}" xvfb-run -a npm run test:e2e:hosted
           

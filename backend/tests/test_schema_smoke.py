@@ -15,7 +15,7 @@ class FakeInspector:
 def test_check_required_schema_reports_missing_auth_column():
     inspector = FakeInspector(
         {
-            "users": {"clerk_user_id", "email", "is_active", "is_deleted"},
+            "users": {"clerk_user_id", "email", "phone_e164", "is_active", "is_deleted"},
             "auth_identities": {"provider", "provider_user_id", "user_id"},
             "user_emails": {"user_id", "normalized_email", "is_primary", "is_verified"},
             "user_phones": {"user_id", "phone_e164", "is_primary", "is_verified"},
@@ -29,13 +29,22 @@ def test_check_required_schema_reports_missing_auth_column():
 
     error = check_required_schema(inspector)
 
-    assert error == "❌ Missing columns in users: phone_e164"
+    assert error == "❌ Missing columns in users: email_verified, is_admin, password_hash"
 
 
 def test_check_required_schema_passes_when_auth_tables_are_present():
     inspector = FakeInspector(
         {
-            "users": {"clerk_user_id", "email", "phone_e164", "is_active", "is_deleted"},
+            "users": {
+                "clerk_user_id",
+                "email",
+                "phone_e164",
+                "password_hash",
+                "is_admin",
+                "email_verified",
+                "is_active",
+                "is_deleted",
+            },
             "auth_identities": {"provider", "provider_user_id", "user_id"},
             "user_emails": {"user_id", "normalized_email", "is_primary", "is_verified"},
             "user_phones": {"user_id", "phone_e164", "is_primary", "is_verified"},

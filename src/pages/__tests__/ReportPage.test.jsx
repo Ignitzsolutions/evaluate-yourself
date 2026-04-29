@@ -7,7 +7,7 @@ import { renderWithFutureRouter } from "../../testUtils/renderWithFutureRouter";
 
 const mockGetToken = jest.fn().mockResolvedValue("test-token");
 
-jest.mock("@clerk/clerk-react", () => ({
+jest.mock("../../context/AuthContext", () => ({
   useAuth: () => ({
     getToken: mockGetToken,
   }),

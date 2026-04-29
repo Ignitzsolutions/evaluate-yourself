@@ -23,7 +23,16 @@ from backend.db.database import engine  # noqa: E402
 
 
 REQUIRED_COLUMNS = {
-    "users": {"clerk_user_id", "email", "phone_e164", "is_active", "is_deleted"},
+    "users": {
+        "clerk_user_id",
+        "email",
+        "phone_e164",
+        "password_hash",
+        "is_admin",
+        "email_verified",
+        "is_active",
+        "is_deleted",
+    },
     "auth_identities": {"provider", "provider_user_id", "user_id"},
     "user_emails": {"user_id", "normalized_email", "is_primary", "is_verified"},
     "user_phones": {"user_id", "phone_e164", "is_primary", "is_verified"},
