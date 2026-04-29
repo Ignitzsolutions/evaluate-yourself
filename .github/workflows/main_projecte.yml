@@ -94,6 +94,10 @@ jobs:
             backend/tests/test_provider_adapter.py
 
       - name: Run backend startup smoke against live local app
+        env:
+          JWT_SECRET_KEY: ci-startup-smoke-secret-at-least-32-chars
+          AZURE_OPENAI_API_KEY: ci-startup-smoke-key
+          AZURE_OPENAI_ENDPOINT: https://ci-startup-smoke.openai.azure.com
         run: |
           source antenv/bin/activate
           cd backend
