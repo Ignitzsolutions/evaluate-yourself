@@ -6,6 +6,71 @@ const STORAGE_STATE = process.env.PW_CERT_STORAGE_STATE || "";
 
 test.use(STORAGE_STATE ? { storageState: STORAGE_STATE } : {});
 
+async function provisionHostedAuth(page, findings) {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const email = `sonia-cert+${suffix}@example.com`;
+  const password = `SoniaCert${suffix}9`;
+
+  const registerResponse = await page.request.post(`${BASE_URL}/api/auth/register`, {
+    data: {
+      email,
+      password,
+      full_name: "Sonia Certification",
+    },
+  });
+  if (!registerResponse.ok()) {
+    const body = await registerResponse.text().catch(() => "");
+    throw new Error(`Hosted auth provisioning failed: ${registerResponse.status()} ${body.slice(0, 300)}`);
+  }
+  const auth = await registerResponse.json();
+  const accessToken = auth.access_token;
+  const refreshToken = auth.refresh_token;
+  if (!accessToken || !refreshToken) {
+    throw new Error("Hosted auth provisioning did not return access and refresh tokens.");
+  }
+
+  const profileResponse = await page.request.put(`${BASE_URL}/api/profile/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    data: {
+      userCategory: "professional",
+      primaryGoal: "Practice a live Sonia beta interview",
+      targetRoles: ["Backend Engineer"],
+      industries: ["Software"],
+      interviewTimeline: "Now",
+      prepIntensity: "Moderate",
+      learningStyle: "Hands-on",
+      consentDataUse: true,
+      consentContact: false,
+      currentRole: "Software Engineer",
+      experienceBand: "1-3 years",
+      managementScope: "Individual contributor",
+      domainExpertise: ["Backend"],
+      targetCompanyType: "Startup",
+      careerTransitionIntent: "Growth",
+      noticePeriodBand: "Immediate",
+      careerCompBand: "Growth",
+      interviewUrgency: "High",
+    },
+  });
+  if (!profileResponse.ok()) {
+    const body = await profileResponse.text().catch(() => "");
+    throw new Error(`Hosted profile provisioning failed: ${profileResponse.status()} ${body.slice(0, 300)}`);
+  }
+
+  await page.evaluate(
+    ({ accessToken: access, refreshToken: refresh }) => {
+      localStorage.setItem("access_token", access);
+      localStorage.setItem("refresh_token", refresh);
+    },
+    { accessToken, refreshToken },
+  );
+  findings.push({
+    title: "provisioned-hosted-auth",
+    body: "Created a temporary self-hosted auth user for certification because no valid app token was present.",
+    severity: "info",
+  });
+}
+
 test.describe("hosted runtime certification", () => {
   test("captures structured runtime findings for the deployed interview flow", async ({ page }, testInfo) => {
     test.skip(!BASE_URL, "PW_CERT_BASE_URL is required for hosted certification.");
@@ -53,6 +118,10 @@ test.describe("hosted runtime certification", () => {
 
     try {
       await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+      const existingAppToken = await page.evaluate(() => localStorage.getItem("access_token")).catch(() => null);
+      if (!existingAppToken) {
+        await provisionHostedAuth(page, findings);
+      }
       await page.goto(SESSION_URL, { waitUntil: "networkidle" });
 
       await requireVisible(
