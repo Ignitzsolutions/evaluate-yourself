@@ -138,7 +138,8 @@ from db.users import (
 
 import logging
 
-models.Base.metadata.create_all(bind=engine)
+if os.getenv("ENV", "development").strip().lower() not in {"production", "prod"}:
+    models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
