@@ -325,12 +325,12 @@ jobs:
             echo "❌ Missing PW_CERT_SESSION_URL secret for hosted Sonia certification"
             exit 1
           fi
-          if [ -z "${PW_CERT_STORAGE_STATE_JSON}" ]; then
-            echo "❌ Missing PW_CERT_STORAGE_STATE_JSON secret for hosted Sonia certification"
-            exit 1
-          fi
           STORAGE_STATE_PATH="${RUNNER_TEMP}/pw-cert-storage-state.json"
-          printf '%s' "${PW_CERT_STORAGE_STATE_JSON}" > "${STORAGE_STATE_PATH}"
+          if [ -n "${PW_CERT_STORAGE_STATE_JSON}" ]; then
+            printf '%s' "${PW_CERT_STORAGE_STATE_JSON}" > "${STORAGE_STATE_PATH}"
+          else
+            printf '{}' > "${STORAGE_STATE_PATH}"
+          fi
           npm install
           npx playwright install --with-deps chromium
           PW_CERT_STORAGE_STATE="${STORAGE_STATE_PATH}" xvfb-run -a npm run test:e2e:hosted
