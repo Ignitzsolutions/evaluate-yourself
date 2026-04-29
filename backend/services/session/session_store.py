@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional, Any, Dict, Callable
+from typing import Optional, Any, Dict, Callable, cast
 import redis
 from redis.exceptions import WatchError
 
@@ -32,7 +32,7 @@ class SessionStore:
     def get(self, session_id: str) -> Optional[SessionData]:
         """Get session by ID."""
         try:
-            data = self.redis.get(f"{self.key_prefix}{session_id}")
+            data = cast(Optional[str], self.redis.get(f"{self.key_prefix}{session_id}"))
             if not data:
                 return None
             session_dict = self._deserialize(data)
@@ -78,7 +78,7 @@ class SessionStore:
     def ttl(self, session_id: str) -> Optional[int]:
         """Get TTL in seconds, or None if not exists."""
         try:
-            ttl = self.redis.ttl(f"{self.key_prefix}{session_id}")
+            ttl = cast(int, self.redis.ttl(f"{self.key_prefix}{session_id}"))
             if ttl == -1:
                 return None  # Key exists with no TTL
             if ttl == -2:
@@ -110,7 +110,7 @@ class SessionStore:
                 pipe.watch(key)
 
                 # Load current value
-                data = pipe.get(key)
+                data = cast(Optional[str], pipe.get(key))
                 if data:
                     session = SessionData(**self._deserialize(data))
                 else:
