@@ -3146,6 +3146,32 @@ def get_current_user(
 
     return user
 
+
+def get_user_id_from_auth(authorization: Optional[str] = None) -> Optional[str]:
+    """Return the app-owned user id from a bearer token, or None when signed out."""
+    from api.auth import _token_service as auth_ts
+
+    if not authorization or not authorization.strip():
+        if DEV_AUTH_BYPASS:
+            return (os.getenv("DEV_USER_ID", "dev-local-admin") or "").strip() or "dev-local-admin"
+        return None
+
+    token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        return None
+    if not auth_ts:
+        raise HTTPException(status_code=500, detail="Auth service not initialized")
+
+    payload = auth_ts.validate_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: missing sub")
+    return str(user_id)
+
+
 personality_reports: Dict[str, PersonalityReport] = {}
 interview_reports: Dict[str, InterviewReport] = {}
 
