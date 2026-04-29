@@ -42,8 +42,9 @@ def _get_database_url() -> str:
     return os.getenv("DATABASE_URL", f"sqlite:///{default_path}")
 
 
-# Override SQLAlchemy URL from env
-config.set_main_option("sqlalchemy.url", _get_database_url())
+# Override SQLAlchemy URL from env. ConfigParser treats "%" as interpolation,
+# so percent-encoded database passwords must be escaped before set_main_option.
+config.set_main_option("sqlalchemy.url", _get_database_url().replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:

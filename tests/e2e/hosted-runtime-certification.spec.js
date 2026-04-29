@@ -75,8 +75,6 @@ test.describe("hosted runtime certification", () => {
   test("captures structured runtime findings for the deployed interview flow", async ({ page }, testInfo) => {
     test.skip(!BASE_URL, "PW_CERT_BASE_URL is required for hosted certification.");
     test.skip(!SESSION_URL, "PW_CERT_SESSION_URL is required for hosted certification.");
-    test.skip(!STORAGE_STATE, "PW_CERT_STORAGE_STATE is required for authenticated hosted certification.");
-
     const findings = [];
     const checks = {};
     const recordFinding = (title, body, severity = "warning") => {

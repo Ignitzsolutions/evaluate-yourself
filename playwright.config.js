@@ -19,12 +19,14 @@ module.exports = defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  webServer: {
-    command: `HOST=${HOST} PORT=${PORT} BROWSER=none npm start`,
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180000,
-  },
+  webServer: process.env.PW_CERT_BASE_URL
+    ? undefined
+    : {
+        command: `HOST=${HOST} PORT=${PORT} BROWSER=none npm start`,
+        url: BASE_URL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180000,
+      },
   projects: [
     {
       name: "chromium",

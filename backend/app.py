@@ -437,10 +437,35 @@ def validate_production_requirements(
             + ", ".join(missing_requirements)
         )
 
+
+def run_startup_migrations_if_enabled() -> None:
+    """Apply Alembic migrations during App Service boot when explicitly enabled."""
+    enabled = os.getenv("RUN_DB_MIGRATIONS_ON_STARTUP", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled or not is_production:
+        return
+    if not os.getenv("DATABASE_URL"):
+        logging.warning("Skipping startup migrations because DATABASE_URL is not set")
+        return
+
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        backend_dir = Path(__file__).resolve().parent
+        config = Config(str(backend_dir / "alembic.ini"))
+        logging.info("Applying database migrations at startup")
+        command.upgrade(config, "head")
+        logging.info("Database migrations are at Alembic head")
+    except Exception:
+        logging.exception("Database migration failed during startup")
+        raise
+
+
 # Run validation on startup
 @app.on_event("startup")
 async def startup_event():
     validate_production_requirements()
+    run_startup_migrations_if_enabled()
     validate_environment(strict=True)
     logging.info("🔐 Auth: self-hosted JWT (HS256) + bcrypt")
 
