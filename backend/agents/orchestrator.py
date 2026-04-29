@@ -169,14 +169,9 @@ class ConversationOrchestrator:
         return graph.compile()
 
     def _invoke(self, state: OrchestratorState, db: Any = None) -> Dict[str, Any]:
-        if self._graph is not None:
-            result = self._graph.invoke((state, {"db": db}))
-            if isinstance(result, tuple):
-                _, output = result
-                if isinstance(output, dict):
-                    return output
-            if isinstance(result, dict):
-                return result
+        # Keep the production path independent of LangGraph input-shape changes.
+        # The graph remains buildable for future adoption, but direct invocation
+        # is the stable runtime contract used by tests and hosted deploys.
         hydrated = self._hydrate_context(state, {"db": db})
         return self._route(hydrated, {"db": db})
 
