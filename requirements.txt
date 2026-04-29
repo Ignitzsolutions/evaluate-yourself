@@ -1,10 +1,58 @@
-# Main requirements file for Azure App Service deployment
-# Oryx (Azure build system) looks for requirements.txt at repo root
-# This file references backend/requirements.txt which contains all dependencies
+# Main requirements file for Azure App Service deployment.
+# Keep this self-contained because Azure/Oryx may flatten the backend directory.
 
-# Backend dependencies (used by Azure App Service)
--r backend/requirements.txt
+# Build tools (required for reliable Azure App Service deployment)
+pip>=24.0
+setuptools>=70.0
+wheel>=0.41.0
 
-# Note: For optional face detection (dlib), see requirements-face.txt
-# Uncomment below if you need dlib for server.py:
-# -r requirements-face.txt
+# Core web framework
+fastapi==0.104.1
+uvicorn==0.24.0
+gunicorn>=21.2.0
+websockets==11.0.3
+python-multipart==0.0.6
+
+# HTTP client
+# Keep <0.28 for Starlette TestClient compatibility in local/CI test runs.
+httpx>=0.27.0,<0.28.0
+requests==2.31.0
+
+# AI/ML libraries
+openai>=1.10.0,<2.0.0
+langchain-core>=0.1.0
+langchain-openai>=0.0.5
+langgraph>=0.2.0
+numpy>=1.26.0,<3.0.0
+opencv-python-headless>=4.10.0.84,<5.0.0
+
+# Data validation and serialization
+# 2.10+ avoids pydantic-core build failures on newer Python (3.13/3.14) used locally.
+pydantic>=2.10.0,<3.0.0
+email-validator>=2.1.0
+python-dotenv==1.0.0
+typing-extensions>=4.12.0
+python-dateutil==2.8.2
+
+# Azure services
+azure-identity==1.17.1
+
+# PDF generation
+reportlab==4.0.9
+
+# Database (Auth & user persistence)
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.18
+alembic>=1.13.1
+
+# Redis (Session & event storage)
+redis>=5.0.0
+
+# Security
+PyJWT>=2.8.0  # Package name is PyJWT, imports as 'jwt'
+bcrypt>=4.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+fakeredis>=2.19.0

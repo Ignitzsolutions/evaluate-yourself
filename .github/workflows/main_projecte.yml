@@ -259,7 +259,7 @@ jobs:
           az webapp config set \
             --resource-group projecte_group \
             --name projecte \
-            --startup-file "cd backend && gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
+            --startup-file "test -d backend && cd backend; export PYTHONPATH=/home/site/wwwroot/__startup_packages__:/home/site/wwwroot:/home/site/wwwroot/backend:\${PYTHONPATH}; test -d /home/site/wwwroot/__startup_packages__/uvicorn || python -m pip install --no-cache-dir -r https://raw.githubusercontent.com/Ignitzsolutions/evaluate-yourself/main/backend/requirements.txt -t /home/site/wwwroot/__startup_packages__; python -m gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
 
       - name: Package deployment artifact
         run: |
