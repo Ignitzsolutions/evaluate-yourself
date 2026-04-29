@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import AdminEntryPage from "../AdminEntryPage";
 
-jest.mock("@clerk/clerk-react", () => ({
+jest.mock("../../context/AuthContext", () => ({
   useAuth: () => ({
     isLoaded: true,
     isSignedIn: true,
