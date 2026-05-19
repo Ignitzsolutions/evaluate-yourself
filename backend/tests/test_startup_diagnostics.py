@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend import app as app_module
 
 
-def test_collect_startup_diagnostics_reports_frontend_and_clerk_status(tmp_path):
+def test_collect_startup_diagnostics_reports_frontend_and_auth_status(tmp_path):
     frontend_dir = tmp_path / "build"
     frontend_dir.mkdir()
     (frontend_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
@@ -23,8 +23,6 @@ def test_collect_startup_diagnostics_reports_frontend_and_clerk_status(tmp_path)
             "DATABASE_URL": "postgresql://db.example/app",
             "REDIS_URL": "rediss://cache.example/0",
             "ALLOWED_ORIGINS": "https://example.com",
-            "CLERK_PUBLISHABLE_KEY": "pk_live_example",
-            "CLERK_SECRET_KEY": "sk_live_example",
         },
         frontend_dir=frontend_dir,
         public_dir=public_dir,
@@ -32,7 +30,7 @@ def test_collect_startup_diagnostics_reports_frontend_and_clerk_status(tmp_path)
 
     assert diagnostics["is_production"] is True
     assert diagnostics["missing_requirements"] == []
-    assert diagnostics["clerk"]["publishable_key_present"] is True
+    assert diagnostics["auth"] == "self-hosted (JWT + bcrypt)"
     assert diagnostics["frontend"]["index_present"] is True
     assert diagnostics["frontend"]["assets_dir_present"] is True
     assert diagnostics["frontend"]["favicon_present"] is True
@@ -70,3 +68,29 @@ def test_favicon_route_returns_repo_managed_asset():
 
     assert response.status_code == 200
     assert response.content
+
+
+def test_realtime_session_log_config_handles_ga_payload_shape():
+    payload = {
+        "session": {
+            "voice": "alloy",
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.55,
+            },
+        }
+    }
+
+    config = app_module._realtime_session_log_config(
+        payload,
+        include_inline_instructions=True,
+    )
+
+    assert config == {
+        "voice": "alloy",
+        "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.55,
+        },
+        "include_inline_instructions": True,
+    }
