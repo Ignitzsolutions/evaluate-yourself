@@ -1576,6 +1576,24 @@ def build_azure_realtime_url(resource_name: str, domain: str, path: str, region:
         base_url = f"https://{resource_name}-{region}.{domain}"
     return f"{base_url}{path}?api-version={AZURE_OPENAI_API_VERSION}"
 
+
+def _realtime_session_log_config(session_payload: Mapping[str, Any], *, include_inline_instructions: bool) -> Dict[str, Any]:
+    """Return safe realtime startup log fields without assuming a nested schema variant."""
+    session = session_payload.get("session")
+    if not isinstance(session, Mapping):
+        session = {}
+    turn_detection = session.get("turn_detection")
+    audio = session.get("audio")
+    if turn_detection is None and isinstance(audio, Mapping):
+        audio_input = audio.get("input")
+        if isinstance(audio_input, Mapping):
+            turn_detection = audio_input.get("turn_detection")
+    return {
+        "voice": session.get("voice"),
+        "turn_detection": turn_detection,
+        "include_inline_instructions": include_inline_instructions,
+    }
+
 @app.post("/api/realtime/webrtc")
 async def webrtc_proxy(
     request: WebRTCRequest,
@@ -1799,11 +1817,10 @@ async def webrtc_proxy(
         print(
             "🎙️ Realtime session config:",
             json.dumps(
-                {
-                    "voice": REALTIME_VOICE,
-                    "turn_detection": client_secrets_request["session"]["audio"]["input"]["turn_detection"],
-                    "include_inline_instructions": include_inline_instructions,
-                }
+                _realtime_session_log_config(
+                    client_secrets_request,
+                    include_inline_instructions=include_inline_instructions,
+                )
             ),
         )
         
