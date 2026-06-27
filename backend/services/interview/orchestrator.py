@@ -1,5 +1,6 @@
 """Interview orchestrator - coordinates the pipeline (scoring + feedback)."""
 
+import json
 import logging
 import uuid
 from typing import Optional, Dict, Any
@@ -49,8 +50,23 @@ class InterviewOrchestrator:
         """
         correlation_id = str(uuid.uuid4())
         logger.info(f"[{correlation_id}] Starting interview evaluation for session {session_id}")
+        eval_cache_key = None
+        lock_key = None
+        lock_acquired = False
         
         try:
+            if idempotency_key:
+                eval_cache_key = f"{self.idempotency_prefix}{session_id}:evaluate:{idempotency_key}"
+                lock_key = f"{self.idempotency_prefix}{session_id}:evaluate:lock:{idempotency_key}"
+                cached_eval = self.redis.get(eval_cache_key)
+                if cached_eval:
+                    logger.info(f"[{correlation_id}] Evaluation cache hit for key {idempotency_key}")
+                    return json.loads(cached_eval)
+                lock_acquired = bool(self.redis.set(lock_key, correlation_id, nx=True, ex=120))
+                if not lock_acquired:
+                    logger.warning(f"[{correlation_id}] Duplicate evaluation request for key {idempotency_key}")
+                    return None
+
             # 1. Validate session
             session = self.session_manager.get_session(session_id)
             if not session:
@@ -67,6 +83,13 @@ class InterviewOrchestrator:
                     "error_message": f"Transcript {transcript_id} not found",
                     "correlation_id": correlation_id,
                     "transcript_id": transcript_id
+                })
+                return None
+
+            if not self.session_manager.update_state(session_id, "TRANSCRIPT_ATTACHED"):
+                self.event_log.append(session_id, "ERROR", {
+                    "error_message": "Invalid session transition to TRANSCRIPT_ATTACHED",
+                    "correlation_id": correlation_id
                 })
                 return None
             
@@ -89,15 +112,23 @@ class InterviewOrchestrator:
             feedback_id = feedback_data.get("feedback_id")
             
             # 5. Update session state
-            self.session_manager.update_state(session_id, "FEEDBACK_GENERATED")
+            if not self.session_manager.update_state(session_id, "FEEDBACK_GENERATED"):
+                self.event_log.append(session_id, "ERROR", {
+                    "error_message": "Invalid session transition to FEEDBACK_GENERATED",
+                    "correlation_id": correlation_id
+                })
+                return None
             
             logger.info(f"[{correlation_id}] Interview evaluation complete: scorecard={scorecard_id}, feedback={feedback_id}")
-            
-            return {
+
+            result = {
                 "scorecard_id": scorecard_id,
                 "feedback_id": feedback_id,
                 "correlation_id": correlation_id
             }
+            if eval_cache_key:
+                self.redis.setex(eval_cache_key, 86400, json.dumps(result))
+            return result
             
         except Exception as e:
             logger.error(f"[{correlation_id}] Error evaluating interview: {e}")
@@ -106,6 +137,12 @@ class InterviewOrchestrator:
                 "correlation_id": correlation_id
             })
             return None
+        finally:
+            if lock_key and lock_acquired:
+                try:
+                    self.redis.delete(lock_key)
+                except Exception:  # noqa: BLE001
+                    logger.warning(f"[{correlation_id}] Failed to release idempotency lock for {session_id}")
 
     def _run_scoring_step(
         self,
@@ -134,15 +171,21 @@ class InterviewOrchestrator:
             })
             
             # Update session state
-            self.session_manager.update_state(session_id, "SCORING_STARTED")
+            if not self.session_manager.update_state(session_id, "SCORING_STARTED"):
+                raise RuntimeError("Invalid session transition to SCORING_STARTED")
             
             # Score transcript
             transcript_text = self.transcript_service.get_transcript(transcript_id)
             if not transcript_text:
                 return None
-            
+
+            transcript_turns = self._to_transcript_turns(transcript_text)
             scorecard = self.scoring_service.score_interview(
-                session_id, "candidate", interview_type, transcript_text
+                session_id=session_id,
+                candidate_id="candidate",
+                transcript_turns=transcript_turns,
+                interview_type=interview_type,
+                duration_minutes=duration_minutes,
             )
             
             scorecard_id = scorecard.get("scorecard_id")
@@ -197,7 +240,8 @@ class InterviewOrchestrator:
             })
             
             # Update session state
-            self.session_manager.update_state(session_id, "FEEDBACK_STARTED")
+            if not self.session_manager.update_state(session_id, "FEEDBACK_STARTED"):
+                raise RuntimeError("Invalid session transition to FEEDBACK_STARTED")
             
             # Build LLM context
             session = self.session_manager.get_session(session_id)
@@ -250,3 +294,29 @@ class InterviewOrchestrator:
                 "correlation_id": correlation_id
             })
             return None
+
+    @staticmethod
+    def _to_transcript_turns(transcript_text: str) -> list[dict[str, Any]]:
+        """Normalize transcript payload into scorer-compatible role/content turns."""
+        if not transcript_text:
+            return []
+        try:
+            payload = json.loads(transcript_text)
+            if isinstance(payload, list):
+                turns = payload
+            elif isinstance(payload, dict):
+                turns = payload.get("transcript") or payload.get("raw_messages") or payload.get("messages") or []
+            else:
+                turns = []
+            normalized = []
+            for turn in turns:
+                if not isinstance(turn, dict):
+                    continue
+                role = (turn.get("role") or turn.get("speaker") or "candidate").lower()
+                content = turn.get("content") or turn.get("text") or turn.get("answer") or ""
+                normalized.append({"role": role, "content": str(content)})
+            if normalized:
+                return normalized
+        except json.JSONDecodeError:
+            pass
+        return [{"role": "candidate", "content": str(transcript_text)}]

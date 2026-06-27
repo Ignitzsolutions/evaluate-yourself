@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import uuid
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ class ScoringService:
         )
 
         scorecard: Dict[str, Any] = {
+            "scorecard_id": f"sc_{session_id[:8]}_{uuid.uuid4().hex[:8]}",
             "session_id": session_id,
             "candidate_id": candidate_id,
             "interview_type": interview_type,

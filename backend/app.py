@@ -2186,6 +2186,48 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
     """WebSocket endpoint for voice-only interview using OpenAI Realtime."""
     print(f"🔌 WebSocket connection attempt: session_id={session_id}, client={websocket.client}")
     
+    # Require authenticated session owner before accepting websocket.
+    auth_token = None
+    if authorization:
+        auth_token = authorization.replace("Bearer ", "").strip()
+    if not auth_token:
+        query_token = websocket.query_params.get("token") or websocket.query_params.get("authorization")
+        if query_token:
+            auth_token = str(query_token).replace("Bearer ", "").strip()
+    if not auth_token:
+        header_auth = websocket.headers.get("Authorization", "")
+        if header_auth.startswith("Bearer "):
+            auth_token = header_auth[7:].strip()
+
+    decoded = verify_clerk_token(auth_token) if auth_token else None
+    caller_user_id = (decoded or {}).get("sub") or (decoded or {}).get("user_id")
+
+    auth_db = SessionLocal()
+    try:
+        if not caller_user_id and auth_token:
+            try:
+                ws_user = get_current_user(authorization=f"Bearer {auth_token}", db=auth_db)
+                caller_user_id = ws_user.clerk_user_id if ws_user else None
+            except Exception:  # noqa: BLE001
+                caller_user_id = None
+        if not caller_user_id:
+            await websocket.close(code=4401, reason="Unauthorized")
+            return
+
+        row = (
+            auth_db.query(models.InterviewSession)
+            .filter(models.InterviewSession.session_id == session_id)
+            .first()
+        )
+        if not row:
+            await websocket.close(code=4404, reason="Session not found")
+            return
+        if row.clerk_user_id != caller_user_id:
+            await websocket.close(code=4403, reason="Forbidden")
+            return
+    finally:
+        auth_db.close()
+
     try:
         await websocket.accept()
         print(f"✅ WebSocket connection accepted: session_id={session_id}")
@@ -2201,14 +2243,7 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         return
     
     # Get user_id from auth if available
-    user_id = "user_default"
-    if authorization:
-        try:
-            decoded = verify_clerk_token(authorization.replace("Bearer ", ""))
-            if decoded:
-                user_id = decoded.get("sub") or decoded.get("user_id") or user_id
-        except Exception:  # noqa: BLE001
-            pass
+    user_id = caller_user_id
     
     # Get or create interview session state
     session_state = load_interview_state(session_id)
@@ -5103,14 +5138,6 @@ async def capture_interview_evidence(
     if authorization:
         current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
-        session_owner_row = (
-            db.query(models.InterviewSession.clerk_user_id)
-            .filter(models.InterviewSession.session_id == session_id)
-            .first()
-        )
-        if session_owner_row and session_owner_row[0]:
-            current_user = type("CaptureUser", (), {"clerk_user_id": str(session_owner_row[0])})()
-    if not current_user:
         raise HTTPException(status_code=401, detail="Authorization is required to capture interview evidence.")
 
     row = db.query(models.InterviewSession).filter(
@@ -5772,35 +5799,15 @@ async def save_interview_transcript(
                 f"turns_evaluated={len(clean_turn_evaluations)} expected_turns={expected_turns}"
             )
 
-        # Resolve report owner:
-        # 1) Authenticated Clerk user from token
-        # 2) Existing interview session owner (for cases where token refresh fails at end-of-call)
-        # 3) guest (dev only fallback)
-        user_id = None
-        current_user = None
-        if authorization:
-            try:
-                current_user = get_current_user(authorization=authorization, db=db)
-                if current_user:
-                    user_id = current_user.clerk_user_id
-            except Exception as auth_err:
-                if is_production:
-                    raise HTTPException(status_code=401, detail=f"Unauthorized transcript save: {auth_err}")
-                print(f"⚠️ Auth optional for transcript save (dev): {auth_err}")
+        # Resolve report owner from authenticated caller only.
+        current_user = get_current_user(authorization=authorization, db=db)
+        user_id = current_user.clerk_user_id
 
-        if not user_id:
-            session_owner_row = (
-                db.query(models.InterviewSession.clerk_user_id)
-                .filter(models.InterviewSession.session_id == session_id)
-                .first()
-            )
-            if session_owner_row and session_owner_row[0]:
-                user_id = str(session_owner_row[0])
-
-        if not user_id:
-            if is_production:
-                raise HTTPException(status_code=401, detail="Authorization is required to save transcripts.")
-            user_id = "guest"
+        session_row = db.query(models.InterviewSession).filter(
+            models.InterviewSession.session_id == session_id
+        ).first()
+        if session_row and session_row.clerk_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
         # Update or reconstruct the in-memory session state
         from services.interview_state import InterviewState

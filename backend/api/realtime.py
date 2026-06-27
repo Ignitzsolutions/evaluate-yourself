@@ -204,6 +204,10 @@ async def websocket_interview_endpoint(
         # 5. REPLAY missed events (chunked)
         # ====================================================================
         replay_events = event_log.get_events_replay(session_id, after_event_id=last_event_id, limit=10000)
+        replay_cursor_stream_id = (
+            replay_events[-1].get("_stream_id")
+            if replay_events else event_log.find_stream_id_by_event_id(session_id, last_event_id)
+        )
         
         chunk_size = 100
         total_chunks = (len(replay_events) + chunk_size - 1) // chunk_size
@@ -223,7 +227,7 @@ async def websocket_interview_endpoint(
                 chunk_events = replay_events[chunk_idx * chunk_size : (chunk_idx + 1) * chunk_size]
                 replay = ReplayMessage(
                     type="REPLAY",
-                    events=chunk_events,
+                    events=[{k: v for k, v in evt.items() if k != "_stream_id"} for evt in chunk_events],
                     resumed_from_id=last_event_id,
                     chunk_index=chunk_idx,
                     total_chunks=total_chunks
@@ -239,11 +243,14 @@ async def websocket_interview_endpoint(
         async def live_event_forwarder():
             """Background task to forward live events."""
             try:
-                async for event in event_log.get_events_stream_subscription(session_id):
+                async for event in event_log.get_events_stream_subscription(
+                    session_id, start_stream_id=replay_cursor_stream_id
+                ):
                     if not subscribed:
                         break
                     
-                    event_msg = EventMessage(type="EVENT", event=event)
+                    event_payload = {k: v for k, v in event.items() if k != "_stream_id"}
+                    event_msg = EventMessage(type="EVENT", event=event_payload)
                     await websocket.send_json(event_msg.model_dump())
                     logger.debug(f"[{connection_id}] Forwarded live event: {event.get('event_type')}")
             except Exception as e:
@@ -285,12 +292,13 @@ async def websocket_interview_endpoint(
                         async def run_pipeline():
                             """Run orchestration asynchronously."""
                             try:
-                                result = orchestrator.evaluate_interview(
+                                result = await asyncio.to_thread(
+                                    orchestrator.evaluate_interview,
                                     session_id=session_id,
                                     transcript_id=pipeline_msg.transcript_id,
                                     interview_type=pipeline_msg.interview_type,
                                     duration_minutes=pipeline_msg.duration_minutes,
-                                    idempotency_key=pipeline_msg.idempotency_key
+                                    idempotency_key=pipeline_msg.idempotency_key,
                                 )
                                 logger.info(f"[{connection_id}] Pipeline complete: {result}")
                             except Exception as e:

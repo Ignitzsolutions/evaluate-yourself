@@ -105,7 +105,9 @@ class SessionEventLog:
             events = []
             for stream_id, event_data in results:
                 event_json = self._extract_event_json(event_data)
-                events.append(json.loads(event_json))
+                event = json.loads(event_json)
+                event["_stream_id"] = stream_id.decode() if isinstance(stream_id, bytes) else str(stream_id)
+                events.append(event)
             
             return events
             
@@ -132,10 +134,14 @@ class SessionEventLog:
             logger.error(f"Error getting event {event_id} for session {session_id}: {e}")
             return None
 
-    async def get_events_stream_subscription(self, session_id: str) -> AsyncIterator[Dict[str, Any]]:
+    async def get_events_stream_subscription(
+        self,
+        session_id: str,
+        start_stream_id: Optional[str] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
         """Async iterator for live event subscription using XREAD BLOCKING."""
         stream_key = f"{self.stream_key_prefix}{session_id}"
-        last_id = "$"  # Start from latest new messages
+        last_id = start_stream_id or "$"  # Start from latest new messages unless resume cursor is provided
         
         try:
             while True:
@@ -152,6 +158,7 @@ class SessionEventLog:
                         for stream_id, event_data in messages:
                             event_json = self._extract_event_json(event_data)
                             event = json.loads(event_json)
+                            event["_stream_id"] = stream_id.decode() if isinstance(stream_id, bytes) else str(stream_id)
                             last_id = stream_id
                             yield event
                 else:
@@ -217,6 +224,21 @@ class SessionEventLog:
             state["event_ids"].append(event.get("event_id"))
         
         return state
+
+    def find_stream_id_by_event_id(self, session_id: str, event_id: str) -> Optional[str]:
+        """Resolve an application event_id UUID to the backing Redis Stream ID."""
+        if not event_id or event_id == "0":
+            return None
+        try:
+            stream_key = f"{self.stream_key_prefix}{session_id}"
+            for stream_id, event_data in self.redis.xrange(stream_key, count=10000):
+                event_json = self._extract_event_json(event_data)
+                event = json.loads(event_json)
+                if event.get("event_id") == event_id:
+                    return stream_id.decode() if isinstance(stream_id, bytes) else str(stream_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error resolving stream ID for event %s in session %s: %s", event_id, session_id, exc)
+        return None
 
     def get_event_count(self, session_id: str) -> int:
         """Get total event count."""
