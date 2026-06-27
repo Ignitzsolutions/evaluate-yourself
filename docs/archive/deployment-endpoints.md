@@ -39,4 +39,3 @@
 - AZURE_OPENAI_* via Key Vault
 - CLERK_* via Key Vault
 - ALLOWED_ORIGINS via Key Vault
-
