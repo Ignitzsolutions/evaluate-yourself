@@ -1,4 +1,4 @@
-"""Shared chat provider adapter with Azure-primary failover to direct OpenAI."""
+"""Shared chat provider adapter using direct OpenAI."""
 
 from __future__ import annotations
 
@@ -9,39 +9,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 def _openai_module():
     try:
-        from openai import AzureOpenAI, OpenAI
+        from openai import OpenAI
     except ImportError:  # pragma: no cover - dependency availability varies locally
-        return None, None
-    return AzureOpenAI, OpenAI
-
-
-def _azure_candidate() -> Optional[Tuple[Any, str]]:
-    AzureOpenAI, _ = _openai_module()
-    if AzureOpenAI is None:
         return None
-
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-    if not api_key or not endpoint or not deployment:
-        return None
-    if api_key == "your-azure-openai-api-key-here":
-        return None
-
-    try:
-        client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint.rstrip("/"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-        )
-    except Exception:
-        return None
-
-    return client, deployment
+    return OpenAI
 
 
 def _openai_candidate() -> Optional[Tuple[Any, str]]:
-    _, OpenAI = _openai_module()
+    OpenAI = _openai_module()
     if OpenAI is None:
         return None
 
@@ -59,17 +34,6 @@ def _openai_candidate() -> Optional[Tuple[Any, str]]:
 
 def get_chat_provider_chain() -> List[Dict[str, Any]]:
     providers: List[Dict[str, Any]] = []
-
-    azure = _azure_candidate()
-    if azure:
-        client, model = azure
-        providers.append(
-            {
-                "provider": "azure",
-                "client": client,
-                "model": model,
-            }
-        )
 
     openai_direct = _openai_candidate()
     if openai_direct:
