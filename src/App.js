@@ -26,6 +26,7 @@ import ReportPage from "./pages/ReportPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import InterviewsPage from "./pages/InterviewsPage";
 import RealtimeTestPage from "./pages/RealtimeTestPage";
+import CommunicationPracticePage from "./pages/CommunicationPracticePage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminOverviewPage from "./pages/admin/AdminOverviewPage";
 import AdminCandidatesPage from "./pages/admin/AdminCandidatesPage";
@@ -183,6 +184,7 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/history" element={<Navigate to="/dashboard" replace state={{ legacyRedirect: "history" }} />} />
             <Route path="/interviews" element={<InterviewsPage />} />
+            <Route path="/communication-practice" element={<CommunicationPracticePage />} />
             <Route path="/interview-config" element={<PreInterviewForm />} />
             <Route path="/report" element={<Navigate to="/dashboard" replace state={{ legacyRedirect: "report" }} />} />
             <Route path="/report/:sessionId" element={<ReportPage />} />

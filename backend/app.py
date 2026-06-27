@@ -1487,6 +1487,24 @@ class TrustedCaptureRequest(BaseModel):
     evaluation_source: Optional[str] = "server_transcript"
 
 
+class CommunicationPracticeNextPromptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pack_id: str
+    quality_flags: List[str] = Field(default_factory=list)
+    completed_prompt_ids: List[str] = Field(default_factory=list)
+
+
+class CommunicationPracticeTurnRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pack_id: str
+    prompt_id: str
+    target_sentence: str
+    spoken_text: str
+    duration_seconds: Optional[float] = None
+
+
 def _profile_skill_defaults(db: Session, clerk_user_id: str, interview_type: str) -> List[str]:
     profile = db.query(models.UserProfile).filter(
         models.UserProfile.clerk_user_id == clerk_user_id
@@ -4345,6 +4363,212 @@ async def list_interview_reports(
         ))
 
     return summaries
+
+
+_COMMUNICATION_PRACTICE_PACKS: List[Dict[str, Any]] = [
+    {
+        "id": "clarity_foundation",
+        "title": "Clarity Foundation",
+        "description": "Practice clear, concise explanations with controlled pacing.",
+        "prompts": [
+            {"id": "c1", "sentence": "I led a project that reduced onboarding time by forty percent.", "focus": ["clarity", "pace"]},
+            {"id": "c2", "sentence": "The key challenge was aligning stakeholders with different priorities.", "focus": ["clarity", "structure"]},
+            {"id": "c3", "sentence": "I broke the problem into phases and validated each milestone early.", "focus": ["structure", "confidence"]},
+            {"id": "c4", "sentence": "The outcome improved customer retention and reduced support tickets.", "focus": ["impact", "concise"]},
+        ],
+    },
+    {
+        "id": "storytelling_star",
+        "title": "STAR Storytelling",
+        "description": "Rehearse crisp STAR-style responses with better flow.",
+        "prompts": [
+            {"id": "s1", "sentence": "In my previous role, a release failed hours before launch.", "focus": ["story", "pace"]},
+            {"id": "s2", "sentence": "My task was to recover the release plan without delaying customers.", "focus": ["clarity", "confidence"]},
+            {"id": "s3", "sentence": "I coordinated engineering and QA to isolate the root cause quickly.", "focus": ["story", "concise"]},
+            {"id": "s4", "sentence": "We restored service in two hours and added safeguards for future releases.", "focus": ["impact", "confidence"]},
+        ],
+    },
+    {
+        "id": "persuasive_communication",
+        "title": "Persuasive Communication",
+        "description": "Practice concise persuasion for meetings and interviews.",
+        "prompts": [
+            {"id": "p1", "sentence": "I recommend prioritizing reliability because downtime directly affects trust.", "focus": ["persuasion", "clarity"]},
+            {"id": "p2", "sentence": "This approach lowers delivery risk while keeping our roadmap realistic.", "focus": ["concise", "confidence"]},
+            {"id": "p3", "sentence": "The data supports this decision with a measurable performance gain.", "focus": ["impact", "structure"]},
+            {"id": "p4", "sentence": "I can lead a pilot this week and report outcomes by Friday.", "focus": ["confidence", "pace"]},
+        ],
+    },
+]
+
+
+def _normalize_practice_tokens(text: str) -> List[str]:
+    return re.findall(r"[a-z0-9']+", str(text or "").lower())
+
+
+def _coverage_ratio(target_sentence: str, spoken_text: str) -> float:
+    target_tokens = set(_normalize_practice_tokens(target_sentence))
+    if not target_tokens:
+        return 0.0
+    spoken_tokens = set(_normalize_practice_tokens(spoken_text))
+    return len(target_tokens & spoken_tokens) / max(1, len(target_tokens))
+
+
+def _choose_next_practice_prompt(
+    pack: Dict[str, Any],
+    quality_flags: List[str],
+    completed_prompt_ids: List[str],
+) -> Optional[Dict[str, Any]]:
+    prompts = [p for p in pack.get("prompts", []) if p.get("id") not in set(completed_prompt_ids or [])]
+    if not prompts:
+        return None
+
+    focus_priority: List[str] = []
+    flags = set(quality_flags or [])
+    if "HIGH_FILLER_DENSITY" in flags or "MODERATE_FILLER_DENSITY" in flags:
+        focus_priority.append("concise")
+    if "PACE_TOO_FAST" in flags or "PACE_TOO_SLOW" in flags:
+        focus_priority.append("pace")
+    if "LOW_PROMPT_COVERAGE" in flags:
+        focus_priority.append("clarity")
+
+    for focus in focus_priority:
+        matched = next((prompt for prompt in prompts if focus in (prompt.get("focus") or [])), None)
+        if matched:
+            return matched
+
+    return prompts[0]
+
+
+@app.get("/api/communication-practice/packs")
+async def list_communication_practice_packs(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    return {
+        "packs": [
+            {
+                "id": pack["id"],
+                "title": pack["title"],
+                "description": pack["description"],
+                "prompt_count": len(pack.get("prompts", [])),
+            }
+            for pack in _COMMUNICATION_PRACTICE_PACKS
+        ]
+    }
+
+
+@app.post("/api/communication-practice/next-prompt")
+async def get_next_communication_practice_prompt(
+    payload: CommunicationPracticeNextPromptRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    pack = next((item for item in _COMMUNICATION_PRACTICE_PACKS if item["id"] == payload.pack_id), None)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Practice pack not found.")
+
+    prompt = _choose_next_practice_prompt(pack, payload.quality_flags, payload.completed_prompt_ids)
+    if not prompt:
+        return {"completed": True, "pack_id": pack["id"], "next_prompt": None}
+
+    remaining_count = max(0, len(pack.get("prompts", [])) - len(set(payload.completed_prompt_ids or [])) - 1)
+    return {
+        "completed": False,
+        "pack_id": pack["id"],
+        "next_prompt": prompt,
+        "remaining_count": remaining_count,
+    }
+
+
+@app.post("/api/communication-practice/evaluate-turn")
+async def evaluate_communication_practice_turn(
+    payload: CommunicationPracticeTurnRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    spoken_text = str(payload.spoken_text or "").strip()
+    if not spoken_text:
+        raise HTTPException(status_code=400, detail="spoken_text is required.")
+
+    duration_seconds = float(payload.duration_seconds or 0.0)
+    estimated_minutes = max(1, int(round(duration_seconds / 60))) if duration_seconds > 0 else 1
+    communication_metrics = analyze_communication_metrics(
+        trusted_messages=[{"speaker": "candidate", "text": spoken_text}],
+        total_duration_minutes=estimated_minutes,
+    )
+
+    coverage = _coverage_ratio(payload.target_sentence, spoken_text)
+    quality_flags = list(communication_metrics.get("quality_flags") or [])
+    if coverage < 0.45:
+        quality_flags.append("LOW_PROMPT_COVERAGE")
+    if spoken_text and spoken_text[0].islower():
+        quality_flags.append("STARTS_WITH_LOWERCASE")
+    if spoken_text and spoken_text[-1] not in ".!?":
+        quality_flags.append("MISSING_TERMINAL_PUNCTUATION")
+    if len(spoken_text.split()) < 4:
+        quality_flags.append("TOO_SHORT")
+    quality_flags = sorted(set(quality_flags))
+
+    pacing_band = communication_metrics.get("pacing_band")
+    filler_density = float(communication_metrics.get("filler_words_per_100") or 0)
+    score = 35 + int(coverage * 45)
+    if pacing_band == "ideal":
+        score += 10
+    elif pacing_band in {"slow", "fast"}:
+        score += 4
+    if filler_density <= 4:
+        score += 8
+    elif filler_density <= 8:
+        score += 4
+    if not any(flag in {"STARTS_WITH_LOWERCASE", "MISSING_TERMINAL_PUNCTUATION"} for flag in quality_flags):
+        score += 7
+    else:
+        score -= 6
+    score = max(0, min(100, int(score)))
+
+    improved_sentence = spoken_text
+    if improved_sentence:
+        improved_sentence = improved_sentence[0].upper() + improved_sentence[1:]
+    if improved_sentence and improved_sentence[-1] not in ".!?":
+        improved_sentence = f"{improved_sentence}."
+
+    coaching: List[str] = []
+    if "LOW_PROMPT_COVERAGE" in quality_flags:
+        coaching.append("Cover more of the target sentence keywords before moving on.")
+    if "HIGH_FILLER_DENSITY" in quality_flags or "MODERATE_FILLER_DENSITY" in quality_flags:
+        coaching.append("Reduce filler words and use shorter, cleaner phrases.")
+    if pacing_band == "fast":
+        coaching.append("Slow down slightly to improve clarity.")
+    elif pacing_band == "slow":
+        coaching.append("Increase pace a little to sound more confident.")
+    if "MISSING_TERMINAL_PUNCTUATION" in quality_flags:
+        coaching.append("Finish with a complete thought and clear ending.")
+    if not coaching:
+        coaching.append("Good attempt. Repeat once more with stronger emphasis on key words.")
+
+    return {
+        "pack_id": payload.pack_id,
+        "prompt_id": payload.prompt_id,
+        "coverage_ratio": round(coverage, 3),
+        "score": score,
+        "quality_flags": quality_flags,
+        "communication_metrics": communication_metrics,
+        "improved_sentence": improved_sentence,
+        "coaching": coaching[:3],
+    }
 
 
 @app.post("/api/waitlist")

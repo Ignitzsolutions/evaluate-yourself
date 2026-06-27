@@ -16,6 +16,7 @@ import {
   Psychology,
   Shuffle,
   PlayArrow,
+  RecordVoiceOver,
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 import { isInterviewFreeAccessMode } from "../utils/accessMode";
@@ -48,6 +49,15 @@ const interviewTypes = [
     color: "primary",
     duration: "30-60 min",
     difficulty: "Varies",
+  },
+  {
+    id: "communication-practice",
+    title: "Communication Practice",
+    description: "Voice-first guided speaking drills with instant grammar and fluency coaching.",
+    icon: <RecordVoiceOver sx={{ fontSize: 48 }} />,
+    color: "primary",
+    duration: "5-20 min",
+    difficulty: "Adaptive",
   },
 ];
 
@@ -104,12 +114,20 @@ export default function InterviewsPage() {
                   variant="contained"
                   color={type.color}
                   startIcon={<PlayArrow />}
-                  onClick={() =>
-                    navigate("/interview-config", { state: { type: type.id } })
-                  }
+                  onClick={() => {
+                    if (type.id === "communication-practice") {
+                      navigate("/communication-practice");
+                      return;
+                    }
+                    navigate("/interview-config", { state: { type: type.id } });
+                  }}
                   fullWidth
                 >
-                  {freeAccessMode ? `Start Sonia ${type.title.split(" ")[0]} Demo` : `Start ${type.title.split(" ")[0]}`}
+                  {type.id === "communication-practice"
+                    ? "Start Practice"
+                    : (freeAccessMode
+                      ? `Start Sonia ${type.title.split(" ")[0]} Demo`
+                      : `Start ${type.title.split(" ")[0]}`)}
                 </Button>
               </CardActions>
             </Card>
