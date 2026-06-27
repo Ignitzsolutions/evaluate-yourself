@@ -6936,19 +6936,23 @@ def admin_tokens_timeseries(
 ):
     _require_admin_user(authorization, db)
     from datetime import datetime, timedelta, timezone
-    from sqlalchemy import func as _func, cast, Date
+    from sqlalchemy import func as _func
     days = max(1, min(int(days or 7), 90))
     since = datetime.now(timezone.utc) - timedelta(days=days)
     LUE = models.LLMUsageEvent
+    # `func.date()` works on both SQLite (built-in) and Postgres, and returns
+    # a text label we don't ask SQLAlchemy to decode as a Date type — that's
+    # the bug we hit on SQLite when using cast(..., Date).
+    day_expr = _func.date(LUE.created_at)
     rows = (
         db.query(
-            cast(LUE.created_at, Date).label("day"),
+            day_expr.label("day"),
             _func.coalesce(_func.sum(LUE.total_tokens), 0),
             _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
         )
         .filter(LUE.created_at >= since)
-        .group_by(cast(LUE.created_at, Date))
-        .order_by(cast(LUE.created_at, Date).asc())
+        .group_by(day_expr)
+        .order_by(day_expr.asc())
         .all()
     )
     return {
