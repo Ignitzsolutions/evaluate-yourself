@@ -27,7 +27,7 @@ An elegant pre-interview evaluation web app that measures and analyzes interpers
 
 ## Local development
 
-> **📌 For Cursor AI**: See [CURSOR_INSTRUCTIONS.md](CURSOR_INSTRUCTIONS.md) for detailed installation requirements and forbidden packages list.
+> **📌 For Cursor AI**: See [docs/guides/CURSOR_INSTRUCTIONS.md](docs/guides/CURSOR_INSTRUCTIONS.md) for detailed installation requirements and forbidden packages list.
 
 ### Quick Start
 
@@ -56,7 +56,11 @@ The voice-only interview feature requires an LLM realtime configuration.
 2. Configure your provider credentials in `backend/.env`
 3. Start the backend and verify `/health` returns success
 
-See [SETUP.md](SETUP.md) for detailed configuration instructions.
+See [docs/guides/SETUP.md](docs/guides/SETUP.md) for detailed configuration instructions.
+
+### Documentation
+
+Root-level legacy setup notes were moved into [`docs/guides/`](docs/guides/README.md) to keep the repository root focused on code and runtime configuration.
 
 
 ---
