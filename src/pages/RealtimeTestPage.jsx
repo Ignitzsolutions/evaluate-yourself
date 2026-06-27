@@ -18,7 +18,7 @@ export default function RealtimeTestPage() {
   const [status, setStatus] = useState('idle'); // idle | connecting | connected | ready | error | disconnected
   const [connectionInfo, setConnectionInfo] = useState({
     backendEndpoint: `${API_BASE_URL}/api/realtime/webrtc`,
-    azureEndpoint: null,
+    providerEndpoint: null,
     region: null,
     deployment: null,
     iceState: null,
@@ -188,11 +188,11 @@ export default function RealtimeTestPage() {
 
           // Handle messages inline to avoid dependency issues
           if (msg.type === 'session.created') {
-            addTranscript('system', 'Azure session created');
+            addTranscript('system', 'Realtime session created');
           } else if (msg.type === 'session.updated') {
             addTranscript('system', 'Session updated');
           } else if (msg.type === 'error') {
-            setError(msg.error?.message || 'Azure API error');
+            setError(msg.error?.message || 'Realtime API error');
             addTranscript('system', `Error: ${msg.error?.message || 'Unknown error'}`);
           } else if (msg.type === 'response.output_text.delta') {
             if (msg.delta) {
@@ -284,7 +284,7 @@ export default function RealtimeTestPage() {
         fetch('http://127.0.0.1:7242/ingest/f0ac307e-28cd-42c1-a0e2-49a4854100b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RealtimeTestPage.jsx:257',message:'Backend request failed',data:{status:resp.status,error_message:errorMessage.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
         // #endregion
         
-        // Distinguish between route not found vs Azure API error
+        // Distinguish between route not found vs provider API error
         if (resp.status === 404 && !text.includes('Realtime API')) {
           errorMessage = `Backend route not found (404). Check if server is running and route exists.`;
         }
@@ -304,8 +304,8 @@ export default function RealtimeTestPage() {
       addTranscript('system', 'SDP answer received from backend');
       
       // Update connection info if available in response
-      if (data.azureEndpoint) {
-        setConnectionInfo(prev => ({ ...prev, azureEndpoint: data.azureEndpoint }));
+      if (data.providerEndpoint) {
+        setConnectionInfo(prev => ({ ...prev, providerEndpoint: data.providerEndpoint }));
       }
       if (data.region) {
         setConnectionInfo(prev => ({ ...prev, region: data.region }));
