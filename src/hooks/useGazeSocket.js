@@ -2,17 +2,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 /**
- * Custom hook for WebSocket connection to backend service that integrates with Azure Face API
- * Sends webcam frames to backend which processes them using Azure Face API for eye tracking
+ * Custom hook for WebSocket connection to backend gaze analysis service.
+ * Sends webcam frames to backend for eye tracking analysis.
  * 
  * The backend service analyzes frames using:
- * - Azure Face API for facial landmarks
+ * - Face landmarks
  * - Eye gaze direction and head pose analysis
  * - Attention metrics calculation
- * 
- * API Documentation: https://learn.microsoft.com/en-us/azure/cognitive-services/computer-vision/overview-identity
- * 
- * @param {string} serverUrl WebSocket server URL that proxies to Azure Face API
+ *
+ * @param {string} serverUrl WebSocket server URL for gaze analysis
  * @returns {Object} Connection state, control functions, and analysis metrics
  */
 export function useGazeSocket(serverUrl) {
@@ -20,7 +18,7 @@ export function useGazeSocket(serverUrl) {
   const [connected, setConnected] = useState(false);
   const [metrics, setMetrics] = useState(null);
 
-  // Connect to WebSocket server for Azure Face API integration
+  // Connect to WebSocket server for gaze analysis integration
   const connect = useCallback(() => {
     if (wsRef.current) return;
     
@@ -31,7 +29,7 @@ export function useGazeSocket(serverUrl) {
     ws.onopen = () => {
       setConnected(true);
       
-      // Initial handshake to verify Azure Face API connectivity
+      // Initial handshake to verify service connectivity
       ws.send(JSON.stringify({ 
         type: "init", 
         clientInfo: {
@@ -50,12 +48,12 @@ export function useGazeSocket(serverUrl) {
       setConnected(false); 
     };
     
-    // Process Azure Face API analysis results
+    // Process gaze analysis results
     ws.onmessage = (ev) => {
       try { 
         const data = JSON.parse(ev.data);
         
-        // Structure expected from Azure Face API proxy
+        // Structure expected from gaze analysis backend
         // {
         //   eyeContact: boolean,      // Whether user is making eye contact
         //   eyeContactPct: number,    // Percentage of eye contact over time
@@ -67,7 +65,7 @@ export function useGazeSocket(serverUrl) {
         
         setMetrics(data); 
       } catch (error) {
-        console.error("Error parsing Azure Face API response:", error);
+        console.error("Error parsing gaze response:", error);
       }
     };
   }, [serverUrl]);
@@ -80,11 +78,10 @@ export function useGazeSocket(serverUrl) {
     }
   }, []);
 
-  // Send video frame to Azure Face API proxy service
+  // Send video frame to gaze analysis service
   const sendFrame = useCallback(async (dataUrl) => {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
     
-    // Optimize payload for Azure Face API processing
     // Frame format: JPEG dataURL (base64)
     wsRef.current.send(JSON.stringify({ 
       type: "frame", 
@@ -104,10 +101,10 @@ export function useGazeSocket(serverUrl) {
   }, []);
 
   return { 
-    connected,      // Whether connected to Azure Face API proxy
-    connect,        // Function to connect to Azure Face API proxy
-    disconnect,     // Function to disconnect from Azure Face API proxy
-    sendFrame,      // Function to send frame for Azure Face API analysis
-    metrics         // Results from Azure Face API analysis
+    connected,      // Whether connected to gaze backend
+    connect,        // Function to connect to gaze backend
+    disconnect,     // Function to disconnect from gaze backend
+    sendFrame,      // Function to send frame for gaze analysis
+    metrics         // Results from gaze analysis
   };
 }

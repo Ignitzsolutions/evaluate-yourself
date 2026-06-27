@@ -21,10 +21,6 @@ import re
 
 import math
 from pathlib import Path
-from azure.identity import (
-    CredentialUnavailableError,
-    DefaultAzureCredential
-)
 try:
     from dotenv import load_dotenv
     import pathlib
@@ -165,17 +161,20 @@ if FRONTEND_AVAILABLE:
         app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="assets")
 
 # Load environment variables
-AZURE_REALTIME_SCOPE = os.getenv(
-    "AZURE_REALTIME_SCOPE",
-    "https://cognitiveservices.azure.com/.default"
-)
-AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")  # e.g., https://{resource}.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
-AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-08-28")
-AZURE_OPENAI_WHISPER_DEPLOYMENT = os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "gpt-4o-mini-transcribe")
-# Note: API version from AZURE_OPENAI_API_VERSION env var (default: 2025-08-28)
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
+OPENAI_API_BASE = (os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1") or "https://api.openai.com/v1").rstrip("/")
+OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "")
+
+# Backward-compatible aliases while internal route wiring is migrated.
+AZURE_OPENAI_API_KEY = OPENAI_API_KEY
+AZURE_OPENAI_ENDPOINT = OPENAI_API_BASE
+AZURE_OPENAI_DEPLOYMENT = OPENAI_REALTIME_MODEL
+AZURE_OPENAI_API_VERSION = OPENAI_API_VERSION
+AZURE_OPENAI_WHISPER_DEPLOYMENT = OPENAI_TRANSCRIBE_MODEL
+
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
 INTERVIEW_ACCESS_MODE = os.getenv("INTERVIEW_ACCESS_MODE", "free").strip().lower()
 if INTERVIEW_ACCESS_MODE not in {"free", "trial"}:
@@ -225,14 +224,11 @@ DEV_AUTH_BYPASS = os.getenv(
     "true" if ADMIN_ALLOW_ALL_LOCAL else "false",
 ).strip().lower() in ("1", "true", "yes", "on")
 
-# OpenAI Realtime API variables (optional - for direct OpenAI API, not Azure)
-OPENAI_REALTIME_API_KEY = os.getenv("OPENAI_REALTIME_API_KEY")
+# Realtime endpoint can be overridden for gateway/self-hosted compatibility.
+OPENAI_REALTIME_API_KEY = OPENAI_API_KEY
 OPENAI_REALTIME_ENDPOINT = os.getenv("OPENAI_REALTIME_ENDPOINT", "wss://api.openai.com/v1/realtime")
-OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 
 import json as json_module
-
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
 def extract_azure_endpoint_info(endpoint: str) -> tuple:
     """Extract resource name, domain, and region from Azure OpenAI endpoint.
@@ -280,46 +276,16 @@ def validate_environment(*, strict: bool = False):
     warnings = []
     errors = []
     
-    # Check Azure OpenAI Realtime configuration
-    if not AZURE_OPENAI_API_KEY or AZURE_OPENAI_API_KEY == "your-azure-openai-api-key-here":
-        errors.append("❌ Azure OpenAI API key not configured. Voice interview will not work.")
+    # Check OpenAI Realtime configuration
+    if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
+        errors.append("❌ OPENAI_API_KEY is not configured. Voice interview will not work.")
     else:
-        if not AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_ENDPOINT == "https://your-resource.openai.azure.com":
-            errors.append("❌ AZURE_OPENAI_ENDPOINT not configured. Set it in backend/.env")
-        elif 'openai.azure.com' not in AZURE_OPENAI_ENDPOINT and 'cognitiveservices.azure.com' not in AZURE_OPENAI_ENDPOINT:
-            errors.append("❌ AZURE_OPENAI_ENDPOINT format invalid. Should be *.openai.azure.com or *.cognitiveservices.azure.com")
-        else:
-            # Check if using cognitiveservices format and warn about conversion
-            if 'cognitiveservices.azure.com' in AZURE_OPENAI_ENDPOINT:
-                warnings.append("⚠️  AZURE_OPENAI_ENDPOINT uses cognitiveservices.azure.com format. This will be automatically converted to openai.azure.com format for Realtime API calls.")
-            
-            # Extract endpoint info for logging
-            try:
-                resource_name, domain, region = extract_azure_endpoint_info(AZURE_OPENAI_ENDPOINT)
-                derived_realtime_host = f"{resource_name}.openai.azure.com"
-                chat_deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-                
-                print("✅ Azure OpenAI Realtime API configured")
-                print(f"   Configured endpoint: {AZURE_OPENAI_ENDPOINT}")
-                print(f"   Derived realtime host: {derived_realtime_host}")
-                print(f"   Deployment: {AZURE_OPENAI_DEPLOYMENT}")
-                print(f"   API version: {AZURE_OPENAI_API_VERSION}")
-                print(f"   Realtime voice: {REALTIME_VOICE}")
-                if chat_deployment:
-                    print(f"   Chat deployment: {chat_deployment}")
-                else:
-                    warnings.append("⚠️  AZURE_OPENAI_CHAT_DEPLOYMENT is not set. Candidate feedback will use deterministic fallback.")
-                if region:
-                    print(f"   Region: {region}")
-            except Exception as e:
-                warnings.append(f"⚠️  Could not parse endpoint for logging: {e}")
-                print("✅ Azure OpenAI Realtime API configured")
-    
-    # Check Azure Speech Services (optional)
-    if AZURE_SPEECH_KEY and AZURE_SPEECH_KEY != "your-azure-speech-key-here":
-        print("✅ Azure Speech Services configured")
-    else:
-        warnings.append("ℹ️  Azure Speech Services not configured (optional for enhanced transcription)")
+        print("✅ OpenAI Realtime API configured")
+        print(f"   Base endpoint: {OPENAI_API_BASE}")
+        print(f"   Realtime model: {OPENAI_REALTIME_MODEL}")
+        print(f"   Chat model: {OPENAI_CHAT_MODEL}")
+        print(f"   Transcription model: {OPENAI_TRANSCRIBE_MODEL}")
+        print(f"   Realtime voice: {REALTIME_VOICE}")
     
     # Print warnings and errors
     if warnings:
@@ -331,7 +297,7 @@ def validate_environment(*, strict: bool = False):
         print("\n".join(errors))
         print("\nTo fix:")
         print("1. Copy backend/.env.example to backend/.env")
-        print("2. Add your Azure OpenAI API key and endpoint")
+        print("2. Add your OPENAI_API_KEY")
         print("3. Restart the server")
         print("="*60 + "\n")
         if strict:
@@ -561,6 +527,13 @@ try:
     logging.info("✅ WebSocket realtime router registered at /ws/interview/{session_id}")
 except Exception as e:
     logging.warning(f"⚠️ Could not register realtime router: {e}")
+
+try:
+    from routes.health import router as health_router
+    app.include_router(health_router, tags=["health"])
+    logging.info("✅ Health router registered at /health")
+except Exception as e:
+    logging.warning(f"⚠️ Could not register health router: {e}")
 
 try:
     from api.auth import router as auth_router, configure_auth_dependencies
@@ -793,20 +766,8 @@ def read_favicon():
         raise HTTPException(status_code=404, detail="Favicon not found")
     return FileResponse(favicon_path)
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
-
 # GET /api/key was removed — it exposed server-side API keys without authentication.
 # Use the authenticated /api/realtime/webrtc endpoint for interview sessions.
-
-azure_credential: Optional[DefaultAzureCredential] = None
-
-def get_azure_credential() -> DefaultAzureCredential:
-    global azure_credential
-    if azure_credential is None:
-        azure_credential = DefaultAzureCredential()
-    return azure_credential
 
 # Interview session storage (Redis-backed, with in-memory fallback for local only)
 _interview_state_cache: Dict[str, InterviewState] = {}
@@ -1607,24 +1568,12 @@ async def webrtc_proxy(
             raise HTTPException(status_code=401, detail="Invalid user session.")
         clerk_user_id = current_user.clerk_user_id
 
-        # Validate Azure configuration
-        if not AZURE_OPENAI_API_KEY or AZURE_OPENAI_API_KEY == "your-azure-openai-api-key-here":
+        # Validate OpenAI configuration
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
             raise HTTPException(
                 status_code=500,
-                detail="Azure OpenAI API key not configured. Please set AZURE_OPENAI_API_KEY in backend/.env"
+                detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env"
             )
-        
-        if not AZURE_OPENAI_ENDPOINT:
-            raise HTTPException(
-                status_code=500,
-                detail="AZURE_OPENAI_ENDPOINT not configured. Please set it in backend/.env"
-            )
-        
-        # Extract resource name, domain, and region
-        try:
-            resource_name, domain, region = extract_azure_endpoint_info(AZURE_OPENAI_ENDPOINT)
-        except ValueError as e:
-            raise HTTPException(status_code=500, detail=str(e))
         
         plan_tier, entitlement = _resolve_plan_tier_for_user(db, clerk_user_id)
         if TRIAL_CODE_ENFORCEMENT and plan_tier != "trial":
@@ -1783,7 +1732,7 @@ async def webrtc_proxy(
             session_row.session_meta_json = json.dumps(runtime_payload)
             db.commit()
 
-        # Build session request per the current GA Realtime schema.
+        # Build session request per the current Realtime schema.
         client_secrets_request = {
             "expires_after": {
                 "anchor": "created_at",
@@ -1824,20 +1773,8 @@ async def webrtc_proxy(
             ),
         )
         
-# Step 1: Create ephemeral token
-        # Azure Realtime API requires openai.azure.com format (extract_azure_endpoint_info now converts cognitiveservices to this)
-        # Build endpoint: {resource-region}.openai.azure.com (preserves full resource-region identifier, e.g., ignit-mk7zvb02-swedencentral.openai.azure.com)
-        base_endpoint = f"{resource_name}.openai.azure.com"
-        
-        # API version: Use value from AZURE_OPENAI_API_VERSION env var
-        # For GA endpoints (2025-08-28), api-version may not be required in URL
-        # Try without api-version first for GA, fallback to with api-version if needed
-        api_version = AZURE_OPENAI_API_VERSION
-        # For GA versions (non-preview), try without api-version parameter first
-        if api_version and "-preview" not in api_version:
-            token_url = f"https://{base_endpoint}/openai/v1/realtime/client_secrets"
-        else:
-            token_url = f"https://{base_endpoint}/openai/v1/realtime/client_secrets?api-version={api_version}"
+        # Step 1: Create ephemeral token
+        token_url = f"{OPENAI_API_BASE}/realtime/client_secrets"
 
         try:
             def _extract_activity_id(resp: Optional[requests.Response]) -> Optional[str]:
@@ -1912,7 +1849,7 @@ async def webrtc_proxy(
                         token_resp = requests.post(
                             token_url,
                             headers={
-                                "api-key": AZURE_OPENAI_API_KEY,
+                                "Authorization": f"Bearer {OPENAI_API_KEY}",
                                 "content-type": "application/json"
                             },
                             json=payload,
@@ -1957,13 +1894,13 @@ async def webrtc_proxy(
                 # Non-transient errors should fail fast.
                 if token_resp.status_code in (401, 403, 404):
                     if token_resp.status_code == 401:
-                        raise HTTPException(status_code=401, detail="Authentication failed. Check API key matches the Azure resource.")
+                        raise HTTPException(status_code=401, detail="Authentication failed. Check OPENAI_API_KEY and account access.")
                     if token_resp.status_code == 403:
-                        raise HTTPException(status_code=403, detail="Forbidden by Azure OpenAI. Verify deployment permissions and API key scope.")
+                        raise HTTPException(status_code=403, detail="Forbidden by OpenAI API. Verify model access and API key scope.")
                     raise HTTPException(
                         status_code=404,
                         detail=(
-                            "Realtime endpoint not found (404). Verify hostname, path, and Realtime availability on this Azure resource."
+                            "Realtime endpoint not found (404). Verify OPENAI_API_BASE and Realtime API availability."
                         ),
                     )
 
@@ -1976,8 +1913,8 @@ async def webrtc_proxy(
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            f"API version {api_version} not supported for Realtime on this resource. "
-                            f"Endpoint used: https://{base_endpoint}/openai/v1/realtime/client_secrets"
+                            f"API version {OPENAI_API_VERSION or '(unset)'} is not supported for Realtime. "
+                            f"Endpoint used: {OPENAI_API_BASE}/realtime/client_secrets"
                         ),
                     )
 
@@ -1990,7 +1927,7 @@ async def webrtc_proxy(
                 raise requests.Timeout() from last_timeout
 
             if not token_resp or token_resp.status_code != 200:
-                retry_hint = "Retry in a few seconds. If this persists, verify Azure Realtime deployment health."
+                retry_hint = "Retry in a few seconds. If this persists, verify OpenAI Realtime model availability."
                 activity_text = f" activityId={last_activity_id}." if last_activity_id else ""
                 detail_text = f"{last_error_detail[:160]} " if last_error_detail else ""
                 raise HTTPException(
@@ -2019,14 +1956,7 @@ async def webrtc_proxy(
             )
         
         # Step 2: SDP negotiation
-        # Azure Realtime API: Use same API version as token creation (from env var)
-        # Always use openai.azure.com format (same as token creation)
-        # For GA versions (non-preview), api-version may not be required in URL
-        calls_api_version = AZURE_OPENAI_API_VERSION
-        if calls_api_version and "-preview" not in calls_api_version:
-            calls_url = f"https://{base_endpoint}/openai/v1/realtime/calls"
-        else:
-            calls_url = f"https://{base_endpoint}/openai/v1/realtime/calls?api-version={calls_api_version}"
+        calls_url = f"{OPENAI_API_BASE}/realtime/calls?model={OPENAI_REALTIME_MODEL}"
         
         try:
             sdp_resp = None
@@ -2107,7 +2037,7 @@ async def create_realtime_session(
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
         raise HTTPException(
             status_code=503,
-            detail="OpenAI Realtime API is not configured on this server. Use Azure via /api/realtime/webrtc."
+            detail="OpenAI Realtime API is not configured on this server. Configure OPENAI_API_KEY."
         )
 
     try:
@@ -2179,7 +2109,7 @@ async def realtime_websocket_proxy(
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
         await websocket.close(
             code=1008,
-            reason="OpenAI API key not configured. Use /api/realtime/webrtc for Azure OpenAI."
+            reason="OpenAI API key not configured on the server."
         )
         return
     
@@ -2253,7 +2183,7 @@ async def realtime_websocket_proxy(
 
 @app.websocket("/api/interview/realtime/{session_id}")
 async def interview_realtime_websocket(websocket: WebSocket, session_id: str, authorization: Optional[str] = None):
-    """WebSocket endpoint for voice-only interview using Azure OpenAI Realtime."""
+    """WebSocket endpoint for voice-only interview using OpenAI Realtime."""
     print(f"🔌 WebSocket connection attempt: session_id={session_id}, client={websocket.client}")
     
     try:
@@ -2302,74 +2232,49 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         )
         save_interview_state(session_state)
     
-    # Build Azure OpenAI Realtime WebSocket URL
-    if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and AZURE_OPENAI_API_KEY != "your-azure-openai-api-key-here":
-        # Use Azure OpenAI
-        endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
-        if not endpoint.startswith("http"):
-            endpoint = f"https://{endpoint}"
-        
-        # Handle both endpoint patterns:
-        # 1. Standard Azure OpenAI: https://{resource}.openai.azure.com
-        # 2. Cognitive Services pattern: https://{region}.api.cognitive.microsoft.com
-        # IMPORTANT: Use /openai/v1/realtime (not /openai/realtime) to match WebRTC pattern
-        # Extract base hostname (same logic as WebRTC endpoint)
-        try:
-            resource_name, domain, region = extract_azure_endpoint_info(endpoint)
-            base_endpoint = f"{resource_name}.openai.azure.com"
-        except Exception as e:
-            print(f"⚠️  Could not parse endpoint for WebSocket: {e}, using endpoint as-is")
-            # Fallback: try to extract hostname manually
-            from urllib.parse import urlparse
-            parsed = urlparse(endpoint if endpoint.startswith(('http://', 'https://')) else f"https://{endpoint}")
-            base_endpoint = parsed.netloc or endpoint.replace("https://", "").replace("http://", "").split("/")[0]
-        
-        # Build WebSocket URL using /openai/v1/realtime (consistent with WebRTC)
-        # For GA versions (non-preview), api-version may not be required in URL
-        if AZURE_OPENAI_API_VERSION and "-preview" not in AZURE_OPENAI_API_VERSION:
-            ws_url = f"wss://{base_endpoint}/openai/v1/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}"
-        else:
-            ws_url = f"wss://{base_endpoint}/openai/v1/realtime?deployment={AZURE_OPENAI_DEPLOYMENT}&api-version={AZURE_OPENAI_API_VERSION}"
-        
-        headers = {"api-key": AZURE_OPENAI_API_KEY}
+    # Build OpenAI Realtime WebSocket URL
+    if OPENAI_API_KEY and OPENAI_API_KEY != "your-openai-api-key-here":
+        ws_url = f"wss://api.openai.com/v1/realtime?model={OPENAI_REALTIME_MODEL}"
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
     else:
         error_msg = (
-            "Azure OpenAI API key not configured. "
-            "Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in backend/.env file."
+            "OpenAI API key not configured. "
+            "Please set OPENAI_API_KEY in backend/.env file."
         )
         await websocket.close(code=1008, reason=error_msg)
         return
     
     try:
-        logging.info("Connecting to Azure OpenAI Realtime: %s", ws_url[:100])
+        logging.info("Connecting to OpenAI Realtime: %s", ws_url[:100])
         
-        # Send status update: starting Azure connection
+        # Send status update: starting OpenAI connection
         await websocket.send_text(json.dumps({
-            "type": "azure.connecting",
+            "type": "openai.connecting",
             "status": "connecting",
-            "message": "Connecting to Azure OpenAI Realtime..."
+            "message": "Connecting to OpenAI Realtime..."
         }))
         
-        # Add timeout for Azure connection
+        # Add timeout for provider connection
         try:
-            azure_ws = await asyncio.wait_for(
+            openai_ws = await asyncio.wait_for(
                 websockets.connect(
                     ws_url,
                     subprotocols=["realtime"],
                     additional_headers=headers
                 ),
-                timeout=10.0  # 10 second timeout for Azure connection
+                timeout=10.0
             )
-            print(f"✅ Azure OpenAI Realtime WebSocket connected: session_id={session_id}")
+            azure_ws = openai_ws  # Temporary alias while legacy helper names are migrated.
+            print(f"✅ OpenAI Realtime WebSocket connected: session_id={session_id}")
             
-            # Send status update: Azure connected
+            # Send status update: OpenAI connected
             await websocket.send_text(json.dumps({
-                "type": "azure.connected",
+                "type": "openai.connected",
                 "status": "connected",
-                "message": "Azure OpenAI Realtime connected. Initializing session..."
+                "message": "OpenAI Realtime connected. Initializing session..."
             }))
         except asyncio.TimeoutError:
-            error_msg = "Azure OpenAI connection timeout after 10 seconds"
+            error_msg = "OpenAI connection timeout after 10 seconds"
             print(f"❌ {error_msg}")
             print(f"❌ WebSocket URL: {ws_url}")
             print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
@@ -2379,31 +2284,31 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
                     "message": error_msg,
                     "code": "timeout",
                     "ws_url": ws_url,
-                    "suggestion": "Check your Azure endpoint, deployment name, and API version"
+                    "suggestion": "Check your OPENAI_API_KEY and model configuration"
                 }
             }))
             # Keep connection open briefly to allow error message to be received
             await asyncio.sleep(1)
             return
         except websockets.exceptions.InvalidHandshake as e:
-            error_msg = f"Azure OpenAI handshake failed: {str(e)}"
+            error_msg = f"OpenAI handshake failed: {str(e)}"
             print(f"❌ {error_msg}")
             print(f"❌ WebSocket URL: {ws_url}")
             print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
-            print(f"❌ This usually means: Wrong endpoint, wrong API key, or deployment not found")
+            print("❌ This usually means: wrong API key, unsupported model, or rate limiting")
             await websocket.send_text(json.dumps({
                 "type": "error",
                 "error": {
                     "message": error_msg,
                     "code": "invalid_handshake",
                     "ws_url": ws_url,
-                    "suggestion": "Verify AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT"
+                    "suggestion": "Verify OPENAI_API_KEY and OPENAI_REALTIME_MODEL"
                 }
             }))
             await asyncio.sleep(1)
             return
         except Exception as e:
-            error_msg = f"Azure OpenAI connection failed: {str(e)}"
+            error_msg = f"OpenAI connection failed: {str(e)}"
             print(f"❌ {error_msg}")
             print(f"❌ Error type: {type(e).__name__}")
             print(f"❌ WebSocket URL: {ws_url}")
@@ -2510,19 +2415,19 @@ Interview behavior:
                     f"instructions(first 500): {english_only_instructions[:500]}"
                 )
                 
-                await azure_ws.send(json.dumps(session_update_payload))
+                await openai_ws.send(json.dumps(session_update_payload))
                 
                 # Step 3: Wait for session.updated confirmation
                 try:
-                    update_event = json.loads(await asyncio.wait_for(azure_ws.recv(), timeout=5.0))
+                    update_event = json.loads(await asyncio.wait_for(openai_ws.recv(), timeout=5.0))
                     if update_event.get("type") == "session.updated":
                         await websocket.send_text(json.dumps(update_event))
-                        print(f"✅ Azure session updated")
+                        print("✅ OpenAI session updated")
                 except asyncio.TimeoutError:
                     print(f"⚠️ Timeout waiting for session.updated, continuing anyway")
                 
                 # Step 4: Send initial greeting to start the interview
-                await _send_initial_question(azure_ws, session_state)
+                await _send_initial_question(openai_ws, session_state)
                 print(f"✅ Sent initial greeting")
                 
                 # Send ready status message

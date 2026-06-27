@@ -84,7 +84,7 @@ The server processes webcam frames and returns:
 
 ## 🔧 Configuration
 
-### Tuning Parameters (in server.py)
+### Tuning Parameters (in backend/app.py)
 
 ```python
 # Blink detection threshold
