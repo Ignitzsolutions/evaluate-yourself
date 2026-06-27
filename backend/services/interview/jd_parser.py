@@ -72,27 +72,11 @@ _TECH_DOMAIN_MAP: Dict[str, str] = {
 
 def _get_llm_client():
     try:
-        from openai import AzureOpenAI, OpenAI
+        from openai import OpenAI
     except ImportError:
         return None, None
 
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-
-    if azure_key and azure_endpoint and azure_key != "your-azure-openai-api-key-here":
-        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-        if not deployment:
-            return None, None
-        try:
-            from openai import AzureOpenAI
-            return AzureOpenAI(
-                api_key=azure_key,
-                azure_endpoint=azure_endpoint.rstrip("/"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-            ), deployment
-        except Exception:
-            return None, None
 
     if openai_key and openai_key != "your-openai-api-key-here":
         try:
