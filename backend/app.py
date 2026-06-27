@@ -41,7 +41,7 @@ from models.interview import InterviewReport, InterviewReportSummary, CreateInte
 from services.personality_scoring import generate_report
 from services.interview_state import InterviewState, NextAction
 from services.interview_state_store import InterviewStateStore
-from db.redis_client import get_redis_client, test_redis_connection
+from db.redis_client import get_redis_client
 from services.interview_evaluator import evaluate_response
 from services.report_generator import generate_report as generate_interview_report
 from services.interview.adaptive_engine import (
@@ -116,7 +116,7 @@ from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Rect, String
 
 #database imports
-from db.database import DATABASE_URL, SessionLocal, engine, test_db_connection
+from db.database import DATABASE_URL, SessionLocal, engine
 from db import models
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect, text
@@ -529,6 +529,13 @@ except Exception as e:
     logging.warning(f"⚠️ Could not register realtime router: {e}")
 
 try:
+    from routes.health import router as health_router
+    app.include_router(health_router, tags=["health"])
+    logging.info("✅ Health router registered at /health")
+except Exception as e:
+    logging.warning(f"⚠️ Could not register health router: {e}")
+
+try:
     from api.auth import router as auth_router, configure_auth_dependencies
     from services.auth.password_service import PasswordService
     from services.auth.token_service import TokenService
@@ -758,34 +765,6 @@ def read_favicon():
     if favicon_path is None:
         raise HTTPException(status_code=404, detail="Favicon not found")
     return FileResponse(favicon_path)
-
-@app.get("/health")
-def health_check():
-    db_ok, db_message, db_latency_ms = test_db_connection()
-    redis_ok, redis_message, redis_latency_ms = test_redis_connection()
-    openai_ok = bool(OPENAI_API_KEY and OPENAI_API_KEY != "your-openai-api-key-here")
-
-    payload = {
-        "status": "healthy" if (db_ok and redis_ok and openai_ok) else "degraded",
-        "components": {
-            "openai": {
-                "ok": openai_ok,
-                "message": "OPENAI_API_KEY configured" if openai_ok else "OPENAI_API_KEY missing",
-            },
-            "database": {
-                "ok": db_ok,
-                "message": db_message,
-                "latency_ms": round(db_latency_ms, 2),
-            },
-            "redis": {
-                "ok": redis_ok,
-                "message": redis_message,
-                "latency_ms": round(redis_latency_ms, 2),
-            },
-        },
-    }
-    status_code = 200 if payload["status"] == "healthy" else 503
-    return JSONResponse(status_code=status_code, content=payload)
 
 # GET /api/key was removed — it exposed server-side API keys without authentication.
 # Use the authenticated /api/realtime/webrtc endpoint for interview sessions.

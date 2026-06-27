@@ -1,6 +1,6 @@
 # backend/db/models.py
 import uuid
-from sqlalchemy import Column, String, DateTime, Integer, Boolean, Text
+from sqlalchemy import Column, String, DateTime, Integer, Boolean, Text, ForeignKey
 from sqlalchemy.sql import func
 from .database import Base
 
@@ -26,7 +26,7 @@ class UserProfile(Base):
     __tablename__ = "user_profiles"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    clerk_user_id = Column(String, unique=True, index=True, nullable=False)
+    clerk_user_id = Column(String, ForeignKey("users.clerk_user_id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
     user_category = Column(String, nullable=False)  # student | professional
 
     # Common fields
@@ -64,7 +64,7 @@ class InterviewSession(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, unique=True, index=True, nullable=False)
-    clerk_user_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, ForeignKey("users.clerk_user_id", ondelete="CASCADE"), index=True, nullable=False)
     status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE | COMPLETED | FAILED
 
     interview_type = Column(String)
@@ -86,7 +86,7 @@ class InterviewReport(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, unique=True, index=True, nullable=True)  # Session ID from interview
-    user_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     title = Column(String, nullable=False)
     date = Column(DateTime(timezone=True), server_default=func.now())
     type = Column(String, nullable=False)  # behavioral, technical, mixed
@@ -122,7 +122,7 @@ class InterviewGazeEvent(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, index=True, nullable=False)
-    clerk_user_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, ForeignKey("users.clerk_user_id", ondelete="CASCADE"), index=True, nullable=False)
     event_type = Column(String, index=True, nullable=False)
     description = Column(String, nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False)
@@ -139,7 +139,7 @@ class InterviewRound(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, index=True, nullable=False)
-    clerk_user_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, ForeignKey("users.clerk_user_id", ondelete="CASCADE"), index=True, nullable=False)
     round_index = Column(Integer, nullable=False, default=0)
     phase = Column(String, nullable=False, default="intro")
     agent_owner = Column(String, nullable=False, default="orchestrator")
@@ -159,7 +159,7 @@ class SessionMemorySnapshot(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, index=True, nullable=False)
-    clerk_user_id = Column(String, index=True, nullable=False)
+    clerk_user_id = Column(String, ForeignKey("users.clerk_user_id", ondelete="CASCADE"), index=True, nullable=False)
     round_index = Column(Integer, nullable=False, default=0)
     snapshot_kind = Column(String, nullable=False, default="carry_forward")
     resume_token = Column(String, nullable=True, index=True)
@@ -225,7 +225,7 @@ class AuthIdentity(Base):
     __tablename__ = "auth_identities"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     provider = Column(String, index=True, nullable=False, default="clerk")
     provider_user_id = Column(String, index=True, nullable=False)
     provider_instance = Column(String, nullable=True)
@@ -241,7 +241,7 @@ class UserEmail(Base):
     __tablename__ = "user_emails"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     email = Column(String, nullable=False)
     normalized_email = Column(String, unique=True, index=True, nullable=False)
     is_primary = Column(Boolean, nullable=False, default=True)
@@ -255,7 +255,7 @@ class UserPhone(Base):
     __tablename__ = "user_phones"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     phone_e164 = Column(String, unique=True, index=True, nullable=False)
     is_primary = Column(Boolean, nullable=False, default=True)
     is_verified = Column(Boolean, nullable=False, default=False)
@@ -269,7 +269,7 @@ class CandidateProfileV2(Base):
     __tablename__ = "candidate_profiles"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, unique=True, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
     full_name_override = Column(String, nullable=True)
     candidate_type = Column(String, nullable=False, default="student")
     state_code = Column(String, nullable=True)
@@ -303,7 +303,7 @@ class CandidateProfileVersion(Base):
     __tablename__ = "candidate_profile_versions"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     version_no = Column(Integer, nullable=False, default=1)
     snapshot_json = Column(Text, nullable=False, default="{}")
     source = Column(String, nullable=False, default="onboarding_submit")
@@ -314,7 +314,7 @@ class AdminExportJob(Base):
     __tablename__ = "admin_export_jobs"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    created_by_user_id = Column(String, index=True, nullable=False)
+    created_by_user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     export_type = Column(String, index=True, nullable=False)
     filters_json = Column(Text, nullable=True)
     columns_json = Column(Text, nullable=True)
