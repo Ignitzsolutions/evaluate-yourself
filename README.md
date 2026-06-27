@@ -48,19 +48,13 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
 
-### Azure Configuration (Required for Voice Interview)
+### LLM Configuration (Required for Voice Interview)
 
-The voice-only interview feature requires Azure OpenAI Realtime API configuration:
+The voice-only interview feature requires an LLM realtime configuration.
 
-1. **Create Azure OpenAI resource** in Azure Portal
-2. **Deploy `gpt-4o-realtime` model**
-3. **Get API key and endpoint** from Azure Portal
-4. **Configure `backend/.env`** file:
-   ```env
-   AZURE_OPENAI_API_KEY=your-api-key
-   AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-   AZURE_OPENAI_DEPLOYMENT=gpt-4o-realtime
-   ```
+1. Copy `backend/.env.example` to `backend/.env`
+2. Configure your provider credentials in `backend/.env`
+3. Start the backend and verify `/health` returns success
 
 See [SETUP.md](SETUP.md) for detailed configuration instructions.
 
@@ -70,4 +64,3 @@ See [SETUP.md](SETUP.md) for detailed configuration instructions.
 ## License
 
 This project is released under the terms of the MIT License. See `LICENSE` for details.
-
