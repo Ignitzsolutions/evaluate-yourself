@@ -175,7 +175,6 @@ AZURE_OPENAI_DEPLOYMENT = OPENAI_REALTIME_MODEL
 AZURE_OPENAI_API_VERSION = OPENAI_API_VERSION
 AZURE_OPENAI_WHISPER_DEPLOYMENT = OPENAI_TRANSCRIBE_MODEL
 
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
 INTERVIEW_ACCESS_MODE = os.getenv("INTERVIEW_ACCESS_MODE", "free").strip().lower()
 if INTERVIEW_ACCESS_MODE not in {"free", "trial"}:
@@ -230,8 +229,6 @@ OPENAI_REALTIME_API_KEY = OPENAI_API_KEY
 OPENAI_REALTIME_ENDPOINT = os.getenv("OPENAI_REALTIME_ENDPOINT", "wss://api.openai.com/v1/realtime")
 
 import json as json_module
-
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
 def extract_azure_endpoint_info(endpoint: str) -> tuple:
     """Extract resource name, domain, and region from Azure OpenAI endpoint.
@@ -289,12 +286,6 @@ def validate_environment(*, strict: bool = False):
         print(f"   Chat model: {OPENAI_CHAT_MODEL}")
         print(f"   Transcription model: {OPENAI_TRANSCRIBE_MODEL}")
         print(f"   Realtime voice: {REALTIME_VOICE}")
-    
-    # Check Azure Speech Services (optional)
-    if AZURE_SPEECH_KEY and AZURE_SPEECH_KEY != "your-azure-speech-key-here":
-        print("✅ Azure Speech Services configured")
-    else:
-        warnings.append("ℹ️  Speech provider key not configured (optional)")
     
     # Print warnings and errors
     if warnings:
