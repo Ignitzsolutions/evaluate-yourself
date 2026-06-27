@@ -208,20 +208,25 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip, ua = _client_meta(request)
     email_norm = body.email.lower()
 
-    locked, ttl = lockout_service.is_locked(email_norm, ip)
-    if locked:
-        audit.log_event("login_blocked", outcome="failure", email=email_norm,
-                        ip_address=ip, user_agent=ua, detail={"seconds_remaining": ttl})
-        raise HTTPException(status_code=429, detail={
-            "code": "ACCOUNT_LOCKED",
-            "message": f"Too many failed attempts. Try again in {ttl} seconds.",
-            "retry_after_seconds": ttl,
-        })
+    from services.feature_flags import auth_lockout_enabled as _lo
+    lockout_on = _lo()
+    if lockout_on:
+        locked, ttl = lockout_service.is_locked(email_norm, ip)
+        if locked:
+            audit.log_event("login_blocked", outcome="failure", email=email_norm,
+                            ip_address=ip, user_agent=ua, detail={"seconds_remaining": ttl})
+            raise HTTPException(status_code=429, detail={
+                "code": "ACCOUNT_LOCKED",
+                "message": f"Too many failed attempts. Try again in {ttl} seconds.",
+                "retry_after_seconds": ttl,
+            })
 
     user = db.query(models.User).filter(models.User.email == email_norm).first()
 
     def _fail(reason: str, status: int = 401, code: str = "INVALID_CREDENTIALS", msg: str = "Invalid email or password."):
-        locked_now, lock_ttl = lockout_service.record_failure(email_norm, ip)
+        locked_now, lock_ttl = (False, 0)
+        if lockout_on:
+            locked_now, lock_ttl = lockout_service.record_failure(email_norm, ip)
         audit.log_event("login_failure", outcome="failure", email=email_norm, user_id=(user.id if user else None),
                         ip_address=ip, user_agent=ua, detail={"reason": reason, "locked": locked_now})
         if locked_now:
@@ -249,14 +254,15 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
         _fail("bad_password")
 
     # MFA gate
-    if mfa_service.is_enabled(db, user.id):
+    from services.feature_flags import auth_mfa_enabled, auth_lockout_enabled
+    if auth_mfa_enabled() and mfa_service.is_enabled(db, user.id):
         # Issue short-lived MFA challenge token; not a full session token.
         mfa_token = _token_service.create_user_token(user_id=user.id, email=user.email or "", is_admin=False)
         audit.log_event("mfa_challenge", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
         return MFARequiredResponse(mfa_token=mfa_token)
 
     # Admin without MFA: force enrollment by responding with a marker.
-    if user.is_admin and not mfa_service.is_enabled(db, user.id):
+    if auth_mfa_enabled() and user.is_admin and not mfa_service.is_enabled(db, user.id):
         mfa_token = _token_service.create_user_token(user_id=user.id, email=user.email or "", is_admin=True)
         audit.log_event("login_admin_mfa_required", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
         # Return same shape as MFA challenge but with mfa_enroll_required hint.

@@ -60,7 +60,10 @@ def rotate(
     if rec is None:
         return None, "not_found"
     now = datetime.now(timezone.utc)
-    if rec.expires_at and rec.expires_at < now:
+    exp = rec.expires_at
+    if exp is not None and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp and exp < now:
         return None, "expired"
     if rec.revoked_at:
         # Reuse detection: kill the family.

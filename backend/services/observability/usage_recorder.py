@@ -67,6 +67,12 @@ def record_llm_usage(
 ) -> None:
     """Fire-and-forget usage record."""
     try:
+        from services.feature_flags import usage_recording_enabled
+        if not usage_recording_enabled():
+            return
+    except Exception:
+        pass
+    try:
         total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
         cost_micro = estimate_cost_micro_usd(
             model,
