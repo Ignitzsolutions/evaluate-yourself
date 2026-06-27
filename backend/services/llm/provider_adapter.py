@@ -111,6 +111,17 @@ def create_chat_completion(
                     "status": "success",
                 }
             )
+            try:
+                from services.observability.usage_recorder import record_openai_response_usage
+                record_openai_response_usage(
+                    getattr(response, "usage", None),
+                    model=str(model or "unknown"),
+                    route=str(purpose or "llm"),
+                    provider=str(provider or "openai"),
+                    latency_ms=latency_ms,
+                )
+            except Exception:
+                pass
             return {
                 "text": text,
                 "provider_trace": build_provider_trace(

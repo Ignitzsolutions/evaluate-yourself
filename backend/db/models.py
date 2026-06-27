@@ -372,3 +372,81 @@ class AdminCustomQuestion(Base):
     updated_by_clerk_user_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Admin observability: LLM/Realtime usage telemetry
+# ─────────────────────────────────────────────────────────────────────
+
+class LLMUsageEvent(Base):
+    """Single LLM or Realtime API call accounting record.
+
+    Written non-blockingly by services.observability.usage_recorder.
+    """
+    __tablename__ = "llm_usage_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True, nullable=True)
+    clerk_user_id = Column(String, index=True, nullable=True)
+    session_id = Column(String, index=True, nullable=True)
+    route = Column(String, index=True, nullable=True)  # e.g. "scoring", "orchestrator", "realtime", "practice"
+    provider = Column(String, nullable=False, default="openai")
+    model = Column(String, nullable=False)
+    kind = Column(String, nullable=False, default="chat")  # chat | realtime_audio | embedding
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    audio_input_seconds = Column(Integer, nullable=False, default=0)
+    audio_output_seconds = Column(Integer, nullable=False, default=0)
+    est_cost_usd_micro = Column(Integer, nullable=False, default=0)  # micro-dollars (USD * 1_000_000)
+    latency_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Auth hardening: MFA, refresh tokens, lockouts, audit log
+# ─────────────────────────────────────────────────────────────────────
+
+class UserMFA(Base):
+    """Per-user TOTP MFA configuration. One row per user when enrolled."""
+    __tablename__ = "user_mfa"
+
+    user_id = Column(String, primary_key=True)
+    secret_encrypted = Column(String, nullable=False)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    recovery_codes_hashed = Column(Text, nullable=True)  # JSON array of bcrypt hashes
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class RefreshTokenRecord(Base):
+    """Persisted refresh tokens with rotation/reuse detection metadata."""
+    __tablename__ = "refresh_tokens"
+
+    jti = Column(String, primary_key=True)
+    user_id = Column(String, index=True, nullable=False)
+    family_id = Column(String, index=True, nullable=False)  # rotation chain
+    parent_jti = Column(String, nullable=True)
+    device_label = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    issued_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_reason = Column(String, nullable=True)
+
+
+class AuthAuditEvent(Base):
+    """Append-only auth audit log surfaced in admin security page."""
+    __tablename__ = "auth_audit_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True, nullable=True)
+    email = Column(String, index=True, nullable=True)
+    event_type = Column(String, nullable=False, index=True)  # login_success|login_failure|mfa_pass|mfa_fail|password_change|token_revoke|account_locked|admin_action
+    outcome = Column(String, nullable=False)  # success|failure
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    detail = Column(Text, nullable=True)  # JSON details
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

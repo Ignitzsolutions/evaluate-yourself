@@ -28,6 +28,8 @@ const getStoredString = (key, fallback) => {
 
 const navItems = [
   { to: "/admin/dashboard/overview", label: "Overview" },
+  { to: "/admin/dashboard/live", label: "Live Ops" },
+  { to: "/admin/dashboard/security", label: "Security" },
   { to: "/admin/dashboard/candidates", label: "Candidates" },
   { to: "/admin/dashboard/interviews", label: "Interviews" },
   { to: "/admin/dashboard/question-bank", label: "Question Bank" },

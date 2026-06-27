@@ -9,6 +9,7 @@ import OnboardingGuard from "./components/OnboardingGuard";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import theme from "./theme/theme";
+import { usePresenceHeartbeat } from "./hooks/usePresenceHeartbeat";
 
 import LandingPage from "./pages/LandingPage.jsx";
 import PresentationPage from "./pages/PresentationPage.jsx";
@@ -29,6 +30,8 @@ import RealtimeTestPage from "./pages/RealtimeTestPage";
 import CommunicationPracticePage from "./pages/CommunicationPracticePage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminOverviewPage from "./pages/admin/AdminOverviewPage";
+import AdminLiveOpsPage from "./pages/admin/AdminLiveOpsPage";
+import AdminSecurityPage from "./pages/admin/AdminSecurityPage";
 import AdminCandidatesPage from "./pages/admin/AdminCandidatesPage";
 import AdminCandidateDetailPage from "./pages/admin/AdminCandidateDetailPage";
 import AdminInterviewsPage from "./pages/admin/AdminInterviewsPage";
@@ -107,6 +110,7 @@ function LandingLayout() {
 }
 
 export default function App() {
+  usePresenceHeartbeat();
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -161,6 +165,8 @@ export default function App() {
           >
             <Route index element={<Navigate to="overview" replace />} />
             <Route path="overview" element={<AdminOverviewPage />} />
+            <Route path="live" element={<AdminLiveOpsPage />} />
+            <Route path="security" element={<AdminSecurityPage />} />
             <Route path="candidates" element={<AdminCandidatesPage />} />
             <Route path="candidates/:clerkUserId" element={<AdminCandidateDetailPage />} />
             <Route path="interviews" element={<AdminInterviewsPage />} />

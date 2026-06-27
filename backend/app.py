@@ -6684,6 +6684,376 @@ async def legacy_gaze_websocket(websocket: WebSocket):
     except Exception as e:
         logging.exception("Legacy gaze websocket error: %s", e)
 
+# ─────────────────────────────────────────────────────────────────────
+# Presence heartbeat + admin live ops + token monitoring + security
+# ─────────────────────────────────────────────────────────────────────
+
+class _HeartbeatPayload(BaseModel):
+    route: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+@app.post("/api/me/heartbeat")
+def me_heartbeat(
+    payload: _HeartbeatPayload = _HeartbeatPayload(),
+    current_user: User = Depends(get_current_user),
+):
+    """Frontend pings every ~30s to keep the user marked as active."""
+    try:
+        from services.presence import presence_service
+        presence_service.mark_active(
+            user_id=str(current_user.id),
+            clerk_user_id=getattr(current_user, "clerk_user_id", None),
+            email=getattr(current_user, "email", None),
+            route=(payload.route or "")[:80] or None,
+            session_id=(payload.session_id or "")[:80] or None,
+        )
+    except Exception as exc:
+        logging.debug("heartbeat failed: %s", exc)
+    return {"ok": True}
+
+
+def _require_admin_user(authorization: Optional[str], db: Session) -> User:
+    user = get_current_user(authorization=authorization, db=db)
+    if not _is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Admin only.")
+    return user
+
+
+@app.get("/api/admin/live/token")
+def admin_live_token(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Mint a short-lived token usable as ?token= for SSE EventSource which
+    cannot send custom Authorization headers."""
+    admin = _require_admin_user(authorization, db)
+    from api.auth import _token_service as auth_ts
+    token = auth_ts.create_user_token(
+        user_id=str(admin.id),
+        email=getattr(admin, "email", "") or "",
+        is_admin=True,
+    )
+    return {"token": token, "expires_in": auth_ts.token_lifetime_seconds}
+
+
+def _validate_admin_query_token(token: Optional[str], db: Session) -> Optional[User]:
+    if not token:
+        return None
+    from api.auth import _token_service as auth_ts
+    payload = auth_ts.validate_token(token) if auth_ts else None
+    if not payload or not payload.get("is_admin"):
+        return None
+    user = db.query(User).filter(User.id == payload.get("sub")).first()
+    if not user or not _is_admin_user(user):
+        return None
+    return user
+
+
+@app.get("/api/admin/live/stream")
+async def admin_live_stream(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """SSE stream multiplexing presence + usage + session events from Redis pub/sub."""
+    admin = None
+    if authorization:
+        try:
+            admin = _require_admin_user(authorization, db)
+        except HTTPException:
+            admin = None
+    if admin is None:
+        admin = _validate_admin_query_token(token, db)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Admin auth required.")
+
+    import asyncio
+    import json as _json
+    from db.redis_client import get_redis_client
+
+    channels = ["presence:events", "usage:events", "session:events"]
+
+    async def event_gen():
+        loop = asyncio.get_running_loop()
+        pubsub = None
+        try:
+            client = get_redis_client()
+            pubsub = client.pubsub()
+            pubsub.subscribe(*channels)
+            yield "retry: 5000\n\n"
+            yield f"event: hello\ndata: {_json.dumps({'ok': True, 'channels': channels})}\n\n"
+            last_ping = loop.time()
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                def _next():
+                    return pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+
+                msg = await loop.run_in_executor(None, _next)
+                now = loop.time()
+                if msg and msg.get("type") == "message":
+                    channel = msg.get("channel") or ""
+                    if isinstance(channel, bytes):
+                        channel = channel.decode("utf-8", "ignore")
+                    data = msg.get("data") or ""
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8", "ignore")
+                    event_name = channel.split(":", 1)[0] or "message"
+                    yield f"event: {event_name}\ndata: {data}\n\n"
+                if now - last_ping >= 15:
+                    yield f"event: ping\ndata: {_json.dumps({'ts': now})}\n\n"
+                    last_ping = now
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logging.debug("admin live stream error: %s", exc)
+        finally:
+            try:
+                if pubsub is not None:
+                    pubsub.unsubscribe()
+                    pubsub.close()
+            except Exception:
+                pass
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
+
+
+@app.get("/api/admin/live/active-users")
+def admin_live_active_users(
+    window_seconds: int = 60,
+    limit: int = 200,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin_user(authorization, db)
+    from services.presence import presence_service
+    window_seconds = max(10, min(int(window_seconds or 60), 600))
+    limit = max(1, min(int(limit or 200), 500))
+    items = presence_service.list_active(window_seconds=window_seconds, limit=limit)
+    return {"window_seconds": window_seconds, "count": len(items), "items": items}
+
+
+@app.get("/api/admin/tokens/summary")
+def admin_tokens_summary(
+    days: int = 7,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin_user(authorization, db)
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func as _func
+    days = max(1, min(int(days or 7), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    LUE = models.LLMUsageEvent
+    base = db.query(LUE).filter(LUE.created_at >= since)
+
+    totals = db.query(
+        _func.coalesce(_func.sum(LUE.total_tokens), 0),
+        _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+        _func.coalesce(_func.sum(LUE.audio_input_seconds + LUE.audio_output_seconds), 0),
+        _func.count(LUE.id),
+    ).filter(LUE.created_at >= since).one()
+    total_tokens, total_cost_micro, total_audio_seconds, total_events = totals
+
+    by_model_rows = (
+        base.with_entities(
+            LUE.model,
+            _func.coalesce(_func.sum(LUE.total_tokens), 0),
+            _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+            _func.count(LUE.id),
+        )
+        .group_by(LUE.model)
+        .order_by(_func.sum(LUE.est_cost_usd_micro).desc())
+        .limit(15)
+        .all()
+    )
+
+    by_route_rows = (
+        base.with_entities(
+            LUE.route,
+            _func.coalesce(_func.sum(LUE.total_tokens), 0),
+            _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+            _func.count(LUE.id),
+        )
+        .group_by(LUE.route)
+        .order_by(_func.sum(LUE.est_cost_usd_micro).desc())
+        .limit(15)
+        .all()
+    )
+
+    top_users_rows = (
+        base.with_entities(
+            LUE.user_id,
+            _func.coalesce(_func.sum(LUE.total_tokens), 0),
+            _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+        )
+        .filter(LUE.user_id.isnot(None))
+        .group_by(LUE.user_id)
+        .order_by(_func.sum(LUE.est_cost_usd_micro).desc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "window_days": days,
+        "totals": {
+            "tokens": int(total_tokens or 0),
+            "est_cost_usd": round(float(total_cost_micro or 0) / 1_000_000.0, 4),
+            "audio_seconds": int(total_audio_seconds or 0),
+            "events": int(total_events or 0),
+        },
+        "by_model": [
+            {"model": m or "unknown", "tokens": int(t or 0),
+             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4), "events": int(n or 0)}
+            for m, t, c, n in by_model_rows
+        ],
+        "by_route": [
+            {"route": r or "unknown", "tokens": int(t or 0),
+             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4), "events": int(n or 0)}
+            for r, t, c, n in by_route_rows
+        ],
+        "top_users": [
+            {"user_id": uid, "tokens": int(t or 0),
+             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4)}
+            for uid, t, c in top_users_rows
+        ],
+    }
+
+
+@app.get("/api/admin/tokens/timeseries")
+def admin_tokens_timeseries(
+    days: int = 7,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin_user(authorization, db)
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func as _func, cast, Date
+    days = max(1, min(int(days or 7), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    LUE = models.LLMUsageEvent
+    rows = (
+        db.query(
+            cast(LUE.created_at, Date).label("day"),
+            _func.coalesce(_func.sum(LUE.total_tokens), 0),
+            _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+        )
+        .filter(LUE.created_at >= since)
+        .group_by(cast(LUE.created_at, Date))
+        .order_by(cast(LUE.created_at, Date).asc())
+        .all()
+    )
+    return {
+        "series": [
+            {
+                "day": (d.isoformat() if hasattr(d, "isoformat") else str(d)),
+                "tokens": int(t or 0),
+                "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4),
+            }
+            for d, t, c in rows
+        ]
+    }
+
+
+@app.get("/api/admin/security/audit")
+def admin_security_audit(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    email: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin_user(authorization, db)
+    limit = max(1, min(int(limit or 100), 500))
+    AAE = models.AuthAuditEvent
+    q = db.query(AAE)
+    if event_type:
+        q = q.filter(AAE.event_type == event_type)
+    if email:
+        q = q.filter(AAE.email == email.lower())
+    rows = q.order_by(AAE.created_at.desc()).limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "user_id": r.user_id,
+                "email": r.email,
+                "event_type": r.event_type,
+                "outcome": r.outcome,
+                "ip_address": r.ip_address,
+                "user_agent": r.user_agent,
+                "detail": r.detail,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/admin/security/unlock")
+def admin_security_unlock(
+    body: dict,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    admin = _require_admin_user(authorization, db)
+    target_email = (body or {}).get("email")
+    if not target_email or "@" not in target_email:
+        raise HTTPException(status_code=400, detail="email required")
+    from services.auth import lockout_service as _lockout, audit_log as _audit
+    cleared = _lockout.admin_unlock(target_email)
+    _audit.log_event("admin_unlock", user_id=str(admin.id), email=admin.email,
+                     detail={"target_email": target_email, "keys_cleared": cleared})
+    return {"ok": True, "keys_cleared": cleared}
+
+
+@app.get("/api/admin/security/sessions/{user_id}")
+def admin_security_sessions(
+    user_id: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin_user(authorization, db)
+    from services.auth import refresh_token_store as _rts
+    recs = _rts.list_active_sessions(db, user_id)
+    return {
+        "items": [
+            {
+                "jti": r.jti,
+                "device_label": r.device_label,
+                "ip_address": r.ip_address,
+                "user_agent": r.user_agent,
+                "issued_at": r.issued_at.isoformat() if r.issued_at else None,
+                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+                "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            }
+            for r in recs
+        ]
+    }
+
+
+@app.delete("/api/admin/security/sessions/{jti}")
+def admin_security_revoke_session(
+    jti: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    admin = _require_admin_user(authorization, db)
+    from services.auth import refresh_token_store as _rts, audit_log as _audit
+    ok = _rts.revoke(db, jti, reason="admin_revoke")
+    _audit.log_event("admin_session_revoke", outcome="success" if ok else "failure",
+                     user_id=str(admin.id), email=admin.email, detail={"jti": jti})
+    return {"ok": ok}
+
+
 # Serve React SPA routes (must be registered after API routes)
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_frontend(full_path: str):

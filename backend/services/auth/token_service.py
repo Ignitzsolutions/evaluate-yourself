@@ -82,10 +82,11 @@ class TokenService:
         }
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
 
-    def create_user_refresh_token(self, user_id: str) -> str:
-        """Create 7-day refresh token for authenticated user."""
+    def create_user_refresh_token(self, user_id: str, *, jti: Optional[str] = None, lifetime_days: int = 7) -> str:
+        """Create refresh token for authenticated user. Caller may supply jti
+        to link it to a persisted refresh_tokens row (rotation/reuse tracking)."""
         now = datetime.now(timezone.utc)
-        jti = str(uuid.uuid4())
+        jti = jti or str(uuid.uuid4())
         payload = {
             "iss": self.issuer,
             "aud": self.audience,
@@ -93,12 +94,12 @@ class TokenService:
             "jti": jti,
             "type": "refresh",
             "iat": now,
-            "exp": now + timedelta(days=7),
+            "exp": now + timedelta(days=lifetime_days),
         }
         token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
         if self._redis:
             try:
-                self._redis.setex(f"refresh_jti:{jti}", 7 * 86400, user_id)
+                self._redis.setex(f"refresh_jti:{jti}", lifetime_days * 86400, user_id)
             except Exception as e:
                 logger.warning("Could not store refresh JTI in Redis: %s", e)
         return token
