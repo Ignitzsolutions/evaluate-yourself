@@ -1894,13 +1894,13 @@ async def webrtc_proxy(
                 # Non-transient errors should fail fast.
                 if token_resp.status_code in (401, 403, 404):
                     if token_resp.status_code == 401:
-                        raise HTTPException(status_code=401, detail="Authentication failed. Check API key matches the Azure resource.")
+                        raise HTTPException(status_code=401, detail="Authentication failed. Check OPENAI_API_KEY and account access.")
                     if token_resp.status_code == 403:
-                        raise HTTPException(status_code=403, detail="Forbidden by Azure OpenAI. Verify deployment permissions and API key scope.")
+                        raise HTTPException(status_code=403, detail="Forbidden by OpenAI API. Verify model access and API key scope.")
                     raise HTTPException(
                         status_code=404,
                         detail=(
-                            "Realtime endpoint not found (404). Verify hostname, path, and Realtime availability on this Azure resource."
+                            "Realtime endpoint not found (404). Verify OPENAI_API_BASE and Realtime API availability."
                         ),
                     )
 
@@ -1913,8 +1913,8 @@ async def webrtc_proxy(
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            f"API version {api_version} not supported for Realtime on this resource. "
-                            f"Endpoint used: https://{base_endpoint}/openai/v1/realtime/client_secrets"
+                            f"API version {OPENAI_API_VERSION or '(unset)'} is not supported for Realtime. "
+                            f"Endpoint used: {OPENAI_API_BASE}/realtime/client_secrets"
                         ),
                     )
 
@@ -1927,7 +1927,7 @@ async def webrtc_proxy(
                 raise requests.Timeout() from last_timeout
 
             if not token_resp or token_resp.status_code != 200:
-                retry_hint = "Retry in a few seconds. If this persists, verify Azure Realtime deployment health."
+                retry_hint = "Retry in a few seconds. If this persists, verify OpenAI Realtime model availability."
                 activity_text = f" activityId={last_activity_id}." if last_activity_id else ""
                 detail_text = f"{last_error_detail[:160]} " if last_error_detail else ""
                 raise HTTPException(
