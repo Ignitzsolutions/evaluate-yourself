@@ -191,9 +191,10 @@ class TrialCode(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     code = Column(String, unique=True, index=True, nullable=False)
     code_suffix = Column(String, index=True, nullable=True)
+    display_name = Column(String(255), nullable=True)
     status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE|REDEEMED|REVOKED|EXPIRED|DELETED
     duration_minutes = Column(Integer, nullable=False, default=5)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_by_clerk_user_id = Column(String, nullable=False)
     redeemed_by_clerk_user_id = Column(String, nullable=True, index=True)
     redeemed_at = Column(DateTime(timezone=True), nullable=True)

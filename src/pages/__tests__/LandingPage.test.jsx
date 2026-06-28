@@ -4,8 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 
 import LandingPage from "../LandingPage";
 
-jest.mock("@clerk/clerk-react", () => ({
-  useUser: () => ({ isSignedIn: false }),
+jest.mock("../../context/AuthContext", () => ({
+  useUser: () => ({ isSignedIn: false, user: null }),
   useClerk: () => ({ signOut: jest.fn() }),
 }));
 
