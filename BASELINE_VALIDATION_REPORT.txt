@@ -1,0 +1,201 @@
+BASELINE VALIDATION REPORT
+============================
+Generated: 2026-06-28
+Repository: evaluate-yourself-rewrite
+
+VALIDATION SUMMARY
+==================
+
+FRONTEND TESTS (npm test):
+- Status: FAIL (2 test suites failed)
+- Test Suites: 2 failed, 25 passed (27 total)
+- Individual Tests: 71 passed, 0 failed
+- Failed Suites:
+  * src/pages/__tests__/AuthPages.test.jsx
+  * src/pages/__tests__/LandingPage.test.jsx
+
+BUILD (npm run build):
+- Status: PASS (with warnings)
+- Errors: 0
+- Warnings: 2 eslint warnings
+
+BACKEND TESTS (npm run test:backend):
+- Status: FAIL (4 errors during collection)
+- Tests Collected: 276 (4 errors prevented full collection)
+- Errors: 4 module/syntax errors
+
+================================================================================
+
+DETAILED ERRORS BY PHASE
+========================
+
+FRONTEND TEST FAILURES:
+========================
+
+File: src/pages/__tests__/AuthPages.test.jsx
+Error: Cannot find module '@clerk/clerk-react'
+Line: 11
+Type: Module Resolution Error
+Description: Jest cannot resolve '@clerk/clerk-react' during test mock setup
+
+File: src/pages/__tests__/LandingPage.test.jsx
+Error: Cannot find module '@clerk/clerk-react'
+Line: 7
+Type: Module Resolution Error
+Description: Jest cannot resolve '@clerk/clerk-react' during test mock setup
+
+BUILD WARNINGS (eslint):
+==========================
+
+File: src/pages/AdminLoginPage.jsx
+Line: 3
+Column: 54
+Issue: 'Typography' is defined but never used
+Rule: no-unused-vars
+Severity: Warning
+
+File: src/pages/InterviewSessionRoom.jsx
+Line: 2314
+Column: 6
+Issue: React Hook useCallback has an unnecessary dependency: 'startBrowserSpeechRecognition'
+Rule: react-hooks/exhaustive-deps
+Severity: Warning
+Action Needed: Either exclude it or remove the dependency array
+
+BACKEND TEST ERRORS:
+=====================
+
+Error 1 - Missing Module: admin_auth_config
+File: backend/tests/test_admin_auth_config.py
+Type: ModuleNotFoundError
+Message: No module named 'backend.services.admin_auth_config'
+Impact: Test suite cannot be imported
+
+Error 2 - Missing Module: clerk_auth_config
+File: backend/tests/test_clerk_auth_config.py
+Type: ModuleNotFoundError
+Message: No module named 'backend.services.clerk_auth_config'
+Impact: Test suite cannot be imported
+
+Error 3 - Missing Module: clerk_profile
+File: backend/tests/test_clerk_profile.py
+Type: ModuleNotFoundError
+Message: No module named 'backend.services.clerk_profile'
+Impact: Test suite cannot be imported
+
+Error 4 - Syntax Error
+File: backend/tests/test_user_contact_sync.py
+Line: 22
+Type: SyntaxError
+Message: positional argument follows keyword argument
+Impact: File cannot be parsed/imported by Python interpreter
+
+Additional Backend Warnings:
+- 167 FastAPI deprecation warnings (asyncio.iscoroutinefunction)
+- 171 Starlette deprecation warnings (asyncio.iscoroutinefunction)
+- 2 FastAPI deprecation warnings (on_event is deprecated, use lifespan instead)
+- 1 FastAPI deprecation warning (regex param deprecated, use pattern instead)
+
+================================================================================
+
+CATEGORIZED ISSUES
+==================
+
+P0 BLOCKERS (Must Fix - Prevents Ship)
+=====================================
+
+Issue 1: Missing '@clerk/clerk-react' Dependency
+Category: P0 - Missing Dependency
+Files: 
+  - src/pages/__tests__/AuthPages.test.jsx (line 11)
+  - src/pages/__tests__/LandingPage.test.jsx (line 7)
+Reason: Cannot resolve module during test execution. Blocks 2 test suites. This is a hard dependency failure that prevents the test suite from running.
+Fix Required: Install @clerk/clerk-react package or add to dependencies
+
+Issue 2: Missing Backend Module - admin_auth_config
+Category: P0 - Missing Module
+File: backend/tests/test_admin_auth_config.py
+Reason: Module 'backend.services.admin_auth_config' does not exist. Blocks test discovery and execution for admin authentication configuration tests.
+Fix Required: Create backend/services/admin_auth_config.py or remove/mock the test
+
+Issue 3: Missing Backend Module - clerk_auth_config
+Category: P0 - Missing Module
+File: backend/tests/test_clerk_auth_config.py
+Reason: Module 'backend.services.clerk_auth_config' does not exist. Blocks test discovery and execution.
+Fix Required: Create backend/services/clerk_auth_config.py or remove/mock the test
+
+Issue 4: Missing Backend Module - clerk_profile
+Category: P0 - Missing Module
+File: backend/tests/test_clerk_profile.py
+Reason: Module 'backend.services.clerk_profile' does not exist. Blocks test discovery and execution.
+Fix Required: Create backend/services/clerk_profile.py or remove/mock the test
+
+Issue 5: Syntax Error in Test File
+Category: P0 - Syntax Error
+File: backend/tests/test_user_contact_sync.py:22
+Error: positional argument follows keyword argument
+Reason: Line 22 has "+919900000001" as positional argument after keyword arguments on line 16-21. This is a Python syntax violation that prevents the file from being parsed.
+Fix Required: Move positional argument before keyword arguments or convert to keyword argument
+
+P1 IMPORTANT (Should Fix - Reduces Confidence)
+==============================================
+
+[None at this time - all failures are P0]
+
+P2 NON-BLOCKING (Can Defer - Nice-to-Have)
+==========================================
+
+Issue 1: Unused Variable Import
+Category: P2 - Code Quality
+File: src/pages/AdminLoginPage.jsx:3:54
+Error: 'Typography' is defined but never used
+Rule: no-unused-vars
+Impact: Code cleanliness
+Fix: Remove unused import or use the variable
+
+Issue 2: Unnecessary Dependency in Hook
+Category: P2 - Code Quality
+File: src/pages/InterviewSessionRoom.jsx:2314:6
+Error: React Hook useCallback has unnecessary dependency: 'startBrowserSpeechRecognition'
+Rule: react-hooks/exhaustive-deps
+Impact: May cause unnecessary re-renders (minor performance)
+Fix: Review dependency array and either exclude or remove the dependency
+
+Issue 3-7: FastAPI/Starlette Deprecation Warnings
+Category: P2 - Deprecation Warnings
+Files: backend/app.py, backend dependencies
+Warnings:
+  - asyncio.iscoroutinefunction deprecated (Python 3.16 removal)
+  - on_event deprecated (use lifespan handlers)
+  - regex parameter deprecated (use pattern instead)
+Impact: Future Python versions may break these; libraries should update
+Fix: Update FastAPI/Starlette when new versions with fixes are available
+
+Issue 8: urllib3/requests Dependency Warning
+Category: P2 - Dependency Warning
+Warning: urllib3 (2.7.0) or chardet (7.4.3)/charset_normalizer (3.4.7) doesn't match supported version
+Impact: May cause requests library issues in future
+Fix: Update requests and urllib3 versions
+
+================================================================================
+
+RECOMMENDATION
+==============
+
+BASELINE VALIDATION STATUS: FAILED
+
+Critical Path to Ship:
+- Fix P0 Blockers (5 issues):
+  1. Add @clerk/clerk-react to dependencies
+  2. Create missing backend service modules or remove tests
+  3. Fix syntax error in test_user_contact_sync.py
+
+After P0 fixes:
+- Verify all tests pass
+- Consider P2 cleanup before final ship (2-3 warnings to address)
+
+Estimated Effort:
+- P0: 1-2 hours (dependency issues likely just need installation/module stubs)
+- P2: 15-30 minutes (code cleanup, should be trivial)
+
+================================================================================

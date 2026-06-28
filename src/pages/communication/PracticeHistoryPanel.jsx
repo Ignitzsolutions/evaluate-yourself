@@ -4,11 +4,12 @@
  * sparkline (Recharts), top quality flags, and per-pack rollup.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { Box, Card, CardContent, Chip, Skeleton, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Skeleton, Stack, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import TrendingFlatIcon from "@mui/icons-material/TrendingFlat";
-import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { LineChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAuth } from "../../context/AuthContext";
 import { getApiBaseUrl } from "../../utils/apiBaseUrl";
 
@@ -28,8 +29,10 @@ function formatFlag(flag) {
 export default function PracticeHistoryPanel({ refreshKey = 0, days = 30 }) {
   const { getToken, isSignedIn } = useAuth();
   const base = useMemo(() => getApiBaseUrl(), []);
+  const theme = useTheme();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -51,7 +54,7 @@ export default function PracticeHistoryPanel({ refreshKey = 0, days = 30 }) {
     return () => {
       cancelled = true;
     };
-  }, [base, days, getToken, isSignedIn, refreshKey]);
+  }, [base, days, getToken, isSignedIn, refreshKey, retryCount]);
 
   if (!isSignedIn) return null;
 
@@ -66,9 +69,29 @@ export default function PracticeHistoryPanel({ refreshKey = 0, days = 30 }) {
     );
   }
 
-  if (error) {
-    return null;
+  if (error && !data) {
+    return (
+      <Card variant="outlined" sx={{ mb: 2 }}>
+        <CardContent>
+          <Alert
+            severity="error"
+            action={
+              <Button color="inherit" size="small" onClick={() => setRetryCount((value) => value + 1)}>
+                Retry
+              </Button>
+            }
+          >
+            We couldn&apos;t load your practice history. Tap Retry, then complete one checked response to refresh your trend.
+          </Alert>
+        </CardContent>
+      </Card>
+    );
   }
+
+  const scores = data?.attempts_by_day?.map((point) => point.avg_score).filter((value) => value != null) || [];
+  const previous7dBaseline = scores.length >= 14
+    ? Math.round((scores.slice(-14, -7).reduce((sum, value) => sum + value, 0) / 7) * 10) / 10
+    : null;
 
   const trend = data.score_trend_7d;
   const TrendIcon = trend == null
@@ -89,6 +112,19 @@ export default function PracticeHistoryPanel({ refreshKey = 0, days = 30 }) {
   return (
     <Card variant="outlined" sx={{ mb: 2 }}>
       <CardContent>
+        {error ? (
+          <Alert
+            severity="error"
+            sx={{ mb: 2 }}
+            action={
+              <Button color="inherit" size="small" onClick={() => setRetryCount((value) => value + 1)}>
+                Retry
+              </Button>
+            }
+          >
+            Couldn&apos;t refresh history. You can keep practicing below, then tap Retry to update this panel.
+          </Alert>
+        ) : null}
         <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems={{ md: "center" }}>
           <Stack spacing={0.5} sx={{ minWidth: 160 }}>
             <Typography variant="overline" color="text.secondary">
@@ -125,18 +161,30 @@ export default function PracticeHistoryPanel({ refreshKey = 0, days = 30 }) {
                   <Line
                     type="monotone"
                     dataKey="avg_score"
-                    stroke="#1976d2"
+                    stroke={theme.palette.primary.main}
                     strokeWidth={2}
-                    dot={{ r: 2 }}
+                    dot={{ r: 2, fill: theme.palette.primary.main, stroke: theme.palette.primary.main }}
                     isAnimationActive={false}
                   />
+                  {previous7dBaseline != null ? (
+                    <ReferenceLine
+                      y={previous7dBaseline}
+                      stroke={theme.palette.text.secondary}
+                      strokeDasharray="4 4"
+                    />
+                  ) : null}
                 </LineChart>
               </ResponsiveContainer>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                Complete attempts to see your trend.
+                No trend yet. Check at least one response below, then use Retry here to load your progress.
               </Typography>
             )}
+            {previous7dBaseline != null ? (
+              <Typography variant="caption" color="text.secondary">
+                Solid line: daily score · Dashed line: previous 7-day baseline ({previous7dBaseline})
+              </Typography>
+            ) : null}
           </Box>
 
           {data.top_quality_flags && data.top_quality_flags.length > 0 ? (
