@@ -128,6 +128,30 @@ export function AuthProvider({ children }) {
     });
     const data = await resp.json();
     if (!resp.ok) throw data?.error || data;
+    // MFA challenge or admin MFA enrollment: don't persist tokens — the
+    // caller routes the user to /mfa-challenge or /admin/mfa-enroll using
+    // the short-lived mfa_token.
+    if (data?.mfa_required) {
+      return data;
+    }
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token);
+    setUser(data.user);
+    setIsSignedIn(true);
+    scheduleRefresh();
+    return data;
+  }, [scheduleRefresh]);
+
+  // Used after MFA enrollment confirms — exchanges the mfa_token for a real
+  // session by calling /api/auth/login/mfa with the verification code.
+  const completeMfaLogin = useCallback(async (mfaToken, code) => {
+    const resp = await fetch(`${API_BASE}/api/auth/login/mfa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mfa_token: mfaToken, code }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw data?.error || data;
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("refresh_token", data.refresh_token);
     setUser(data.user);
@@ -168,7 +192,7 @@ export function AuthProvider({ children }) {
     clearAuth();
   }, [clearAuth]);
 
-  const value = { user, isLoaded, isSignedIn, getToken, login, register, signOut };
+  const value = { user, isLoaded, isSignedIn, getToken, login, completeMfaLogin, register, signOut };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -194,5 +218,5 @@ export function useClerk() {
 export function useAuthActions() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuthActions must be used within AuthProvider");
-  return { login: ctx.login, register: ctx.register, signOut: ctx.signOut };
+  return { login: ctx.login, register: ctx.register, signOut: ctx.signOut, completeMfaLogin: ctx.completeMfaLogin };
 }

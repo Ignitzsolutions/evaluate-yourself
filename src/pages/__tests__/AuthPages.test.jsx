@@ -1,54 +1,56 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import LoginPage from "../LoginPage";
 import RegisterPage from "../RegisterPage";
 import ForgotPasswordPage from "../ForgotPasswordPage";
 
-const mockSignIn = jest.fn((props) => <div data-testid="sign-in-props">{JSON.stringify(props)}</div>);
-const mockSignUp = jest.fn((props) => <div data-testid="sign-up-props">{JSON.stringify(props)}</div>);
+const mockLogin = jest.fn();
+const mockRegister = jest.fn();
 
-jest.mock("@clerk/clerk-react", () => ({
-  SignIn: (props) => mockSignIn(props),
-  SignUp: (props) => mockSignUp(props),
+jest.mock("../../context/AuthContext", () => ({
+  useAuthActions: () => ({
+    login: mockLogin,
+    register: mockRegister,
+    signOut: jest.fn(),
+    completeMfaLogin: jest.fn(),
+  }),
 }));
 
 describe("auth pages", () => {
   beforeEach(() => {
-    mockSignIn.mockClear();
-    mockSignUp.mockClear();
+    mockLogin.mockClear();
+    mockRegister.mockClear();
   });
 
-  test("register page mounts SignUp on the register path", () => {
-    render(<RegisterPage />);
+  test("register page renders with registration form", () => {
+    render(
+      <MemoryRouter>
+        <RegisterPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/start practicing interviews/i)).toBeInTheDocument();
-    expect(mockSignUp.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/register",
-      routing: "path",
-      signInUrl: "/login",
-    }));
+    expect(screen.getByText(/start practicing interviews with a setup that actually feels serious/i)).toBeInTheDocument();
   });
 
-  test("forgot password page mounts SignIn on the forgot-password path", () => {
-    render(<ForgotPasswordPage />);
+  test("forgot password page renders with password recovery form", () => {
+    render(
+      <MemoryRouter>
+        <ForgotPasswordPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/reset access without guessing/i)).toBeInTheDocument();
-    expect(mockSignIn.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/forgot-password",
-      routing: "path",
-      initialStep: "forgot-password",
-    }));
+    expect(screen.getByText(/password recovery/i)).toBeInTheDocument();
   });
 
-  test("login page keeps the dedicated sign-in route", () => {
-    render(<LoginPage />);
+  test("login page renders with login form", () => {
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/build interview confidence/i)).toBeInTheDocument();
-    expect(mockSignIn.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/login",
-      routing: "path",
-      signUpUrl: "/register",
-    }));
+    expect(screen.getByText(/build interview confidence with realtime coaching/i)).toBeInTheDocument();
   });
 });

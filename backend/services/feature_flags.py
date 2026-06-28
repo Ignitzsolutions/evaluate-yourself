@@ -31,3 +31,35 @@ def auth_lockout_enabled() -> bool:
 
 def usage_recording_enabled() -> bool:
     return _truthy(os.getenv("USAGE_RECORDING_ENABLED", "true"))
+
+
+def demo_mode_enabled() -> bool:
+    """When true and no API key is set, the app serves canned demo responses.
+
+    This lets the entire app run end-to-end without any external credentials
+    so it stays demoable in CI, contractor laptops, and review environments.
+    """
+    return _truthy(os.getenv("DEMO_MODE", "true"))
+
+
+def communication_practice_enabled() -> bool:
+    """Master switch for /api/communication-practice/*."""
+    return _truthy(os.getenv("COMMUNICATION_PRACTICE_ENABLED", "true"))
+
+
+def openai_configured() -> bool:
+    """True when a usable OpenAI API key is present (placeholders don't count)."""
+    key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY") or "").strip()
+    if not key:
+        return False
+    bad = {"your-openai-api-key", "your-openai-api-key-here", "sk-dev-placeholder-no-real-calls"}
+    if key in bad:
+        return False
+    if key.startswith("sk-dev-") or key.startswith("placeholder"):
+        return False
+    return True
+
+
+def realtime_enabled() -> bool:
+    """Realtime voice is only usable when a real API key is configured."""
+    return openai_configured()
