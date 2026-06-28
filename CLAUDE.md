@@ -102,3 +102,31 @@ Admin subroutes under `/admin/dashboard`:
 2. When changing a route, update both caller and server side in one change.
 3. Keep root clean: guides in `docs/guides/`, historical docs in `docs/archive/`.
 4. Never expose secrets to frontend bundles; keep keys server-side only.
+
+## 6) Demo mode (no API keys)
+
+The app boots cleanly with `OPENAI_API_KEY` unset or set to any `sk-dev-*` / `placeholder-*` value. In that state `DEMO_MODE=true` activates:
+
+- A synthetic LLM provider (`backend/services/llm/provider_adapter.py::_DemoClient`) returns deterministic canned scoring/orchestrator/coaching responses and emits fake `LLMUsageEvent` rows so the admin dashboard has visible activity.
+- `/api/realtime/sessions` returns `{demo_mode:true, provider:"demo"}` instead of 503 so the voice mic UI degrades gracefully.
+- Frontend shows a top banner (`src/components/DemoModeBanner.jsx`) sourced from `RuntimeModeContext` (`src/contexts/RuntimeModeContext.jsx`).
+
+### New endpoints in this PR
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/system/runtime-mode` | GET | Public unauthenticated runtime descriptor: `{ demo_mode, openai_configured, realtime_enabled, mfa_enabled, lockout_enabled, communication_practice_enabled, ... }`. Frontend reads at boot. |
+| `/api/communication-practice/history?days=30` | GET | Per-user progression rollup: `attempts_total`, `avg_score`, `score_trend_7d`, `attempts_by_day` (sparkline), `top_quality_flags`. |
+| `/api/realtime/sessions` (demo branch) | POST | Returns `{demo_mode:true, message, provider:"demo"}` when no real OpenAI key. |
+| `/admin/mfa-enroll` (frontend route) | — | TOTP QR + 6-digit confirmation flow (`src/pages/auth/AdminMfaEnrollPage.jsx`) wired into the login challenge response. |
+
+### Seeding
+
+`python backend/scripts/seed_admin_demo_data.py --wipe` seeds usage events, audit trail, a locked-out user, refresh-token sessions, and a fake MFA-enrolled user. Pass `--with-locked-user` / `--with-sessions` / `--with-mfa-user` to seed individually; default seeds everything.
+
+### Feature flags (env)
+
+- `DEMO_MODE` — enable the demo provider/realtime fallback.
+- `COMMUNICATION_PRACTICE_ENABLED` — gates the three `/api/communication-practice/*` endpoints (404 when off).
+- Existing: `ADMIN_LIVE_OPS_ENABLED`, `AUTH_MFA_ENABLED`, `AUTH_LOCKOUT_ENABLED`, `USAGE_RECORDING_ENABLED`.
+

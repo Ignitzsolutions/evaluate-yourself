@@ -450,3 +450,30 @@ class AuthAuditEvent(Base):
     user_agent = Column(String, nullable=True)
     detail = Column(Text, nullable=True)  # JSON details
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Communication practice progression
+# ─────────────────────────────────────────────────────────────────────
+
+class CommunicationPracticeAttempt(Base):
+    """Single user attempt at a communication-practice prompt.
+
+    Persisted by /api/communication-practice/evaluate-turn so the dashboard
+    can show progression (sparkline + improvement trend + flag history).
+    """
+    __tablename__ = "communication_practice_attempts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True, nullable=False)
+    pack_id = Column(String, index=True, nullable=False)
+    prompt_id = Column(String, index=True, nullable=True)
+    target_sentence = Column(Text, nullable=True)
+    spoken_text = Column(Text, nullable=True)
+    score = Column(Integer, nullable=False, default=0)  # 0-100
+    coverage = Column(Integer, nullable=False, default=0)  # 0-100 (percent)
+    duration_seconds = Column(Integer, nullable=False, default=0)
+    filler_per_100 = Column(Integer, nullable=False, default=0)
+    pacing_band = Column(String, nullable=True)
+    quality_flags = Column(Text, nullable=True)  # JSON array
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

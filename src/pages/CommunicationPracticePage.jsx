@@ -17,6 +17,7 @@ import { Mic, Stop, Refresh, PlayArrow } from "@mui/icons-material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import PracticeHistoryPanel from "./communication/PracticeHistoryPanel";
 
 const API_BASE = getApiBaseUrl();
 
@@ -210,6 +211,8 @@ export default function CommunicationPracticePage() {
           Voice-first guided speaking drills with instant grammar and fluency coaching.
         </Typography>
       </Stack>
+
+      <PracticeHistoryPanel refreshKey={result?.created_at || result?.score || 0} />
 
       <Card sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>

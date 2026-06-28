@@ -2052,11 +2052,22 @@ async def create_realtime_session(
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
-    if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
-        raise HTTPException(
-            status_code=503,
-            detail="OpenAI Realtime API is not configured on this server. Configure OPENAI_API_KEY."
-        )
+    # Use the same placeholder-aware logic as openai_configured() so demo
+    # fallbacks fire for sk-dev-* / placeholder-* keys, not just empty ones.
+    try:
+        from services.feature_flags import openai_configured as _oai_ok
+        _has_real_key = _oai_ok()
+    except Exception:
+        _has_real_key = bool(OPENAI_REALTIME_API_KEY) and OPENAI_REALTIME_API_KEY != "your-openai-api-key-here"
+    if not _has_real_key:
+        return {
+            "demo_mode": True,
+            "message": "Realtime API not configured. Voice features are simulated locally.",
+            "clientSecret": None,
+            "expiresAt": None,
+            "model": OPENAI_REALTIME_MODEL,
+            "provider": "demo",
+        }
 
     try:
         import httpx
@@ -4445,6 +4456,10 @@ async def list_communication_practice_packs(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
+    from services.feature_flags import communication_practice_enabled
+    if not communication_practice_enabled():
+        raise HTTPException(status_code=404, detail="Communication practice is disabled.")
+
     current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
@@ -4468,6 +4483,10 @@ async def get_next_communication_practice_prompt(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
+    from services.feature_flags import communication_practice_enabled
+    if not communication_practice_enabled():
+        raise HTTPException(status_code=404, detail="Communication practice is disabled.")
+
     current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
@@ -4495,6 +4514,10 @@ async def evaluate_communication_practice_turn(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
+    from services.feature_flags import communication_practice_enabled
+    if not communication_practice_enabled():
+        raise HTTPException(status_code=404, detail="Communication practice is disabled.")
+
     current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
@@ -4568,6 +4591,205 @@ async def evaluate_communication_practice_turn(
         "communication_metrics": communication_metrics,
         "improved_sentence": improved_sentence,
         "coaching": coaching[:3],
+        **(_persist_practice_attempt(
+            db=db,
+            user_id=current_user.id,
+            pack_id=payload.pack_id,
+            prompt_id=payload.prompt_id,
+            target_sentence=payload.target_sentence,
+            spoken_text=spoken_text,
+            score=score,
+            coverage=coverage,
+            duration_seconds=duration_seconds,
+            filler_per_100=filler_density,
+            pacing_band=pacing_band,
+            quality_flags=quality_flags,
+        ) or {}),
+    }
+
+
+def _persist_practice_attempt(
+    *,
+    db: Session,
+    user_id: str,
+    pack_id: str,
+    prompt_id: Optional[str],
+    target_sentence: Optional[str],
+    spoken_text: str,
+    score: int,
+    coverage: float,
+    duration_seconds: float,
+    filler_per_100: float,
+    pacing_band: Optional[str],
+    quality_flags: List[str],
+) -> Dict[str, Any]:
+    """Save the attempt and return a small `progression` summary block.
+
+    Best-effort: any DB error is logged and swallowed so the user-facing
+    scoring response is never lost on a write hiccup.
+    """
+    import json as _json
+
+    try:
+        attempt = models.CommunicationPracticeAttempt(
+            user_id=user_id,
+            pack_id=pack_id,
+            prompt_id=prompt_id,
+            target_sentence=target_sentence,
+            spoken_text=spoken_text,
+            score=int(score or 0),
+            coverage=int(round((coverage or 0) * 100)),
+            duration_seconds=int(round(duration_seconds or 0)),
+            filler_per_100=int(round(filler_per_100 or 0)),
+            pacing_band=pacing_band,
+            quality_flags=_json.dumps(list(quality_flags or [])),
+        )
+        db.add(attempt)
+        db.commit()
+    except Exception as exc:  # pragma: no cover - DB errors shouldn't break UX
+        logging.warning("practice attempt persist failed: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {}
+
+    # Lightweight progression hint: avg of last 5 vs previous 5 attempts.
+    try:
+        recent = (
+            db.query(models.CommunicationPracticeAttempt.score)
+            .filter(models.CommunicationPracticeAttempt.user_id == user_id)
+            .order_by(models.CommunicationPracticeAttempt.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        recent_scores = [int(r[0] or 0) for r in recent]
+        last5 = recent_scores[:5]
+        prev5 = recent_scores[5:10]
+        delta = None
+        if last5 and prev5:
+            delta = round(sum(last5) / len(last5) - sum(prev5) / len(prev5), 1)
+        return {
+            "progression": {
+                "attempts_total": len(recent_scores),
+                "avg_last_5": (round(sum(last5) / len(last5), 1) if last5 else None),
+                "delta_vs_previous_5": delta,
+            }
+        }
+    except Exception:
+        return {}
+
+
+@app.get("/api/communication-practice/history")
+async def communication_practice_history(
+    days: int = 30,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Per-user practice progression rollup used by the history panel."""
+    from services.feature_flags import communication_practice_enabled
+    if not communication_practice_enabled():
+        raise HTTPException(status_code=404, detail="Communication practice is disabled.")
+
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func as _func
+    import json as _json
+
+    days = max(1, min(int(days or 30), 180))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    A = models.CommunicationPracticeAttempt
+
+    base_q = db.query(A).filter(A.user_id == current_user.id, A.created_at >= since)
+    attempts = base_q.order_by(A.created_at.asc()).all()
+    total = len(attempts)
+    avg_score = round(sum(int(a.score or 0) for a in attempts) / total, 1) if total else None
+
+    # By-day rollup (SQLite + Postgres safe via func.date()).
+    day_expr = _func.date(A.created_at)
+    by_day_rows = (
+        db.query(day_expr.label("day"), _func.count(A.id), _func.avg(A.score))
+        .filter(A.user_id == current_user.id, A.created_at >= since)
+        .group_by(day_expr)
+        .order_by(day_expr.asc())
+        .all()
+    )
+    attempts_by_day = [
+        {
+            "day": (d.isoformat() if hasattr(d, "isoformat") else str(d)),
+            "attempts": int(n or 0),
+            "avg_score": round(float(s or 0), 1),
+        }
+        for d, n, s in by_day_rows
+    ]
+
+    # Improvement delta (last 7d vs previous 7d when both have data).
+    # SQLite returns naive datetimes; normalize to naive UTC for comparison.
+    now_naive = datetime.utcnow()
+    week_ago = now_naive - timedelta(days=7)
+    two_weeks_ago = now_naive - timedelta(days=14)
+
+    def _naive(dt):
+        if dt is None:
+            return None
+        return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
+
+    last_week = [a for a in attempts if _naive(a.created_at) and _naive(a.created_at) >= week_ago]
+    prev_week = [a for a in attempts if _naive(a.created_at) and two_weeks_ago <= _naive(a.created_at) < week_ago]
+    score_trend = None
+    if last_week and prev_week:
+        score_trend = round(
+            sum(int(a.score or 0) for a in last_week) / len(last_week)
+            - sum(int(a.score or 0) for a in prev_week) / len(prev_week),
+            1,
+        )
+
+    # Top flags
+    flag_counts: Dict[str, int] = {}
+    for a in attempts:
+        try:
+            for f in _json.loads(a.quality_flags or "[]"):
+                flag_counts[f] = flag_counts.get(f, 0) + 1
+        except Exception:
+            pass
+    top_flags = sorted(
+        [{"flag": k, "count": v} for k, v in flag_counts.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:6]
+
+    # Per-pack rollup
+    per_pack: Dict[str, Dict[str, Any]] = {}
+    for a in attempts:
+        slot = per_pack.setdefault(a.pack_id, {"pack_id": a.pack_id, "attempts": 0, "score_sum": 0})
+        slot["attempts"] += 1
+        slot["score_sum"] += int(a.score or 0)
+    per_pack_progress = [
+        {"pack_id": v["pack_id"], "attempts": v["attempts"], "avg_score": round(v["score_sum"] / v["attempts"], 1)}
+        for v in per_pack.values()
+    ]
+
+    return {
+        "window_days": days,
+        "attempts_total": total,
+        "avg_score": avg_score,
+        "score_trend_7d": score_trend,
+        "attempts_by_day": attempts_by_day,
+        "top_quality_flags": top_flags,
+        "per_pack_progress": per_pack_progress,
+        "recent_attempts": [
+            {
+                "id": a.id,
+                "pack_id": a.pack_id,
+                "prompt_id": a.prompt_id,
+                "score": int(a.score or 0),
+                "created_at": (a.created_at.isoformat() if a.created_at else None),
+            }
+            for a in sorted(attempts, key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:10]
+        ],
     }
 
 
@@ -6964,6 +7186,29 @@ def admin_tokens_timeseries(
             }
             for d, t, c in rows
         ]
+    }
+
+
+@app.get("/api/system/runtime-mode")
+def get_system_runtime_mode():
+    """Public, unauthenticated runtime descriptor consumed by the frontend at boot.
+
+    Frontend uses this to render the demo banner, hide voice features when
+    realtime isn't configured, and gate MFA flows. Returns no secrets — only
+    booleans that reflect server-side feature flag state.
+    """
+    from services import feature_flags as _ff
+
+    return {
+        "demo_mode": _ff.demo_mode_enabled() and not _ff.openai_configured(),
+        "openai_configured": _ff.openai_configured(),
+        "realtime_enabled": _ff.realtime_enabled(),
+        "mfa_enabled": _ff.auth_mfa_enabled(),
+        "lockout_enabled": _ff.auth_lockout_enabled(),
+        "admin_live_ops_enabled": _ff.admin_live_ops_enabled(),
+        "communication_practice_enabled": _ff.communication_practice_enabled(),
+        "usage_recording_enabled": _ff.usage_recording_enabled(),
+        "environment": os.getenv("ENV", "development"),
     }
 
 

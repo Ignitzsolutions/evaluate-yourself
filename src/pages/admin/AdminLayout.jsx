@@ -10,6 +10,7 @@ import {
   Typography,
 } from "@mui/material";
 import { formatDateTime } from "./adminUtils";
+import DemoModeBanner from "../../components/DemoModeBanner";
 
 const ADMIN_PREF_AUTO_REFRESH = "admin.pref.auto_refresh";
 const ADMIN_PREF_DENSITY = "admin.pref.table_density";
@@ -87,7 +88,9 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", bgcolor: "background.default" }}>
+      <DemoModeBanner variant="admin" />
+      <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
       <Box
         component="aside"
         sx={{
@@ -169,6 +172,7 @@ export default function AdminLayout() {
         <Box sx={{ p: { xs: 2, md: 3 } }}>
           <Outlet context={outletContext} />
         </Box>
+      </Box>
       </Box>
     </Box>
   );
