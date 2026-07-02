@@ -56,7 +56,11 @@ def rotate(
     user_agent: Optional[str] = None,
 ) -> Tuple[Optional[models.RefreshTokenRecord], Optional[str]]:
     """Return (new_record, error_reason). On reuse detection, revokes the family."""
-    rec = db.query(models.RefreshTokenRecord).filter(models.RefreshTokenRecord.jti == presented_jti).first()
+    rec = (
+        db.query(models.RefreshTokenRecord)
+        .filter(models.RefreshTokenRecord.jti == presented_jti)
+        .first()
+    )
     if rec is None:
         return None, "not_found"
     now = datetime.now(timezone.utc)

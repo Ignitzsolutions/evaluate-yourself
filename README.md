@@ -39,14 +39,31 @@ npm start
 
 **Backend:**
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r backend/requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync
 cd backend
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
+
+### Python tooling
+
+The backend Python source of truth is now:
+
+- `pyproject.toml`
+- `uv.lock`
+
+Common commands:
+
+```bash
+uv sync
+uv run black --check backend/services/auth backend/services/interview/scoring_service.py backend/scripts
+uv run mypy
+uv run pytest backend/tests
+```
+
+`requirements.txt` remains in the repo only as an Azure/Oryx compatibility export during the transition.
 
 ### LLM Configuration (Required for Voice Interview)
 

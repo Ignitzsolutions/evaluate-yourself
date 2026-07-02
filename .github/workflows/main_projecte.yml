@@ -12,6 +12,16 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read #This is required for actions/checkout
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +45,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+      
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # 🛠️ Local Build Section (Optional)
-      # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -50,27 +62,36 @@ jobs:
             libavformat-dev \
             libswscale-dev
 
-      - name: Create and Start virtual environment and Install dependencies
+      - name: Sync Python dependencies with uv
         run: |
-          python -m venv antenv
-          source antenv/bin/activate
-          # Upgrade pip, setuptools, wheel first (ensures reliable builds)
-          pip install --upgrade pip>=24.0 setuptools>=70.0 wheel>=0.41.0
-          pip install -r backend/requirements.txt
+          uv sync --frozen
+
+      - name: Export Azure compatibility requirements
+        run: |
+          ./scripts/export-python-requirements.sh
+
+      - name: Check Python formatting
+        run: |
+          uv run black --check \
+            backend/services/auth \
+            backend/services/interview/scoring_service.py \
+            backend/scripts \
+            backend/tests/test_schema_smoke.py \
+            backend/tests/test_auth_migration_smoke.py \
+            backend/tests/test_interview_orchestration_backend.py \
+            backend/tests/test_replay_payload.py \
+            backend/tests/test_provider_adapter.py \
+            backend/tests/test_user_contact_sync.py
 
       - name: Run mypy on cleaned service modules
         run: |
-          source antenv/bin/activate
-          pip install mypy
-          cd backend
-          mypy --ignore-missing-imports services/auth/ services/interview/scoring_service.py
+          uv run mypy
 
       - name: Validate imports and app module
         run: |
-          source antenv/bin/activate
           python --version
-          python -c "import fastapi, uvicorn; print('✓ Core imports successful')"
-          python - <<'PY'
+          uv run python -c "import fastapi, uvicorn; print('✓ Core imports successful')"
+          uv run python - <<'PY'
           import importlib
           optional = ["cv2", "numpy", "scipy"]
           for name in optional:
@@ -80,13 +101,12 @@ jobs:
             except Exception as exc:
               print(f"ℹ Optional import missing: {name} ({exc.__class__.__name__})")
           PY
-          python -c "import jwt; print('✓ PyJWT (jwt) import successful')"
-          cd backend && python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
+          uv run python -c "import jwt; print('✓ PyJWT (jwt) import successful')"
+          cd backend && uv run python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
 
       - name: Run targeted backend release checks
         run: |
-          source antenv/bin/activate
-          pytest -q \
+          uv run pytest -q \
             backend/tests/test_schema_smoke.py \
             backend/tests/test_auth_migration_smoke.py \
             backend/tests/test_interview_orchestration_backend.py \
@@ -95,13 +115,17 @@ jobs:
 
       - name: Run backend startup smoke against live local app
         env:
+          DATABASE_URL: sqlite:///${{ github.workspace }}/backend/ci-startup-smoke.db
+          REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET_KEY: ci-startup-smoke-secret-at-least-32-chars
+          OPENAI_API_KEY: ci-startup-smoke-key
           AZURE_OPENAI_API_KEY: ci-startup-smoke-key
           AZURE_OPENAI_ENDPOINT: https://ci-startup-smoke.openai.azure.com
         run: |
-          source antenv/bin/activate
+          rm -f "${{ github.workspace }}/backend/ci-startup-smoke.db"
+          uv run python -m alembic -c backend/alembic.ini upgrade head
           cd backend
-          PYTHONPATH=. uvicorn app:app --host 127.0.0.1 --port 8000 > ../backend-smoke.log 2>&1 &
+          PYTHONPATH=. uv run uvicorn app:app --host 127.0.0.1 --port 8000 > ../backend-smoke.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID' EXIT
           for attempt in $(seq 1 30); do
@@ -111,7 +135,7 @@ jobs:
             sleep 2
           done
           cd ..
-          python backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000
+          uv run python backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
       # Note: The artifact includes the entire repo root (.), ensuring backend/ folder exists in deployment
@@ -136,7 +160,7 @@ jobs:
           name: python-app
           path: |
             .
-            !antenv/
+            !.venv/
             !node_modules/
             !backend/venv/
 
@@ -259,11 +283,11 @@ jobs:
           az webapp config set \
             --resource-group projecte_group \
             --name projecte \
-            --startup-file "test -d backend && cd backend; export PYTHONPATH=/home/site/wwwroot/__startup_packages__:/home/site/wwwroot:/home/site/wwwroot/backend:\${PYTHONPATH}; test -d /home/site/wwwroot/__startup_packages__/uvicorn || python -m pip install --no-cache-dir -r requirements.txt -t /home/site/wwwroot/__startup_packages__; python -m gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
+            --startup-file "test -d backend && cd backend; export PYTHONPATH=/home/site/wwwroot/__startup_packages__:/home/site/wwwroot:/home/site/wwwroot/backend:\${PYTHONPATH}; test -d /home/site/wwwroot/__startup_packages__/uvicorn || python -m pip install --no-cache-dir -r /home/site/wwwroot/requirements.txt -t /home/site/wwwroot/__startup_packages__; python -m gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
 
       - name: Package deployment artifact
         run: |
-          zip -r release.zip . -x "antenv/*" "node_modules/*" "backend/venv/*"
+          zip -r release.zip . -x ".venv/*" "node_modules/*" "backend/venv/*"
 
       - name: Deploy to Azure Web App (retry)
         run: |

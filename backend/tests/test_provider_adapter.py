@@ -30,8 +30,16 @@ class _FakeClient:
 
 
 def test_create_chat_completion_falls_back_to_openai_when_azure_fails(monkeypatch):
-    azure = {"provider": "azure", "client": _FakeClient(error=RuntimeError("azure unavailable")), "model": "azure-model"}
-    openai = {"provider": "openai", "client": _FakeClient(content="fallback answer"), "model": "gpt-4o-mini"}
+    azure = {
+        "provider": "azure",
+        "client": _FakeClient(error=RuntimeError("azure unavailable")),
+        "model": "azure-model",
+    }
+    openai = {
+        "provider": "openai",
+        "client": _FakeClient(content="fallback answer"),
+        "model": "gpt-4o-mini",
+    }
     monkeypatch.setattr(
         "backend.services.llm.provider_adapter.get_chat_provider_chain",
         lambda: [azure, openai],

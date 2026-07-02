@@ -32,6 +32,7 @@ def _fernet():
     key = os.getenv("MFA_ENCRYPTION_KEY")
     if not key:
         from db.redis_client import is_production_env
+
         if is_production_env():
             raise RuntimeError("MFA_ENCRYPTION_KEY must be set in production for MFA service.")
         return None
@@ -54,12 +55,12 @@ def _encrypt_secret(secret: str) -> str:
 
 def _decrypt_secret(blob: str) -> str:
     if blob.startswith("plain:"):
-        return blob[len("plain:"):]
+        return blob[len("plain:") :]
     if blob.startswith("enc:"):
         f = _fernet()
         if f is None:
             raise RuntimeError("MFA secret is encrypted but no MFA_ENCRYPTION_KEY available.")
-        return f.decrypt(blob[len("enc:"):].encode()).decode()
+        return f.decrypt(blob[len("enc:") :].encode()).decode()
     return blob  # legacy
 
 
@@ -76,9 +77,16 @@ def get_record(db: Session, user_id: str) -> Optional[models.UserMFA]:
     return db.query(models.UserMFA).filter(models.UserMFA.user_id == user_id).first()
 
 
-def begin_enrollment(db: Session, user_id: str, *, issuer: str = "EvaluateYourself", account_label: Optional[str] = None) -> Tuple[str, str]:
+def begin_enrollment(
+    db: Session,
+    user_id: str,
+    *,
+    issuer: str = "EvaluateYourself",
+    account_label: Optional[str] = None,
+) -> Tuple[str, str]:
     """Return (provisioning_uri, base32_secret). Caller renders QR code from URI."""
     import pyotp
+
     secret = pyotp.random_base32()
     row = get_record(db, user_id)
     if row is None:
@@ -97,6 +105,7 @@ def confirm_enrollment(db: Session, user_id: str, code: str) -> Tuple[bool, List
     """Verify first TOTP code and finalize enrollment. Returns (ok, recovery_codes)."""
     import pyotp
     from datetime import datetime, timezone
+
     row = get_record(db, user_id)
     if row is None:
         return False, []
@@ -116,6 +125,7 @@ def confirm_enrollment(db: Session, user_id: str, code: str) -> Tuple[bool, List
 def verify(db: Session, user_id: str, code: str) -> bool:
     """Verify a TOTP code or consume a recovery code."""
     import pyotp
+
     row = get_record(db, user_id)
     if row is None or not row.confirmed_at:
         return False

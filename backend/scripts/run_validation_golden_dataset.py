@@ -18,12 +18,37 @@ except Exception:
     from backend.services.interview.evaluation_contract import apply_evaluation_contract  # type: ignore
 
 
-DATASET_PATH = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "golden_validation_dataset.json"
-ALLOWED_SOURCES = {"server_deterministic_rubric", "runtime_adaptive_turn_evaluations", "none_no_candidate_audio"}
+DATASET_PATH = (
+    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "golden_validation_dataset.json"
+)
+ALLOWED_SOURCES = {
+    "server_deterministic_rubric",
+    "runtime_adaptive_turn_evaluations",
+    "none_no_candidate_audio",
+}
 TECH_TERMS = {
-    "api", "postgres", "redis", "latency", "cache", "caching", "queue", "consumer", "rollback",
-    "circuit", "database", "index", "indexes", "query", "distributed", "consistency", "availability",
-    "idempotency", "retry", "load", "balancer", "python",
+    "api",
+    "postgres",
+    "redis",
+    "latency",
+    "cache",
+    "caching",
+    "queue",
+    "consumer",
+    "rollback",
+    "circuit",
+    "database",
+    "index",
+    "indexes",
+    "query",
+    "distributed",
+    "consistency",
+    "availability",
+    "idempotency",
+    "retry",
+    "load",
+    "balancer",
+    "python",
 }
 COMPETENCY_RULES = [
     ("conflict_resolution", ("conflict", "disagree")),
@@ -56,13 +81,41 @@ def _infer_competency(question: str, answer: str) -> str:
 def _behavioral_star_count(answer: str) -> int:
     text = str(answer or "").lower()
     score = 0
-    if any(token in text for token in ("when", "team", "project", "release", "stakeholder", "last", "sprint")):
+    if any(
+        token in text
+        for token in ("when", "team", "project", "release", "stakeholder", "last", "sprint")
+    ):
         score += 1
-    if any(token in text for token in ("had to", "needed to", "owned", "goal", "milestone", "target")):
+    if any(
+        token in text for token in ("had to", "needed to", "owned", "goal", "milestone", "target")
+    ):
         score += 1
-    if any(token in text for token in ("i ", "aligned", "reviewed", "coordinated", "rank", "communicate", "proposed", "documented")):
+    if any(
+        token in text
+        for token in (
+            "i ",
+            "aligned",
+            "reviewed",
+            "coordinated",
+            "rank",
+            "communicate",
+            "proposed",
+            "documented",
+        )
+    ):
         score += 1
-    if any(token in text for token in ("result", "as a result", "recovered", "shipped", "avoided", "within", "improved")):
+    if any(
+        token in text
+        for token in (
+            "result",
+            "as a result",
+            "recovered",
+            "shipped",
+            "avoided",
+            "within",
+            "improved",
+        )
+    ):
         score += 1
     return score
 
@@ -88,8 +141,16 @@ def build_contract_case(case: Dict[str, Any]) -> Dict[str, Any]:
                 "candidate_text_excerpt": answer,
                 "answer_word_count": answer_word_count,
                 "competency": _infer_competency(question, answer),
-                "star_components_detected": _behavioral_star_count(answer) if interview_type in {"behavioral", "mixed"} else 0,
-                "technical_signal_count": _technical_signal_count(answer) if interview_type in {"technical", "mixed"} else 0,
+                "star_components_detected": (
+                    _behavioral_star_count(answer)
+                    if interview_type in {"behavioral", "mixed"}
+                    else 0
+                ),
+                "technical_signal_count": (
+                    _technical_signal_count(answer)
+                    if interview_type in {"technical", "mixed"}
+                    else 0
+                ),
             }
         )
 
@@ -132,8 +193,12 @@ def validate_dataset_case(result: Dict[str, Any]) -> List[str]:
     expected = case.get("expected") or {}
     failures: List[str] = []
 
-    if "contract_passed" in expected and bool(contract.get("contract_passed")) != bool(expected["contract_passed"]):
-        failures.append(f"contract_passed expected {expected['contract_passed']} got {contract.get('contract_passed')}")
+    if "contract_passed" in expected and bool(contract.get("contract_passed")) != bool(
+        expected["contract_passed"]
+    ):
+        failures.append(
+            f"contract_passed expected {expected['contract_passed']} got {contract.get('contract_passed')}"
+        )
 
     actual_label = contract.get("validation_summary", {}).get("validity_label")
     if expected.get("validity_label") and actual_label != expected["validity_label"]:
@@ -144,12 +209,19 @@ def validate_dataset_case(result: Dict[str, Any]) -> List[str]:
         failures.append(f"final_score expected {expected['final_score']} got {actual_score}")
 
     behavior = expected.get("score_behavior")
-    provenance = contract.get("score_provenance", {}) if isinstance(contract.get("score_provenance"), dict) else {}
+    provenance = (
+        contract.get("score_provenance", {})
+        if isinstance(contract.get("score_provenance"), dict)
+        else {}
+    )
     if behavior == "unchanged" and provenance.get("score_cap_reason"):
         failures.append("score unexpectedly capped")
     if behavior == "capped" and provenance.get("score_cap_reason") != "validation_quality_cap":
         failures.append("score expected to be capped but cap reason missing")
-    if behavior == "forced_zero" and provenance.get("forced_zero_reason") != "evaluation_contract_failed":
+    if (
+        behavior == "forced_zero"
+        and provenance.get("forced_zero_reason") != "evaluation_contract_failed"
+    ):
         failures.append("score expected to be forced zero but zero reason missing")
 
     flags = list(contract.get("validation_flags") or [])
@@ -170,7 +242,9 @@ def main() -> int:
         case_failures = validate_dataset_case(result)
         label = contract.get("validation_summary", {}).get("validity_label", "unknown")
         score = contract.get("final_scores", {}).get("overall_score", 0)
-        print(f"- {case['id']}: validity={label} score={score} flags={len(contract.get('validation_flags') or [])}")
+        print(
+            f"- {case['id']}: validity={label} score={score} flags={len(contract.get('validation_flags') or [])}"
+        )
         for failure in case_failures:
             failures += 1
             print(f"  FAIL: {failure}")

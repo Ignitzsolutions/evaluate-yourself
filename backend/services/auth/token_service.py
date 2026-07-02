@@ -30,13 +30,14 @@ class TokenService:
         """
         resolved = secret_key or os.getenv("JWT_SECRET_KEY")
         from db.redis_client import is_production_env
+
         is_prod = is_production_env()
 
         if not resolved:
             if is_prod:
                 raise RuntimeError(
                     "JWT_SECRET_KEY must be set in production. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
             resolved = _WEAK_FALLBACK
             logger.warning(
@@ -47,13 +48,15 @@ class TokenService:
             if is_prod:
                 raise RuntimeError(
                     "JWT_SECRET_KEY is set to the default insecure value. "
-                    "Generate a strong key: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    'Generate a strong key: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
             logger.warning("JWT_SECRET_KEY is the default weak value — replace before production.")
 
         if len(resolved) < 32:
             if is_prod:
-                raise RuntimeError(f"JWT_SECRET_KEY must be at least 32 characters (got {len(resolved)}).")
+                raise RuntimeError(
+                    f"JWT_SECRET_KEY must be at least 32 characters (got {len(resolved)})."
+                )
             logger.warning(f"JWT_SECRET_KEY is only {len(resolved)} chars — use 32+ in production.")
 
         self.secret_key = resolved
@@ -82,7 +85,9 @@ class TokenService:
         }
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
 
-    def create_user_refresh_token(self, user_id: str, *, jti: Optional[str] = None, lifetime_days: int = 7) -> str:
+    def create_user_refresh_token(
+        self, user_id: str, *, jti: Optional[str] = None, lifetime_days: int = 7
+    ) -> str:
         """Create refresh token for authenticated user. Caller may supply jti
         to link it to a persisted refresh_tokens row (rotation/reuse tracking)."""
         now = datetime.now(timezone.utc)

@@ -5,7 +5,6 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 
-
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BACKEND_DIR = ROOT_DIR / "backend"
 
@@ -32,14 +31,10 @@ def test_self_hosted_auth_migration_reaches_single_head(tmp_path):
 
     engine = create_engine(database_url)
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
+        connection.execute(text("""
                 INSERT INTO users (id, clerk_user_id, email, full_name, is_active, is_deleted)
                 VALUES ('user-1', 'clerk_1', 'beta@example.com', 'Beta Tester', 1, 0)
-                """
-            )
-        )
+                """))
 
     run_alembic(database_url, "upgrade", "head")
 
@@ -48,9 +43,14 @@ def test_self_hosted_auth_migration_reaches_single_head(tmp_path):
         user_columns = {column["name"]: column for column in inspector.get_columns("users")}
         assert {"password_hash", "is_admin", "email_verified"} <= set(user_columns)
         assert user_columns["clerk_user_id"]["nullable"] is True
-        assert connection.execute(text("SELECT email_verified FROM users WHERE id='user-1'")).scalar() == 1
+        assert (
+            connection.execute(text("SELECT email_verified FROM users WHERE id='user-1'")).scalar()
+            == 1
+        )
 
-        heads = connection.execute(
-            text("SELECT version_num FROM alembic_version ORDER BY version_num")
-        ).scalars().all()
-        assert heads == ["20260429_0013"]
+        heads = (
+            connection.execute(text("SELECT version_num FROM alembic_version ORDER BY version_num"))
+            .scalars()
+            .all()
+        )
+        assert heads == ["20260430_0014"]

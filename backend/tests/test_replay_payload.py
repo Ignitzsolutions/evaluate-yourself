@@ -7,7 +7,11 @@ def test_build_report_replay_payload_marks_fallback_segments_and_overlay_markers
         report={
             "transcript": [
                 {"speaker": "ai", "text": "Question", "timestamp": "2026-04-09T09:00:00Z"},
-                {"speaker": "user", "text": "Um I built a service", "timestamp": "2026-04-09T09:00:09Z"},
+                {
+                    "speaker": "user",
+                    "text": "Um I built a service",
+                    "timestamp": "2026-04-09T09:00:09Z",
+                },
             ]
         },
         metrics={

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { TextField, Button, Alert, CircularProgress, Typography, Box } from "@mui/material";
+import { TextField, Button, Alert, CircularProgress, Box } from "@mui/material";
 import AuthShell from "../components/AuthShell";
 import { useAuth, useAuthActions } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";

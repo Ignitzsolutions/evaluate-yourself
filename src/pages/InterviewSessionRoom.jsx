@@ -2338,7 +2338,6 @@ export default function InterviewSessionRoom() {
     startGazeMonitoring,
     runGazePreflight,
     stopGazeMonitoring,
-    startBrowserSpeechRecognition,
     stopBrowserSpeechRecognition,
     setAiSpeakingState,
     markUserSpeechSignal,

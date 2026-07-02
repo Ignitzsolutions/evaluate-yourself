@@ -12,7 +12,10 @@ from sqlalchemy.orm import sessionmaker
 from backend import app as app_module
 from backend.db import models
 from backend.services.interview.conversation_planner import build_bootstrap_conversation_plan
-from backend.services.interview.persistence import load_latest_evidence_artifact, persist_session_memory_snapshot
+from backend.services.interview.persistence import (
+    load_latest_evidence_artifact,
+    persist_session_memory_snapshot,
+)
 
 
 class FakeUser:
@@ -50,9 +53,13 @@ def test_bootstrap_plan_exposes_resume_and_evaluation_metadata():
     assert plan["resume_token"]
     assert plan["filler_pack_version"] == "sonia-fillers-v1"
     assert plan["orchestrator_session_version"] == "orchestrator-sprint1-v1"
-    assert plan["evaluation_channels"]["technical_semantic"]["trusted_source"] == "server_transcript"
+    assert (
+        plan["evaluation_channels"]["technical_semantic"]["trusted_source"] == "server_transcript"
+    )
     assert plan["conversation_plan"]["resume_supported"] is True
-    assert plan["conversation_plan"]["evaluation_channels"]["english_communication"]["enabled"] is True
+    assert (
+        plan["conversation_plan"]["evaluation_channels"]["english_communication"]["enabled"] is True
+    )
 
 
 def test_bootstrap_plan_loads_prior_round_memory_summary():
@@ -122,7 +129,9 @@ def test_persistence_module_supports_backend_script_import_path():
 
 
 @pytest.mark.asyncio
-async def test_next_turn_and_compatibility_wrapper_share_planner_contract(monkeypatch, redis_client):
+async def test_next_turn_and_compatibility_wrapper_share_planner_contract(
+    monkeypatch, redis_client
+):
     monkeypatch.setattr(app_module, "INTERVIEW_SKILL_TRACKS_ENABLED", False)
     monkeypatch.setattr(
         app_module,
@@ -206,7 +215,10 @@ async def test_next_turn_and_compatibility_wrapper_share_planner_contract(monkey
             last_user_turn="I built a deployment pipeline.",
             transcript_window=[
                 {"speaker": "ai", "text": "Tell me about your background."},
-                {"speaker": "user", "text": "I built deployment pipelines and rolled out services."},
+                {
+                    "speaker": "user",
+                    "text": "I built deployment pipelines and rolled out services.",
+                },
             ],
             interviewType="mixed",
             difficulty="mid",
@@ -226,12 +238,13 @@ async def test_next_turn_and_compatibility_wrapper_share_planner_contract(monkey
 
 
 @pytest.mark.asyncio
-async def test_capture_endpoint_persists_trusted_and_fallback_evidence(redis_client):
+async def test_capture_endpoint_persists_trusted_and_fallback_evidence(redis_client, monkeypatch):
     db = _db()
+    current_user = FakeUser("candidate_1")
     db.add(
         models.InterviewSession(
             session_id="session_capture",
-            clerk_user_id="candidate_1",
+            clerk_user_id=current_user.clerk_user_id,
             status="ACTIVE",
             interview_type="mixed",
             difficulty="mid",
@@ -241,22 +254,35 @@ async def test_capture_endpoint_persists_trusted_and_fallback_evidence(redis_cli
     )
     db.commit()
 
+    monkeypatch.setattr(app_module, "get_current_user", lambda authorization, db: current_user)
     response = await app_module.capture_interview_evidence(
         session_id="session_capture",
         request=app_module.TrustedCaptureRequest(
             trusted_transcript=[
-                {"speaker": "ai", "text": "What did you build?", "timestamp": "2026-04-08T10:00:00Z"},
-                {"speaker": "user", "text": "I built a payment service.", "timestamp": "2026-04-08T10:00:06Z"},
+                {
+                    "speaker": "ai",
+                    "text": "What did you build?",
+                    "timestamp": "2026-04-08T10:00:00Z",
+                },
+                {
+                    "speaker": "user",
+                    "text": "I built a payment service.",
+                    "timestamp": "2026-04-08T10:00:06Z",
+                },
             ],
             fallback_transcript=[
-                {"speaker": "user", "text": "I built a payment service.", "timestamp": "2026-04-08T10:00:06Z"},
+                {
+                    "speaker": "user",
+                    "text": "I built a payment service.",
+                    "timestamp": "2026-04-08T10:00:06Z",
+                },
             ],
             word_timestamps=[{"word": "built", "start_ms": 0, "end_ms": 120}],
             capture_integrity={"manual_override": True},
             transcript_origin="browser_speech_fallback",
             evaluation_source="server_transcript",
         ),
-        authorization=None,
+        authorization="Bearer test-token",
         db=db,
     )
 
@@ -264,7 +290,10 @@ async def test_capture_endpoint_persists_trusted_and_fallback_evidence(redis_cli
     assert response["trust_level"] == "mixed_evidence"
     assert response["capture_integrity"]["trusted_candidate_turn_count"] == 1
     assert response["capture_integrity"]["fallback_candidate_turn_count"] == 1
-    assert response["evaluation_channels"]["technical_semantic"]["trusted_source"] == "server_transcript"
+    assert (
+        response["evaluation_channels"]["technical_semantic"]["trusted_source"]
+        == "server_transcript"
+    )
 
     artifact = load_latest_evidence_artifact(db, session_id="session_capture")
     assert artifact is not None

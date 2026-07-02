@@ -11,7 +11,9 @@ import urllib.request
 from typing import Iterable
 
 
-def _request(base_url: str, path: str, method: str = "GET", max_bytes: int | None = 600) -> tuple[int, str]:
+def _request(
+    base_url: str, path: str, method: str = "GET", max_bytes: int | None = 600
+) -> tuple[int, str]:
     url = f"{base_url.rstrip('/')}{path}"
     req = urllib.request.Request(url, method=method)
     try:
@@ -52,12 +54,26 @@ def main() -> int:
             # Some app/middleware combinations surface POST-only routes as 404 on GET probes.
             # OpenAPI validation below keeps the route-registration contract strict.
             _expect(base_url, "/api/realtime/webrtc", post_only_probe_statuses, method="GET"),
-            _expect(base_url, "/api/interview/test-session/next-turn", post_only_probe_statuses, method="GET"),
-            _expect(base_url, "/api/interview/test-session/capture", post_only_probe_statuses, method="GET"),
+            _expect(
+                base_url,
+                "/api/interview/test-session/next-turn",
+                post_only_probe_statuses,
+                method="GET",
+            ),
+            _expect(
+                base_url,
+                "/api/interview/test-session/capture",
+                post_only_probe_statuses,
+                method="GET",
+            ),
             _expect(base_url, "/api/interview/reports/test-report/replay", [401, 403, 404]),
             _expect(base_url, "/openapi.json", [200]),
             _expect(base_url, "/api/admin/dashboard/overview", [200, 401, 403]),
-            _expect(base_url, "/api/admin/question-bank/tracks?interview_type=technical", [200, 401, 403]),
+            _expect(
+                base_url,
+                "/api/admin/question-bank/tracks?interview_type=technical",
+                [200, 401, 403],
+            ),
         ]
     )
     if not checks_ok:
