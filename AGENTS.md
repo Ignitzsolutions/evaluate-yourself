@@ -24,7 +24,7 @@ This repository has two major runtimes:
 
 ## Realtime constraints
 
-- The project uses Azure/OpenAI realtime flows and browser-native media paths.
+- The project uses backend-managed realtime provider flows and browser-native media paths.
 - Avoid introducing unnecessary third-party websocket/audio wrappers where native/browser or existing backend abstractions are already used.
 - Keep secrets server-side only (`backend/.env`), never exposed to frontend bundles.
 

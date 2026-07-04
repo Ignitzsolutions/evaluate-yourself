@@ -14,6 +14,7 @@ import { usePresenceHeartbeat } from "./hooks/usePresenceHeartbeat";
 import LandingPage from "./pages/LandingPage.jsx";
 import PresentationPage from "./pages/PresentationPage.jsx";
 import PricingPage from "./pages/PricingPage";
+import CheckoutPage from "./pages/CheckoutPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -46,7 +47,7 @@ function MainLayout() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         backgroundColor: "background.default",
         display: "flex",
         flexDirection: "column",
@@ -65,7 +66,7 @@ function PublicLayout() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         backgroundColor: "background.default",
         display: "flex",
         flexDirection: "column",
@@ -83,7 +84,7 @@ function AuthLayout() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         backgroundColor: "background.default",
       }}
     >
@@ -96,7 +97,7 @@ function LandingLayout() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         backgroundColor: "background.default",
         display: "flex",
         flexDirection: "column",
@@ -131,6 +132,7 @@ export default function App() {
           {/* Public routes without navbar */}
           <Route element={<PublicLayout />}>
             <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/checkout/:planKey" element={<CheckoutPage />} />
             <Route path="/test-realtime" element={<RealtimeTestPage />} />
           </Route>
 

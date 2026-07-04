@@ -23,6 +23,7 @@ Repository context and route index for Claude-driven work.
 | `/` | `LandingLayout` | `src/pages/LandingPage.jsx` | Landing page |
 | `/presentation` | `LandingLayout` | `src/pages/PresentationPage.jsx` | Product presentation |
 | `/pricing` | `PublicLayout` | `src/pages/PricingPage.jsx` | Pricing view |
+| `/checkout/:planKey` | `PublicLayout` | `src/pages/CheckoutPage.jsx` | Redirect-based checkout for plan payment methods |
 | `/test-realtime` | `PublicLayout` | `src/pages/RealtimeTestPage.jsx` | Realtime connection checks |
 | `/login/*` | `AuthLayout` | `src/pages/LoginPage.jsx` | User login |
 | `/register/*` | `AuthLayout` | `src/pages/RegisterPage.jsx` | User signup |
@@ -95,10 +96,24 @@ Admin subroutes under `/admin/dashboard`:
 | Gaze capture pipeline | `src/components/WebcamToGaze.js`, `backend/services/gaze_monitor.py`, `backend/app.py` websocket gaze endpoints |
 | Admin console frontend | `src/pages/admin/*`, `src/components/AdminRoute.jsx` |
 | Candidate report UX | `src/pages/ReportPage.jsx`, `src/pages/AnalyticsPage.jsx`, `src/pages/Dashboard.jsx` |
+| Pricing and checkout UX | `src/pages/PricingPage.jsx`, `src/pages/CheckoutPage.jsx`, `src/config/pricingConfig.js` |
 
-## 5) Editing rules for this repo
+## 5) Local AI workflow skills
+
+These are local assistant skills used for repo work. They are not application runtime dependencies and should not be imported by product code.
+
+| Skill | Use in this repo |
+|---|---|
+| `use-mcp` | Product-code changes that need lean schemas, shared logic, parameterized tests, and premium light-only UI |
+| `frontend-skill` | Higher-polish React page and SaaS UI work, especially landing, pricing, checkout, and report surfaces |
+| `playwright` | Browser-level verification for routing, viewport fit, and end-to-end candidate flows |
+| `gh-fix-ci` | GitHub Actions failure inspection and CI remediation |
+| `remotion-best-practices` | Future video/replay overlay work if report playback moves into Remotion-rendered assets |
+
+## 6) Editing rules for this repo
 
 1. Keep route contracts stable unless a breaking change is explicitly requested.
 2. When changing a route, update both caller and server side in one change.
 3. Keep root clean: guides in `docs/guides/`, historical docs in `docs/archive/`.
 4. Never expose secrets to frontend bundles; keep keys server-side only.
+5. Keep checkout redirect configuration frontend-safe: use public payment URLs only, never provider secret keys.
