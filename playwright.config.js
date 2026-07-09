@@ -22,7 +22,7 @@ module.exports = defineConfig({
   webServer: process.env.PW_CERT_BASE_URL
     ? undefined
     : {
-        command: `HOST=${HOST} PORT=${PORT} BROWSER=none npm start`,
+        command: `PORT=${PORT} BROWSER=none npm start`,
         url: BASE_URL,
         reuseExistingServer: !process.env.CI,
         timeout: 180000,
