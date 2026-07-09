@@ -1,6 +1,6 @@
 export const trialConfig = {
-  label: "Try Free for 5 Minutes",
-  description: "Start one realtime interview session with full AI interviewer experience.",
+  label: "Free Access Active",
+  description: "Start realtime interview practice with full AI interviewer experience.",
 };
 
 export const pricingCapabilityCatalog = [

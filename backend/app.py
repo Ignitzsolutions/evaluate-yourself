@@ -5334,22 +5334,6 @@ async def next_turn(
     )
 
 
-@app.post("/api/interview/{session_id}/adaptive-turn")
-async def adaptive_turn(
-    session_id: str,
-    payload: AdaptiveTurnRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Compatibility wrapper for the legacy adaptive-turn contract."""
-    return _plan_next_turn_response(
-        session_id=session_id,
-        payload=payload,
-        current_user=current_user,
-        db=db,
-    )
-
-
 @app.post("/api/interview/{session_id}/capture")
 async def capture_interview_evidence(
     session_id: str,

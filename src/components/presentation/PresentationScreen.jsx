@@ -201,14 +201,13 @@ export default function PresentationScreen({ variant }) {
       <Box className="presentation-screen presentation-screen-waitlist">
         <Box className="presentation-screen-waitlist-hero">
           <Typography className="presentation-screen-waitlist-badge">
-            Try Free for 5 Minutes
+            Free Access Active
           </Typography>
           <Typography className="presentation-screen-waitlist-title">
             Pricing That Scales With Interview Goals
           </Typography>
           <Typography className="presentation-screen-waitlist-copy">
-            Join the free-trial waitlist and leave your email to get notified when new
-            5-minute trial slots open.
+            Start practicing with Sonia now, then upgrade when you need deeper analytics.
           </Typography>
           <Box className="presentation-screen-waitlist-form">
             <Typography className="presentation-screen-waitlist-input">

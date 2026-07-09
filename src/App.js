@@ -27,7 +27,6 @@ import InterviewSessionRoom from "./pages/InterviewSessionRoom";
 import ReportPage from "./pages/ReportPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import InterviewsPage from "./pages/InterviewsPage";
-import RealtimeTestPage from "./pages/RealtimeTestPage";
 import CommunicationPracticePage from "./pages/CommunicationPracticePage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminOverviewPage from "./pages/admin/AdminOverviewPage";
@@ -42,8 +41,7 @@ import AdminConfigPage from "./pages/admin/AdminConfigPage";
 import AdminQuestionBankPage from "./pages/admin/AdminQuestionBankPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
-// Layout wrapper for authenticated pages with navbar
-function MainLayout() {
+function AppShell({ navbar = false, footer = false }) {
   return (
     <Box
       sx={{
@@ -53,32 +51,18 @@ function MainLayout() {
         flexDirection: "column",
       }}
     >
-      <Navbar />
+      {navbar && <Navbar />}
       <Box component="main" sx={{ flex: 1 }}>
         <Outlet />
       </Box>
-      <Footer />
+      {footer && <Footer />}
     </Box>
   );
 }
 
-function PublicLayout() {
-  return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        backgroundColor: "background.default",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <Box component="main" sx={{ flex: 1 }}>
-        <Outlet />
-      </Box>
-      <Footer />
-    </Box>
-  );
-}
+const MainLayout = () => <AppShell navbar footer />;
+const PublicLayout = () => <AppShell footer />;
+const LandingLayout = () => <AppShell />;
 
 function AuthLayout() {
   return (
@@ -89,23 +73,6 @@ function AuthLayout() {
       }}
     >
       <Outlet />
-    </Box>
-  );
-}
-
-function LandingLayout() {
-  return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        backgroundColor: "background.default",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <Box component="main" sx={{ flex: 1 }}>
-        <Outlet />
-      </Box>
     </Box>
   );
 }
@@ -133,13 +100,13 @@ export default function App() {
           <Route element={<PublicLayout />}>
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/checkout/:planKey" element={<CheckoutPage />} />
-            <Route path="/test-realtime" element={<RealtimeTestPage />} />
           </Route>
 
           <Route element={<AuthLayout />}>
             <Route path="/login/*" element={<LoginPage />} />
             <Route path="/register/*" element={<RegisterPage />} />
             <Route path="/forgot-password/*" element={<ForgotPasswordPage />} />
+            <Route path="/set-password/*" element={<ForgotPasswordPage />} />
             <Route path="/admin" element={<AdminEntryPage />} />
             <Route path="/admin/login/*" element={<AdminLoginPage />} />
           </Route>

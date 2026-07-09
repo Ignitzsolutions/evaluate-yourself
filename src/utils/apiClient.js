@@ -23,6 +23,15 @@ function isFetchNetworkFailure(error) {
   );
 }
 
+function isProxyBackendFailure(status, rawText) {
+  const text = String(rawText || "").toLowerCase();
+  return (
+    status >= 500 &&
+    text.includes("proxy") &&
+    (text.includes("econnrefused") || text.includes("could not proxy") || text.includes("trying to proxy"))
+  );
+}
+
 function buildBackendUnavailableError(url, error) {
   const wrapped = new Error("Backend service is unavailable. Start the API server and try again.");
   wrapped.code = BACKEND_UNAVAILABLE_CODE;
@@ -107,6 +116,10 @@ export async function buildApiErrorFromResponse(response, options = {}) {
     }
   }
 
+  if (isProxyBackendFailure(status, rawText)) {
+    return buildBackendUnavailableError(response?.url || "", new Error(rawText));
+  }
+
   const detail = parsed?.detail ?? parsed ?? rawText;
   const fallbackCode = defaultCode || `HTTP_${status || "UNKNOWN"}`;
 
@@ -154,33 +167,3 @@ export function getApiErrorMessage(error, options = {}) {
   const message = String(error?.message || "").trim();
   return message || defaultMessage;
 }
-
-export const adminApi = {
-  summary: (baseUrl, token) => authFetch(`${baseUrl}/api/admin/summary`, token, { method: "GET" }),
-  dashboardOverview: (baseUrl, token) => authFetch(`${baseUrl}/api/admin/dashboard/overview`, token, { method: "GET" }),
-  candidates: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/candidates${query}`, token, { method: "GET" }),
-  candidateDetail: (baseUrl, token, clerkUserId) => authFetch(`${baseUrl}/api/admin/candidates/${encodeURIComponent(clerkUserId)}`, token, { method: "GET" }),
-  deactivateCandidate: (baseUrl, token, clerkUserId) => authFetch(`${baseUrl}/api/admin/candidates/${encodeURIComponent(clerkUserId)}/deactivate`, token, { method: "POST" }),
-  softDeleteCandidate: (baseUrl, token, clerkUserId) => authFetch(`${baseUrl}/api/admin/candidates/${encodeURIComponent(clerkUserId)}`, token, { method: "DELETE" }),
-  activeUsers: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/active-users${query}`, token, { method: "GET" }),
-  interviews: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/interviews${query}`, token, { method: "GET" }),
-  reports: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/reports${query}`, token, { method: "GET" }),
-  config: (baseUrl, token) => authFetch(`${baseUrl}/api/admin/config`, token, { method: "GET" }),
-  createExport: (baseUrl, token, payload) =>
-    authFetch(`${baseUrl}/api/admin/exports`, token, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  exports: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/exports${query}`, token, { method: "GET" }),
-  exportDetail: (baseUrl, token, exportId) => authFetch(`${baseUrl}/api/admin/exports/${encodeURIComponent(exportId)}`, token, { method: "GET" }),
-  exportDownloadUrl: (baseUrl, exportId) => `${baseUrl}/api/admin/exports/${encodeURIComponent(exportId)}/download`,
-  createTrialCode: (baseUrl, token, payload) =>
-    authFetch(`${baseUrl}/api/admin/trial-codes`, token, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  trialCodes: (baseUrl, token, query = "") => authFetch(`${baseUrl}/api/admin/trial-codes${query}`, token, { method: "GET" }),
-  deleteTrialCode: (baseUrl, token, codeId) => authFetch(`${baseUrl}/api/admin/trial-codes/${encodeURIComponent(codeId)}`, token, { method: "DELETE" }),
-};

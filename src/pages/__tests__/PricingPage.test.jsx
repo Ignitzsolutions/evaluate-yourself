@@ -18,7 +18,7 @@ describe("PricingPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText(/Try Free for 5 Minutes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Free Access Active/i)).toBeInTheDocument();
     expect(screen.getByText(/Join the free-trial waitlist/i)).toBeInTheDocument();
     expect(screen.getByText(/Most popular/i)).toBeInTheDocument();
     expect(screen.getByText(/Included in every plan/i)).toBeInTheDocument();

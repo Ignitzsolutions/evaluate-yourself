@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Alert,
@@ -20,18 +20,18 @@ import {
 } from "@mui/material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 import {
   buildInterviewConfig,
+  INTERVIEW_TYPES_REQUIRING_SKILLS,
   isInterviewFreeAccessMode,
   readSavedInterviewConfig,
   saveInterviewConfig,
 } from "../utils/accessMode";
 
 const FREE_ACCESS_MODE = isInterviewFreeAccessMode();
-const API_BASE = getApiBaseUrl();
-const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
+const DURATION_OPTIONS = [10, 15, 20, 30, 45, 60];
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
@@ -40,8 +40,7 @@ export default function PreInterviewForm() {
 
   const [selectedType, setSelectedType] = useState(location.state?.type || "technical");
 
-  const durationOptions = useMemo(() => [10, 15, 20, 30, 45, 60], []);
-  const [duration, setDuration] = useState(durationOptions[0]);
+  const [duration, setDuration] = useState(DURATION_OPTIONS[0]);
   const [difficulty, setDifficulty] = useState("easy");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
@@ -73,7 +72,7 @@ export default function PreInterviewForm() {
     }
     const parsed = savedConfig.config;
     setSelectedType(locationType || parsed.type || "technical");
-    setDuration(Number(parsed.duration) || durationOptions[0]);
+    setDuration(Number(parsed.duration) || DURATION_OPTIONS[0]);
     setDifficulty(parsed.difficulty || "easy");
     setRole(parsed.role || "");
     setCompany(parsed.company || "");
@@ -81,7 +80,7 @@ export default function PreInterviewForm() {
     setInterviewStyle(parsed.interviewStyle || "neutral");
     setTranscriptConsent(Boolean(parsed.transcriptConsent));
     setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
-  }, [durationOptions, location.state?.recoveryMessage, location.state?.type]);
+  }, [location.state?.recoveryMessage, location.state?.type]);
 
   useEffect(() => {
     let mounted = true;
@@ -100,7 +99,7 @@ export default function PreInterviewForm() {
       try {
         const token = await getToken();
         const resp = await authFetch(
-          `${API_BASE}/api/interview/skill-catalog?interview_type=${encodeURIComponent(selectedType)}`,
+          apiUrl("/api/interview/skill-catalog", { interview_type: selectedType }),
           token,
           { method: "GET" }
         );
@@ -188,7 +187,7 @@ export default function PreInterviewForm() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         py: { xs: 3, md: 6 },
         px: { xs: 2, md: 4 },
         background:
@@ -239,7 +238,7 @@ export default function PreInterviewForm() {
                 <FormControl fullWidth>
                   <InputLabel id="duration-label">Duration</InputLabel>
                   <Select labelId="duration-label" label="Duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                    {durationOptions.map((mins) => (
+                    {DURATION_OPTIONS.map((mins) => (
                       <MenuItem key={mins} value={mins}>{mins} minutes</MenuItem>
                     ))}
                   </Select>

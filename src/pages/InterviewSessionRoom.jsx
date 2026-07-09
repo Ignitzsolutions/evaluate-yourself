@@ -1506,7 +1506,7 @@ export default function InterviewSessionRoom() {
       setIsThinking(false);
       stopFiller();
       if (detail) {
-        console.warn('[adaptive-turn] recovery detail:', detail);
+        console.warn('[next-turn] recovery detail:', detail);
       }
     };
 
@@ -1579,7 +1579,7 @@ export default function InterviewSessionRoom() {
         }
       }
     } catch (err) {
-      console.warn('[adaptive-turn] error:', err);
+      console.warn('[next-turn] error:', err);
       recoverAdaptiveTurn(
         'Adaptive scoring failed during the interview. Sonia is continuing with a safe fallback question.',
         err,
@@ -1722,7 +1722,7 @@ export default function InterviewSessionRoom() {
     }
   }, [addTranscript, startBrowserSpeechRecognition]);
 
-  // Connect to Realtime API (proven logic from RealtimeTestPage)
+  // Connect to the backend-managed Realtime API.
   const handleConnect = useCallback(async () => {
     if (status === 'connecting' || status === 'connected' || status === 'ready') {
       return;
