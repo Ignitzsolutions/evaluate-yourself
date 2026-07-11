@@ -40,7 +40,7 @@
                     <mxGeometry x="580" y="140" width="120" height="80" as="geometry"/>
                 </mxCell>
                 
-                <mxCell id="openai-logo" value="Azure OpenAI&#xa;gpt-realtime&#xa;Whisper ASR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#74AA9C;strokeColor=#10A37F;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#FFFFFF;spacingTop=10;" vertex="1" parent="1">
+                <mxCell id="openai-logo" value="Realtime Provider&#xa;gpt-realtime&#xa;Server transcription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#74AA9C;strokeColor=#10A37F;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#FFFFFF;spacingTop=10;" vertex="1" parent="1">
                     <mxGeometry x="720" y="140" width="120" height="80" as="geometry"/>
                 </mxCell>
                 
@@ -82,7 +82,7 @@
                     <mxGeometry x="80" y="600" width="880" height="140" as="geometry"/>
                 </mxCell>
                 
-                <mxCell id="azure-logo" value="Azure OpenAI&#xa;Sweden Central&#xa;WebSocket Realtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0078D4;strokeColor=#005A9E;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#FFFFFF;image=https://swimburger.net/media/ppnn3pcl/azure.png;imageWidth=48;imageHeight=48;spacingTop=60;" vertex="1" parent="1">
+                <mxCell id="azure-logo" value="Realtime Provider&#xa;OpenAI native&#xa;Realtime session" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0078D4;strokeColor=#005A9E;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#FFFFFF;image=https://swimburger.net/media/ppnn3pcl/azure.png;imageWidth=48;imageHeight=48;spacingTop=60;" vertex="1" parent="1">
                     <mxGeometry x="120" y="640" width="180" height="80" as="geometry"/>
                 </mxCell>
                 
@@ -143,7 +143,7 @@
                 <mxCell id="leg-2" value="" style="line;strokeWidth=3;direction=south;html=1;strokeColor=#0078D4;" vertex="1" parent="1">
                     <mxGeometry x="1040" y="165" width="60" height="10" as="geometry"/>
                 </mxCell>
-                <mxCell id="leg-2-text" value="Azure OpenAI WebSocket" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+                <mxCell id="leg-2-text" value="Realtime provider session" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
                     <mxGeometry x="1110" y="160" width="190" height="20" as="geometry"/>
                 </mxCell>
                 

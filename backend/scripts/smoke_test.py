@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke tests for Azure-ready backend architecture.
+Smoke tests for the backend runtime.
 Tests database and Redis connectivity without running migrations.
 """
 
@@ -140,7 +140,7 @@ def test_environment_variables():
         "Database": "DATABASE_URL",
         "Redis": ["REDIS_URL", "REDIS_HOST"],  # Either REDIS_URL or REDIS_HOST
         "Clerk Auth": "CLERK_SECRET_KEY",
-        "Azure OpenAI": "AZURE_OPENAI_API_KEY",
+        "Realtime provider": ["OPENAI_API_KEY", "SARVAM_API_KEY"],
     }
 
     for service, var_names in critical_vars.items():
@@ -194,7 +194,7 @@ def test_health_endpoint_logic():
 def run_all_tests():
     """Run all smoke tests."""
     print("=" * 60)
-    print("🚀 Azure Backend Smoke Tests")
+    print("🚀 Backend Smoke Tests")
     print("=" * 60)
 
     tests = [
@@ -245,10 +245,10 @@ def run_all_tests():
     critical_passed = all(results.get(t, False) for t in critical_tests)
 
     if critical_passed:
-        print("\n✅ Critical tests passed! Backend database layer is Azure-ready.")
+        print("\n✅ Critical tests passed! Backend database layer is ready.")
         if not redis_available:
             print("   ℹ️  Redis tests skipped (not running locally)")
-            print("   ℹ️  Redis will work in Azure with REDIS_URL configured")
+            print("   ℹ️  Redis will work in production when REDIS_URL is configured")
         else:
             print("   ✅ Redis also working!")
         return 0

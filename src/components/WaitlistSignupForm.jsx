@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Alert, Box, Button, Stack, TextField, Typography } from "@mui/material";
 import { authFetch } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
-
-const API_BASE_URL = getApiBaseUrl();
+import { apiUrl } from "../utils/apiBaseUrl";
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
@@ -33,7 +31,7 @@ export default function WaitlistSignupForm({
     try {
       setSubmitting(true);
       setStatus({ kind: "", message: "" });
-      const response = await authFetch(`${API_BASE_URL}/api/waitlist`, null, {
+      const response = await authFetch(apiUrl("/api/waitlist"), null, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

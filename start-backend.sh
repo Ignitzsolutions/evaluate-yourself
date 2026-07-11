@@ -27,7 +27,7 @@ if [ ! -f "${ROOT_DIR}/backend/.env" ]; then
     echo "   Creating from .env.example..."
     if [ -f "${ROOT_DIR}/backend/.env.example" ]; then
         cp "${ROOT_DIR}/backend/.env.example" "${ROOT_DIR}/backend/.env"
-        echo "   Please edit backend/.env and add your Azure OpenAI keys"
+        echo "   Please edit backend/.env and add your provider credentials"
     else
         echo "   Please create backend/.env with your configuration"
     fi

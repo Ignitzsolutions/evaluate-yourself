@@ -3,14 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Ensure Oryx-built virtualenv is active when using a custom startup command.
-# App Service typically builds a venv at /home/site/wwwroot/antenv.
-if [ -n "${ORYX_VIRTUAL_ENV:-}" ] && [ -d "${ORYX_VIRTUAL_ENV:-}" ]; then
-  source "${ORYX_VIRTUAL_ENV}/bin/activate"
-elif [ -d "/home/site/wwwroot/antenv" ]; then
-  source "/home/site/wwwroot/antenv/bin/activate"
-fi
-
 cd "${SCRIPT_DIR}"
 
 # Run DB migrations on startup

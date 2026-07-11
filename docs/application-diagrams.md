@@ -7,8 +7,8 @@ flowchart LR
   C["Candidate"]
   A["Admin"]
   CL["Clerk Auth"]
-  RT["Azure OpenAI Realtime"]
-  DB["Azure PostgreSQL"]
+  RT["Realtime AI Provider"]
+  DB["PostgreSQL"]
   BE["FastAPI Backend"]
   CA["Candidate App"]
   AD["Admin Dashboard"]
@@ -28,7 +28,7 @@ flowchart LR
   CA --> BE
   AD --> BE
   BE -->|JWT Verify| CL
-  BE -->|Session/Transcript| RT
+  BE -->|Realtime Session, Transcript, TTS| RT
   BE -->|Users/Sessions/Reports/Trials| DB
 ```
 
@@ -54,8 +54,8 @@ flowchart TB
 
   subgraph Data["Data/Infra"]
     Clerk["Clerk"]
-    Realtime["Azure OpenAI Realtime"]
-    PG["Azure PostgreSQL\nusers, profiles, sessions, reports,\ntrial_codes, user_entitlements, gaze_events"]
+    Realtime["Provider Layer\nOpenAI Native or Sarvam Hybrid"]
+    PG["PostgreSQL\nusers, profiles, sessions, reports,\ntrial_codes, user_entitlements, gaze_events"]
     Redis["Redis (optional cache/events)"]
   end
 
@@ -91,3 +91,9 @@ flowchart TB
 
 - Use case SVG: `/Users/srujanreddy/Projects/evaluate-yourself/docs/diagrams/use-case.svg`
 - Functional architecture SVG: `/Users/srujanreddy/Projects/evaluate-yourself/docs/diagrams/functional-architecture.svg`
+
+## Active architecture references
+
+- Provider capabilities and mode tradeoffs: [docs/provider-matrix.md](/Users/srujanreddy/Projects/evaluate-yourself/docs/provider-matrix.md)
+- Realtime gateway shape: [docs/realtime-provider-architecture.md](/Users/srujanreddy/Projects/evaluate-yourself/docs/realtime-provider-architecture.md)
+- Current API inventory: [docs/api-endpoints.md](/Users/srujanreddy/Projects/evaluate-yourself/docs/api-endpoints.md)

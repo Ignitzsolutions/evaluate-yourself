@@ -2,12 +2,31 @@
   --bg:#ffffff;
   --ink:#0f172a;              /* title */
   --muted:#6b7280;            /* paragraphs */
-  --brand:#1E88E5;            /* primary */
-  --radius:16px;
-  --shadow:0 10px 35px rgba(0,0,0,.08);
+  --brand:#1d4ed8;            /* primary */
+  --brand-ink:#0f172a;
+  --radius:20px;
+  --shadow:0 18px 56px rgba(15,23,42,.08);
 }
 
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+html,
+body,
+#root {
+  min-height: 100dvh;
+  width: 100%;
+}
+
+body{
+  margin: 0;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 800px at 0% 0%, rgba(29,78,216,.08), transparent 60%),
+    radial-gradient(900px 600px at 100% 10%, rgba(15,118,110,.06), transparent 55%),
+    #f6f8fc;
+  color: var(--ink);
+  font-family: "Manrope", system-ui, sans-serif;
+}
 
 /* ===== Glossy, sticky header (full-width bar with centered content) ===== */
 .glossy-header{
@@ -56,7 +75,10 @@
 
 /* ===== Centered hero (keeps height; scales horizontally via max-width) ===== */
 .hero{
-  background: var(--bg);
+  background:
+    radial-gradient(1000px 500px at 10% 0%, rgba(29,78,216,.08), transparent 60%),
+    radial-gradient(900px 400px at 90% 10%, rgba(15,118,110,.08), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 .hero-inner{
   margin: 0 auto; max-width: 1100px; padding: 56px 24px;
@@ -70,7 +92,7 @@
   line-height: 1.05;
   letter-spacing: -.01em;
   text-wrap: balance;
-  text-shadow: 0 2px 0 #fff, 0 18px 35px rgba(30,136,229,.15); /* gentle glow */
+  text-shadow: 0 2px 0 #fff, 0 18px 35px rgba(29,78,216,.12); /* gentle glow */
 }
 .hero-sub{
   color: var(--muted);
@@ -87,7 +109,7 @@
 .btn-ghost{ background:#fff; color:#111827; border:1px solid #e5e7eb; }
 .hero-img{
   width:100%; border-radius: var(--radius);
-  box-shadow: 0 24px 60px rgba(30,136,229,.25);
+  box-shadow: 0 24px 60px rgba(29,78,216,.18);
 }
 
 /* ===== Colored feature cards (no dots; full soft color panels with gloss) ===== */
@@ -102,6 +124,7 @@
 .card{
   position:relative; padding:22px; border-radius: var(--radius);
   color:#0b1220; background:#fff; box-shadow: var(--shadow); overflow:hidden;
+  border: 1px solid rgba(148,163,184,.16);
 }
 .card-title{ font-weight:700; font-size: 16px; margin-bottom: 6px; }
 .card-body{ color:#243244; opacity:.85; font-size:14px; }
@@ -121,7 +144,7 @@
 
 /* ===== Glowing login card (centered, bigger inputs) ===== */
 .auth-shell{
-  min-height: 100vh; display:grid; place-items:center; background: #f7f9fc;
+  min-height: 100dvh; display:grid; place-items:center; background: #f7f9fc;
   padding: 24px;
 }
 .auth-card{
@@ -154,7 +177,7 @@
 
 /* ===== Clerk Login Layout ===== */
 .clerk-shell{
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 32px 20px 48px;
@@ -164,7 +187,8 @@
     linear-gradient(135deg, #f1f5ff 0%, #f7fbff 45%, #eef2ff 100%);
   font-family: "Manrope", system-ui, sans-serif;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .clerk-bg-orb{
@@ -329,6 +353,41 @@
   color: #2563eb !important;
 }
 
+.studio-band{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.studio-pill{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,.82);
+  border: 1px solid rgba(148,163,184,.18);
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.studio-panel{
+  border-radius: 28px;
+  background: rgba(255,255,255,.84);
+  border: 1px solid rgba(148,163,184,.18);
+  box-shadow: 0 24px 70px rgba(15,23,42,.10);
+}
+
+.studio-section{
+  padding: 20px;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.9));
+  border: 1px solid rgba(148,163,184,.16);
+}
+
 @media (max-width: 980px){
   .clerk-panel{
     grid-template-columns: 1fr;
@@ -341,11 +400,12 @@
 
 /* ===== Interview Session (Apple-like minimal curves) ===== */
 .session-shell{
-  height: 100vh;
-  width: 100vw;
+  min-height: 100dvh;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: "Manrope", system-ui, sans-serif;
   background:
     radial-gradient(1200px 600px at 0% -10%, rgba(15,118,255,.08), transparent 60%),
@@ -899,7 +959,8 @@
   }
   .meet-stage{
     width: min(100%, 94vw);
-    height: min(430px, 56vh);
+    min-height: 360px;
+    height: min(430px, 54dvh);
     border-radius: 18px;
   }
   .meet-gaze-badge{
@@ -978,7 +1039,7 @@
 
 /* ===== Interview stage shipping overrides ===== */
 .meet-shell{
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1200px 640px at 10% -10%, rgba(59,130,246,.14), transparent 58%),
     radial-gradient(900px 520px at 100% 0%, rgba(14,165,233,.08), transparent 54%),
@@ -1031,12 +1092,12 @@
   color: #334155;
 }
 .meet-stage-wrap{
-  padding: 26px 20px 112px;
+  padding: clamp(14px, 2.5vh, 26px) 20px 112px;
 }
 .meet-stage{
   width: min(1180px, 95vw);
-  min-height: 640px;
-  height: min(72vh, 760px);
+  min-height: clamp(420px, calc(100dvh - 260px), 640px);
+  height: clamp(420px, calc(100dvh - 260px), 760px);
   align-items: stretch;
   justify-items: stretch;
   overflow: hidden;

@@ -63,7 +63,7 @@ uv run mypy
 uv run pytest backend/tests
 ```
 
-`requirements.txt` remains in the repo only as an Azure/Oryx compatibility export during the transition.
+`requirements.txt` remains in the repo only as a compatibility export for non-`uv` environments during the transition.
 
 ### LLM Configuration (Required for Voice Interview)
 
@@ -73,7 +73,23 @@ The voice-only interview feature requires an LLM realtime configuration.
 2. Configure your provider credentials in `backend/.env`
 3. Start the backend and verify `/health` returns success
 
-See [docs/guides/SETUP.md](docs/guides/SETUP.md) for detailed configuration instructions.
+See [docs/guides/SETUP.md](docs/guides/SETUP.md), [docs/provider-matrix.md](docs/provider-matrix.md), and [docs/realtime-provider-architecture.md](docs/realtime-provider-architecture.md) for the active provider configuration and runtime architecture.
+
+## Server deployment
+
+Production deploys now target a Linux server over SSH with Docker Compose.
+
+Required GitHub Actions secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH`
+- `DEPLOY_ENV_FILE`
+- `APP_BASE_URL`
+
+`DEPLOY_ENV_FILE` should contain the full backend `backend/.env` contents for production. The deploy workflow uploads the release bundle, writes `backend/.env`, runs `docker compose up -d --build`, applies Alembic migrations, runs schema smoke inside the backend container, and then checks `APP_BASE_URL` via `/health` and core routes.
 
 ### Documentation
 

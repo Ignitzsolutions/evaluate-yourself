@@ -1,75 +1,81 @@
 # Quick Start Guide
 
-## Starting the Application
+## Start the application
 
-### Option 1: Start Both Servers Together (Recommended)
+### Option 1: Start both servers together
 
 ```bash
 ./start-all.sh
 ```
 
-This will start both the backend and frontend servers in the background.
+### Option 2: Start separately
 
-### Option 2: Start Servers Separately
+Backend:
 
-**Backend:**
 ```bash
 ./start-backend.sh
 ```
 
-**Frontend:**
+Frontend:
+
 ```bash
 ./start-frontend.sh
 ```
 
-### Option 3: Using npm scripts
+### Option 3: npm scripts
 
 ```bash
-npm run start:all      # Start both servers
-npm run start:backend  # Start backend only
-npm run start:frontend # Start frontend only
+npm run start:all
+npm run start:backend
+npm run start:frontend
 ```
 
-## Access the Application
+## Access points
 
-- **Frontend**: http://localhost:3001
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+- Frontend: `http://localhost:3001`
+- Backend API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
 
-## Configuration
+## Minimal configuration
 
-1. **Backend Configuration** (`backend/.env`):
-   - `AZURE_OPENAI_API_KEY` - Your Azure OpenAI API key
-   - `AZURE_OPENAI_ENDPOINT` - Your Azure OpenAI endpoint
-   - `AZURE_OPENAI_DEPLOYMENT_NAME` - Your deployment name
-   - `AZURE_SPEECH_KEY` (optional) - Azure Speech Services key
+Backend:
 
-2. **Frontend Configuration** (`.env`):
-   - `REACT_APP_API_URL` - Backend API URL (default: http://localhost:8000)
+- create `backend/.env`
+- choose `AI_PROVIDER=openai_native|sarvam_hybrid`
+- add the matching provider credentials
 
-## Troubleshooting
+Frontend:
 
-### Port Already in Use
-The startup scripts will automatically try the next available port if the default port is in use.
+- set `REACT_APP_API_URL` if the backend is not on `http://localhost:8000`
 
-### Backend Not Starting
-- Check that `backend/.env` exists and has valid Azure OpenAI credentials
-- Ensure Python virtual environment is activated
-- Check `backend.log` for error messages
+## Fast checks
 
-### Frontend Not Starting
-- Ensure `node_modules` is installed (`npm install`)
-- Check `frontend.log` for error messages
+- open `/health`
+- open `/docs`
+- open the interview flow
+- verify the realtime bootstrap endpoint responds through the backend
 
-### WebSocket Connection Errors
-- Ensure backend is running on port 8000
-- Check that Azure OpenAI keys are configured correctly
-- Verify CORS settings in `backend/app.py`
+## Common problems
 
-## Production Build
+### Backend not starting
+
+- run `uv sync`
+- check that `backend/.env` exists
+- confirm the provider credentials are present for the selected mode
+
+### Frontend not starting
+
+- run `npm install`
+- check `frontend.log`
+
+### Realtime connection errors
+
+- verify the backend is reachable on port `8000`
+- verify the selected provider is configured correctly
+- check browser microphone permissions
+
+## Production build
 
 ```bash
 npm run build
 ```
-
-The built files will be in the `build/` directory.

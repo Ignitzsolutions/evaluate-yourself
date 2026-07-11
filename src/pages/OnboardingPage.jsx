@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import {
   Alert,
   Box,
@@ -22,8 +22,6 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-
-const API_BASE_URL = getApiBaseUrl();
 
 const steps = ["Profile Type", "Goals", "Background", "Consent"];
 
@@ -170,7 +168,7 @@ export default function OnboardingPage() {
     async function loadProfile() {
       try {
         const token = await getToken();
-        const resp = await authFetch(`${API_BASE_URL}/api/profile/me`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/profile/me"), token, { method: "GET" });
         if (!mounted) return;
         if (resp.status === 404) {
           setLoading(false);
@@ -349,7 +347,7 @@ export default function OnboardingPage() {
         careerCompBand: form.careerCompBand || null,
         interviewUrgency: form.interviewUrgency || null,
       };
-      const resp = await authFetch(`${API_BASE_URL}/api/profile/me`, token, {
+      const resp = await authFetch(apiUrl("/api/profile/me"), token, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -377,7 +375,7 @@ export default function OnboardingPage() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         py: { xs: 3, md: 5 },
         background:
           "radial-gradient(900px 360px at 0% 0%, rgba(37,99,235,0.14), transparent 60%), radial-gradient(800px 320px at 100% 0%, rgba(14,116,144,0.12), transparent 60%), #f8fafc",

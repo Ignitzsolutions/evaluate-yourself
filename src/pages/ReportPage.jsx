@@ -48,9 +48,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
-
-const API_BASE_URL = getApiBaseUrl();
+import { apiUrl } from "../utils/apiBaseUrl";
 
 function safeTimestamp(ts) {
   if (!ts) return null;
@@ -136,7 +134,7 @@ export default function ReportPage() {
       setErrorKind("");
 
       const token = await getToken();
-      const response = await authFetch(`${API_BASE_URL}/api/interview/reports/${reportKey}`, token, {
+      const response = await authFetch(apiUrl(`/api/interview/reports/${reportKey}`), token, {
         headers: { "Content-Type": "application/json" },
       });
 
@@ -152,7 +150,7 @@ export default function ReportPage() {
       const sessionKey = data?.session_id || reportKey;
       if (sessionKey) {
         const gazeResponse = await authFetch(
-          `${API_BASE_URL}/api/interview/sessions/${sessionKey}/gaze-events?limit=500`,
+          apiUrl(`/api/interview/sessions/${sessionKey}/gaze-events`, { limit: 500 }),
           token,
           { headers: { "Content-Type": "application/json" } },
         );
@@ -166,7 +164,7 @@ export default function ReportPage() {
         }
 
         const replayResponse = await authFetch(
-          `${API_BASE_URL}/api/interview/reports/${reportKey}/replay`,
+          apiUrl(`/api/interview/reports/${reportKey}/replay`),
           token,
           { headers: { "Content-Type": "application/json" } },
         );
@@ -480,7 +478,7 @@ export default function ReportPage() {
       };
 
       const response = await authFetch(
-        `${API_BASE_URL}/api/interview/reports/${report.id}/feedback`,
+        apiUrl(`/api/interview/reports/${report.id}/feedback`),
         token,
         {
           method: "PUT",
@@ -522,7 +520,7 @@ export default function ReportPage() {
     setDownloadLoading(true);
     try {
       const token = await getToken();
-      const resp = await authFetch(`${API_BASE_URL}/api/interview/reports/${sessionId}/download?format=pdf`, token);
+      const resp = await authFetch(apiUrl(`/api/interview/reports/${sessionId}/download`, { format: "pdf" }), token);
       if (!resp.ok) {
         throw new Error(`Download failed: ${resp.status}`);
       }

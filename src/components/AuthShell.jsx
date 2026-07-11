@@ -23,6 +23,7 @@ export default function AuthShell({
             </div>
           </div>
 
+          <div className="clerk-eyebrow">{eyebrow}</div>
           <h1>{title}</h1>
           <p>{subtitle}</p>
 
@@ -36,6 +37,10 @@ export default function AuthShell({
               ))}
             </div>
           )}
+
+          <div className="clerk-hero-note">
+            Designed as an interview workspace, not a generic SaaS dashboard. The focus is on clarity, state, and the live coaching loop.
+          </div>
         </div>
 
         <div className="clerk-form-wrap">{children}</div>

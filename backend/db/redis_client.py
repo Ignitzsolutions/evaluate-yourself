@@ -1,4 +1,4 @@
-"""Redis client factory for Azure Redis Cache support."""
+"""Redis client factory."""
 
 import os
 import logging
@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 
 # Global Redis client instance
 _redis_client: Optional[redis.Redis] = None
-_env_value = os.getenv(
-    "ENV",
-    os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", "development"))),
-).strip().lower()
+_env_value = (
+    os.getenv(
+        "ENV",
+        os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", "development"))),
+    )
+    .strip()
+    .lower()
+)
 
 
 def is_production_env() -> bool:
@@ -22,22 +26,22 @@ def is_production_env() -> bool:
 
 def get_redis_client() -> redis.Redis:
     """Get or create Redis client singleton.
-    
-    Supports both local development and Azure Redis Cache:
+
+    Supports both local development and hosted Redis:
     - Local: REDIS_URL not set → localhost:6379
-    - Azure: REDIS_URL=rediss://xxx.redis.cache.windows.net:6380
-    
+    - Hosted TLS Redis: REDIS_URL=rediss://redis.example.com:6380
+
     Returns:
         redis.Redis: Configured Redis client
     """
     global _redis_client
-    
+
     if _redis_client is None:
         redis_url = os.getenv("REDIS_URL")
 
         if is_production_env() and not redis_url:
             raise RuntimeError("REDIS_URL must be set in production.")
-        
+
         if redis_url:
             # Parse Redis URL (supports redis:// and rediss:// for TLS)
             logger.info(f"Connecting to Redis via URL (TLS: {redis_url.startswith('rediss://')})")
@@ -49,7 +53,7 @@ def get_redis_client() -> redis.Redis:
                 socket_keepalive=True,
                 health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30")),
                 retry_on_timeout=True,
-                max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
+                max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "50")),
             )
         else:
             # Local development fallback
@@ -67,17 +71,18 @@ def get_redis_client() -> redis.Redis:
                 retry_on_timeout=True,
                 max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "20")),
             )
-    
+
     return _redis_client
 
 
 def test_redis_connection() -> tuple[bool, str, float]:
     """Test Redis connectivity for health checks.
-    
+
     Returns:
         tuple: (success: bool, message: str, latency_ms: float)
     """
     import time
+
     start = time.time()
     try:
         client = get_redis_client()

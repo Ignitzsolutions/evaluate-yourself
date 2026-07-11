@@ -4,9 +4,7 @@
  * subscribes, and dispatches typed events to listeners. Reconnects on error.
  */
 
-import { getApiBaseUrl } from "./apiBaseUrl";
-
-const API_BASE = getApiBaseUrl();
+import { apiUrl } from "./apiBaseUrl";
 
 export function connectAdminLiveStream({ getAuthToken, onEvent, onStatus } = {}) {
   let es = null;
@@ -24,7 +22,7 @@ export function connectAdminLiveStream({ getAuthToken, onEvent, onStatus } = {})
   async function fetchLiveToken() {
     const bearer = await getAuthToken();
     if (!bearer) throw new Error("Not authenticated");
-    const resp = await fetch(`${API_BASE}/api/admin/live/token`, {
+    const resp = await fetch(apiUrl("/api/admin/live/token"), {
       headers: { Authorization: `Bearer ${bearer}` },
     });
     if (!resp.ok) throw new Error(`live token failed: ${resp.status}`);
@@ -40,7 +38,7 @@ export function connectAdminLiveStream({ getAuthToken, onEvent, onStatus } = {})
       if (!liveToken || Date.now() > liveTokenExpiresAt) {
         await fetchLiveToken();
       }
-      const url = `${API_BASE}/api/admin/live/stream?token=${encodeURIComponent(liveToken)}`;
+      const url = apiUrl("/api/admin/live/stream", { token: liveToken });
       es = new EventSource(url);
 
       const dispatch = (evt, parsed) => {

@@ -16,9 +16,7 @@ import {
 import { Mic, Stop, Refresh, PlayArrow } from "@mui/icons-material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
-
-const API_BASE = getApiBaseUrl();
+import { apiUrl } from "../utils/apiBaseUrl";
 
 const getSpeechRecognitionCtor = () =>
   (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition)) || null;
@@ -47,7 +45,7 @@ export default function CommunicationPracticePage() {
     setError("");
     try {
       const token = await getToken();
-      const response = await authFetch(`${API_BASE}/api/communication-practice/next-prompt`, token, {
+      const response = await authFetch(apiUrl("/api/communication-practice/next-prompt"), token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -80,7 +78,7 @@ export default function CommunicationPracticePage() {
       setError("");
       try {
         const token = await getToken();
-        const response = await authFetch(`${API_BASE}/api/communication-practice/packs`, token, { method: "GET" });
+        const response = await authFetch(apiUrl("/api/communication-practice/packs"), token, { method: "GET" });
         if (!response.ok) {
           throw await buildApiErrorFromResponse(response, {
             defaultMessage: "Could not load communication practice packs.",
@@ -170,7 +168,7 @@ export default function CommunicationPracticePage() {
     setError("");
     try {
       const token = await getToken();
-      const response = await authFetch(`${API_BASE}/api/communication-practice/evaluate-turn`, token, {
+      const response = await authFetch(apiUrl("/api/communication-practice/evaluate-turn"), token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

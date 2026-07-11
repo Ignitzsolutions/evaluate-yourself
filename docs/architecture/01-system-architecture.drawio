@@ -29,7 +29,7 @@
                 <mxCell id="fastapi-app" value="FastAPI Application&#xa;• REST endpoints&#xa;• WebSocket proxy&#xa;• JWT validation (Clerk)&#xa;• CORS middleware&#xa;• Error handling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;" vertex="1" parent="backend-lane">
                     <mxGeometry x="20" y="60" width="220" height="120" as="geometry"/>
                 </mxCell>
-                <mxCell id="realtime-client" value="Azure OpenAI Realtime Client&#xa;• Session management&#xa;• Audio streaming&#xa;• Whisper transcription&#xa;• Response handling&#xa;• Event processing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;" vertex="1" parent="backend-lane">
+                <mxCell id="realtime-client" value="Realtime Provider Client&#xa;• Session management&#xa;• Audio streaming&#xa;• Whisper transcription&#xa;• Response handling&#xa;• Event processing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;" vertex="1" parent="backend-lane">
                     <mxGeometry x="270" y="60" width="240" height="120" as="geometry"/>
                 </mxCell>
                 <mxCell id="langchain-pipeline" value="LangChain Feedback Pipeline&#xa;• Structured output (Pydantic)&#xa;• Candidate evaluation&#xa;• CategoryScore validation&#xa;• Report generation&#xa;• Legacy fallback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;" vertex="1" parent="backend-lane">
@@ -57,7 +57,7 @@
                 <mxCell id="external-lane" value="External Services" style="swimlane;startSize=40;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=14;" vertex="1" parent="1">
                     <mxGeometry x="40" y="660" width="1520" height="180" as="geometry"/>
                 </mxCell>
-                <mxCell id="azure-openai" value="Azure OpenAI&#xa;(Sweden Central)&#xa;• gpt-realtime deployment&#xa;• Whisper ASR model&#xa;• API: 2024-08-28&#xa;• WebSocket realtime&#xa;• Input audio transcription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;fontStyle=1" vertex="1" parent="external-lane">
+                <mxCell id="azure-openai" value="Realtime Provider Layer&#xa;• OpenAI native today&#xa;• Sarvam hybrid planned&#xa;• Realtime session bootstrap&#xa;• Input audio transcription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;fontStyle=1" vertex="1" parent="external-lane">
                     <mxGeometry x="20" y="60" width="240" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="clerk-auth" value="Clerk Authentication&#xa;(engaging-gazelle-52)&#xa;• User authentication&#xa;• Session management&#xa;• JWKS validation&#xa;• JWT tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;fontStyle=1" vertex="1" parent="external-lane">
@@ -73,7 +73,7 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 
-                <!-- Backend to Azure OpenAI -->
+                <!-- Backend to Realtime Provider -->
                 <mxCell id="conn3" value="WebSocket Realtime" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#CC0000;strokeWidth=2;" edge="1" parent="1" source="realtime-client" target="azure-openai">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
@@ -120,7 +120,7 @@
                 <mxCell id="legend5" value="Database Queries" style="text;html=1;strokeColor=#FF8800;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;strokeWidth=3;" vertex="1" parent="legend-box">
                     <mxGeometry x="10" y="140" width="180" height="20" as="geometry"/>
                 </mxCell>
-                <mxCell id="tech-stack" value="Tech Stack:&#xa;• React 18.2 + Material-UI&#xa;• FastAPI 0.104.1 + Uvicorn&#xa;• LangChain + Azure OpenAI&#xa;• Redis 5.0+ + SQLite/PostgreSQL&#xa;• Python 3.14 + Node.js" style="text;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;spacingLeft=8;spacingTop=8;" vertex="1" parent="legend-box">
+                <mxCell id="tech-stack" value="Tech Stack:&#xa;• React 18.2 + Material-UI&#xa;• FastAPI 0.104.1 + Uvicorn&#xa;• LangChain + Provider Adapter&#xa;• Redis 5.0+ + SQLite/PostgreSQL&#xa;• Python 3.14 + Node.js" style="text;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;spacingLeft=8;spacingTop=8;" vertex="1" parent="legend-box">
                     <mxGeometry x="220" y="40" width="210" height="120" as="geometry"/>
                 </mxCell>
             </root>

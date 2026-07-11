@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const getEnv = (k) =>
-  (typeof import.meta !== "undefined" ? import.meta.env?.[k] : undefined) ||
-  process.env[k];
-
-export default function useAzureSpeech({
+export default function useBrowserSpeechRecognition({
   language = "en-US",
   interimResults = true,
 } = {}) {
   const recognizerRef = useRef(null);
   const [partial, setPartial] = useState(null);
-  const [finals, setFinals] = useState([]); // {text, offsetMs, durationMs}
+  const [finals, setFinals] = useState([]);
   const [isListening, setListening] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
@@ -40,8 +36,8 @@ export default function useAzureSpeech({
             continue;
           }
           setPartial(null);
-          setFinals((p) => [
-            ...p,
+          setFinals((previous) => [
+            ...previous,
             {
               text,
               offsetMs: Date.now(),
@@ -66,7 +62,6 @@ export default function useAzureSpeech({
     } catch (err) {
       setError(String(err?.message || err));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, interimResults]);
 
   const startListening = useCallback(() => {
@@ -88,14 +83,14 @@ export default function useAzureSpeech({
     setError(null);
   }, []);
 
-  return { 
-    ready, 
-    isListening, 
-    partial, 
-    finals, 
-    error, 
-    startListening, 
-    stopListening, 
-    reset 
+  return {
+    ready,
+    isListening,
+    partial,
+    finals,
+    error,
+    startListening,
+    stopListening,
+    reset,
   };
 }

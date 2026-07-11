@@ -29,11 +29,11 @@ class _FakeClient:
         return _FakeResponse(self._content)
 
 
-def test_create_chat_completion_falls_back_to_openai_when_azure_fails(monkeypatch):
-    azure = {
-        "provider": "azure",
-        "client": _FakeClient(error=RuntimeError("azure unavailable")),
-        "model": "azure-model",
+def test_create_chat_completion_falls_back_to_next_provider(monkeypatch):
+    primary = {
+        "provider": "primary",
+        "client": _FakeClient(error=RuntimeError("primary unavailable")),
+        "model": "primary-model",
     }
     openai = {
         "provider": "openai",
@@ -42,7 +42,7 @@ def test_create_chat_completion_falls_back_to_openai_when_azure_fails(monkeypatc
     }
     monkeypatch.setattr(
         "backend.services.llm.provider_adapter.get_chat_provider_chain",
-        lambda: [azure, openai],
+        lambda: [primary, openai],
     )
 
     result = create_chat_completion(messages=[{"role": "user", "content": "hello"}], purpose="test")
