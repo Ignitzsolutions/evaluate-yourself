@@ -18,6 +18,7 @@ import CheckoutPage from "./pages/CheckoutPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import SetPasswordPage from "./pages/SetPasswordPage";
 import Dashboard from "./pages/Dashboard";
 import AdminEntryPage from "./pages/AdminEntryPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
@@ -106,7 +107,7 @@ export default function App() {
             <Route path="/login/*" element={<LoginPage />} />
             <Route path="/register/*" element={<RegisterPage />} />
             <Route path="/forgot-password/*" element={<ForgotPasswordPage />} />
-            <Route path="/set-password/*" element={<ForgotPasswordPage />} />
+            <Route path="/set-password/*" element={<SetPasswordPage />} />
             <Route path="/admin" element={<AdminEntryPage />} />
             <Route path="/admin/login/*" element={<AdminLoginPage />} />
           </Route>

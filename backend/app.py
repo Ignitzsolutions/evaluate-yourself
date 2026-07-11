@@ -7057,6 +7057,13 @@ def serve_frontend(full_path: str):
         return FileResponse(file_path)
     return FileResponse(FRONTEND_INDEX)
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=os.getenv("UVICORN_RELOAD", "").lower() in {"1", "true", "yes"},
+    )

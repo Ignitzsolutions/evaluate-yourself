@@ -68,6 +68,10 @@ export default function CheckoutPage() {
     }
 
     const url = new URL(paymentUrl, window.location.origin);
+    if (!["http:", "https:"].includes(url.protocol)) {
+      setConfigError("Payment link must use an http or https URL.");
+      return;
+    }
     if (email.trim()) {
       url.searchParams.set("prefilled_email", email.trim());
     }
