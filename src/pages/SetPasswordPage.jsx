@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Alert, Box, Button, CircularProgress, TextField, Typography } from "@mui/material";
 import AuthShell from "../components/AuthShell";
@@ -15,8 +15,10 @@ export default function SetPasswordPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const setupToken = params.get("token") || location.state?.setupToken || "";
-  const email = location.state?.email || params.get("email") || "";
+  const tokenFromQuery = params.get("token") || "";
+  const emailFromQuery = params.get("email") || "";
+  const setupToken = tokenFromQuery || location.state?.setupToken || "";
+  const email = location.state?.email || emailFromQuery || "";
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -24,6 +26,18 @@ export default function SetPasswordPage() {
   const [loading, setLoading] = useState(false);
 
   const canSubmit = Boolean(setupToken) && password.length > 0 && confirmPassword.length > 0 && !loading;
+
+  useEffect(() => {
+    if (!tokenFromQuery) return;
+    navigate(location.pathname, {
+      replace: true,
+      state: {
+        ...(location.state || {}),
+        setupToken: tokenFromQuery,
+        email,
+      },
+    });
+  }, [email, location.pathname, location.state, navigate, tokenFromQuery]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
