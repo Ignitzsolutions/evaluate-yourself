@@ -1,0 +1,14 @@
+---
+description: UI system rules
+globs:
+  - "src/**/*.jsx"
+  - "src/**/*.js"
+alwaysApply: false
+---
+
+Use the MUI theme in `src/theme/theme.js` for colors, spacing, typography, radii, and component defaults.
+
+Do not add arbitrary colors, spacing values, decorative gradients, glass effects, or emoji icons.
+
+Every screen should have one clear primary action.
+

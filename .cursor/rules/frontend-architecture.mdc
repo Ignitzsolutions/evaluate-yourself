@@ -1,0 +1,14 @@
+---
+description: Frontend architecture rules
+globs:
+  - "src/**/*.jsx"
+  - "src/**/*.js"
+alwaysApply: false
+---
+
+Keep business logic out of visual components where practical.
+
+Reuse existing components and utilities before creating new ones.
+
+Do not introduce new dependencies without a specific, reviewed need.
+

@@ -49,6 +49,11 @@ This repository has two major runtimes:
 - Maintain keyboard accessibility and visible focus.
 - Mobile behavior is required.
 - Avoid unnecessary gradients, glass effects, decorative cards, and animation.
+- Do not copy generic AI SaaS landing-page patterns.
+- Do not use emojis as interface icons; use the existing icon system.
+- Do not redesign the full app in one unreviewed operation.
+- Migrate one route at a time: specification, implementation, review, correction, commit.
+- Keep the existing MUI theme in `src/theme/theme.js` as the source of UI tokens unless a design-system change is approved.
 
 ## Completion requirements
 
