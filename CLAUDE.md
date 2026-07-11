@@ -108,6 +108,16 @@ These are local assistant skills used for repo work. They are not application ru
 | `playwright` | Browser-level verification for routing, viewport fit, and end-to-end candidate flows |
 | `gh-fix-ci` | GitHub Actions failure inspection and CI remediation |
 | `remotion-best-practices` | Future video/replay overlay work if report playback moves into Remotion-rendered assets |
+| `frontend-ui-engineering` | Frontend implementation tasks that need production UX structure, state handling, and interaction quality |
+| `web-design-guidelines` | Visual design and layout guidance when changing public-facing or SaaS UI surfaces |
+| `vercel-react-best-practices` | React performance, rendering, async, and component-architecture decisions where applicable |
+| `shadcn` | shadcn/ui-specific component guidance only if the repo adds or touches shadcn components |
+| `accessibility` | Accessibility implementation or audit work |
+| `performance`, `core-web-vitals` | Performance and Core Web Vitals audits or targeted optimization |
+| `seo` | SEO-specific page/content/metadata review |
+| `web-quality-audit` | Broad web-quality audits across accessibility, performance, SEO, and best practices |
+
+Use these skills only when the task calls for them. Do not load every installed skill by default.
 
 ## 6) Editing rules for this repo
 
