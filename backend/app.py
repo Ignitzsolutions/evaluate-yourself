@@ -5183,7 +5183,8 @@ async def communication_practice_history(
         try:
             for f in _json.loads(a.quality_flags or "[]"):
                 flag_counts[f] = flag_counts.get(f, 0) + 1
-        except Exception:
+        except ValueError:
+            # Ignore malformed quality_flags payloads so one bad record doesn't break rollups.
             pass
     top_flags = sorted(
         [{"flag": k, "count": v} for k, v in flag_counts.items()],
