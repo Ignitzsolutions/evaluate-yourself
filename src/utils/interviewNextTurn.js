@@ -1,4 +1,5 @@
 import { buildApiErrorFromResponse } from "./apiClient";
+import { apiUrl } from "./apiBaseUrl";
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -53,37 +54,14 @@ export async function requestNextInterviewTurn({
   payload,
   buildError = buildApiErrorFromResponse,
 }) {
-  const nextTurnUrl = `${baseUrl}/api/interview/${sessionId}/next-turn`;
-  const adaptiveTurnUrl = `${baseUrl}/api/interview/${sessionId}/adaptive-turn`;
+  const buildUrl = (path) => (baseUrl ? `${baseUrl}${path}` : apiUrl(path));
+  const nextTurnUrl = buildUrl(`/api/interview/${sessionId}/next-turn`);
 
-  const tryRequest = async (url) => {
-    const resp = await postJson(authFetch, url, token, payload);
-    if (!resp.ok) {
-      const error = await buildError(resp, { defaultMessage: "Failed to plan next interview turn." });
-      error.status = resp.status;
-      throw error;
-    }
-    const data = await resp.json();
-    return normalizeNextTurnDecision(data);
-  };
-
-  try {
-    return await tryRequest(nextTurnUrl);
-  } catch (err) {
-    const status = Number(err?.status || err?.response?.status || 0);
-    const message = String(err?.message || "");
-    const maybeMissingRoute = status === 404 || status === 405 || /not found/i.test(message);
-    if (!maybeMissingRoute) {
-      throw err;
-    }
-  }
-
-  const fallbackResponse = await postJson(authFetch, adaptiveTurnUrl, token, payload);
-  if (!fallbackResponse.ok) {
-    const error = await buildError(fallbackResponse, { defaultMessage: "Failed to plan next interview turn." });
-    error.status = fallbackResponse.status;
+  const resp = await postJson(authFetch, nextTurnUrl, token, payload);
+  if (!resp.ok) {
+    const error = await buildError(resp, { defaultMessage: "Failed to plan next interview turn." });
+    error.status = resp.status;
     throw error;
   }
-  return normalizeNextTurnDecision(await fallbackResponse.json());
+  return normalizeNextTurnDecision(await resp.json());
 }
-

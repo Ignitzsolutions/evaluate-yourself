@@ -16,10 +16,8 @@ import {
 import { Mic, Stop, Refresh, PlayArrow } from "@mui/icons-material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import PracticeHistoryPanel from "./communication/PracticeHistoryPanel";
-
-const API_BASE = getApiBaseUrl();
 
 const FLAG_GUIDANCE = {
   LOW_PROMPT_COVERAGE: { label: "Missed key words", hint: "Include more of the target sentence." },
@@ -87,7 +85,7 @@ export default function CommunicationPracticePage() {
     setError("");
     try {
       const token = await getToken();
-      const response = await authFetch(`${API_BASE}/api/communication-practice/next-prompt`, token, {
+      const response = await authFetch(apiUrl("/api/communication-practice/next-prompt"), token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -120,7 +118,7 @@ export default function CommunicationPracticePage() {
       setError("");
       try {
         const token = await getToken();
-        const response = await authFetch(`${API_BASE}/api/communication-practice/packs`, token, { method: "GET" });
+        const response = await authFetch(apiUrl("/api/communication-practice/packs"), token, { method: "GET" });
         if (!response.ok) {
           throw await buildApiErrorFromResponse(response, {
             defaultMessage: "Could not load practice packs. Refresh and pick a pack to continue.",
@@ -215,7 +213,7 @@ export default function CommunicationPracticePage() {
     setError("");
     try {
       const token = await getToken();
-      const response = await authFetch(`${API_BASE}/api/communication-practice/evaluate-turn`, token, {
+      const response = await authFetch(apiUrl("/api/communication-practice/evaluate-turn"), token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

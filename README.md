@@ -39,11 +39,10 @@ npm start
 
 **Backend:**
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r backend/requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync
 cd backend
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
@@ -64,6 +63,24 @@ REACT_APP_API_URL=http://127.0.0.1:8088 npm start
 
 When `OPENAI_API_KEY` is empty or a placeholder, a "Demo mode" banner appears, the LLM provider returns deterministic canned responses, and `/api/realtime/sessions` returns a friendly stub instead of erroring. Set a real key to switch back to live behavior — no other config change required.
 
+### Python tooling
+
+The backend Python source of truth is now:
+
+- `pyproject.toml`
+- `uv.lock`
+
+Common commands:
+
+```bash
+uv sync
+uv run black --check backend/services/auth backend/services/interview/scoring_service.py backend/scripts
+uv run mypy
+uv run pytest backend/tests
+```
+
+`requirements.txt` remains in the repo only as a compatibility export for non-`uv` environments during the transition.
+
 ### LLM Configuration (Required for Voice Interview)
 
 The voice-only interview feature requires an LLM realtime configuration.
@@ -72,7 +89,23 @@ The voice-only interview feature requires an LLM realtime configuration.
 2. Configure your provider credentials in `backend/.env`
 3. Start the backend and verify `/health` returns success
 
-See [docs/guides/SETUP.md](docs/guides/SETUP.md) for detailed configuration instructions.
+See [docs/guides/SETUP.md](docs/guides/SETUP.md), [docs/provider-matrix.md](docs/provider-matrix.md), and [docs/realtime-provider-architecture.md](docs/realtime-provider-architecture.md) for the active provider configuration and runtime architecture.
+
+## Server deployment
+
+Production deploys now target a Linux server over SSH with Docker Compose.
+
+Required GitHub Actions secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH`
+- `DEPLOY_ENV_FILE`
+- `APP_BASE_URL`
+
+`DEPLOY_ENV_FILE` should contain the full backend `backend/.env` contents for production. The deploy workflow uploads the release bundle, writes `backend/.env`, runs `docker compose up -d --build`, applies Alembic migrations, runs schema smoke inside the backend container, and then checks `APP_BASE_URL` via `/health` and core routes.
 
 ### Documentation
 

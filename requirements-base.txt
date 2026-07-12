@@ -1,4 +1,4 @@
-# Core dependencies for Azure App Service deployment
+# Core dependencies for backend runtime deployment
 # These packages work reliably with Python 3.10 on Linux (manylinux wheels available)
 
 # Web framework

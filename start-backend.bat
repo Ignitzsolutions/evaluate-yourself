@@ -28,7 +28,7 @@ if not exist "backend\.env" (
     echo Creating from .env.example...
     if exist "backend\.env.example" (
         copy backend\.env.example backend\.env
-        echo Please edit backend\.env and add your Azure OpenAI keys
+        echo Please edit backend\.env and add your realtime provider credentials
     ) else (
         echo Please create backend\.env with your configuration
     )
@@ -36,7 +36,7 @@ if not exist "backend\.env" (
 
 REM Install/update dependencies
 echo Checking dependencies...
-pip install -q -r backend\requirements.txt
+pip install -q -r requirements.txt
 if errorlevel 1 (
     echo Failed to install dependencies
     pause

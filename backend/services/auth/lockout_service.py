@@ -21,6 +21,7 @@ _WINDOW_SECONDS = 15 * 60
 
 def _redis():
     from db.redis_client import get_redis_client
+
     return get_redis_client()
 
 
@@ -57,7 +58,7 @@ def record_failure(email: str, ip: Optional[str]) -> Tuple[bool, int]:
         count = int(count or 0)
         if count >= _MAX_FAILS_BEFORE_LOCK:
             tier = max(0, count - _MAX_FAILS_BEFORE_LOCK)
-            lock_seconds = min(_BASE_LOCK_SECONDS * (2 ** tier), _MAX_LOCK_SECONDS)
+            lock_seconds = min(_BASE_LOCK_SECONDS * (2**tier), _MAX_LOCK_SECONDS)
             client.setex(lkey, lock_seconds, "1")
             return True, lock_seconds
     except Exception as exc:
@@ -83,7 +84,9 @@ def admin_unlock(email: str) -> int:
         for pattern_prefix in (_FAIL_PREFIX, _LOCK_PREFIX):
             cursor = 0
             while True:
-                cursor, keys = client.scan(cursor=cursor, match=f"{pattern_prefix}{prefix}*", count=200)
+                cursor, keys = client.scan(
+                    cursor=cursor, match=f"{pattern_prefix}{prefix}*", count=200
+                )
                 if keys:
                     client.delete(*keys)
                     cleared += len(keys)

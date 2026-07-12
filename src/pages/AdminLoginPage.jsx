@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { TextField, Button, Alert, CircularProgress, Typography, Box } from "@mui/material";
+import { TextField, Button, Alert, CircularProgress, Box } from "@mui/material";
 import AuthShell from "../components/AuthShell";
 import { useAuth, useAuthActions } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import "../ui.css";
-
-const API_BASE = getApiBaseUrl();
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -28,7 +26,7 @@ export default function AdminLoginPage() {
       try {
         const token = await getToken();
         if (!token) { setCheckingAdmin(false); return; }
-        const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/me"), token, { method: "GET" });
         if (resp.ok) {
           const data = await resp.json();
           if (!cancelled) {

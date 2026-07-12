@@ -4,10 +4,8 @@ import { Box, CircularProgress } from "@mui/material";
 import { useAuth } from "../context/AuthContext";
 import BackendUnavailableState from "../components/BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
-
-const API_BASE = getApiBaseUrl();
 
 export default function AdminEntryPage() {
   const location = useLocation();
@@ -42,7 +40,7 @@ export default function AdminEntryPage() {
           return;
         }
 
-        const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/me"), token, { method: "GET" });
         if (!resp.ok) {
           if (!devBypass && resp.status === 401) {
             if (mounted) {

@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 logger = logging.getLogger(__name__)
 
 # Compiled once at module level — reused across all scoring calls
-_WORD_RE = re.compile(r'\b\w+\b')
+_WORD_RE = re.compile(r"\b\w+\b")
 
 # Scoring weights per competency (must sum to 1.0)
 _COMPETENCY_WEIGHTS = {
@@ -22,11 +22,57 @@ _COMPETENCY_WEIGHTS = {
 
 # Keywords that signal strong performance per competency
 _POSITIVE_KEYWORDS: Dict[str, List[str]] = {
-    "communication": ["explained", "communicated", "collaborated", "discussed", "presented", "articulated", "clearly"],
-    "clarity": ["specifically", "concretely", "example", "instance", "precisely", "defined", "structured"],
-    "technical": ["implemented", "designed", "architecture", "algorithm", "optimized", "scalable", "deployed", "framework", "api", "database"],
-    "problem_solving": ["identified", "analyzed", "solution", "approach", "debugged", "resolved", "hypothesis", "tested", "iterated"],
-    "confidence": ["decided", "led", "initiated", "proposed", "recommended", "owned", "drove", "delivered"],
+    "communication": [
+        "explained",
+        "communicated",
+        "collaborated",
+        "discussed",
+        "presented",
+        "articulated",
+        "clearly",
+    ],
+    "clarity": [
+        "specifically",
+        "concretely",
+        "example",
+        "instance",
+        "precisely",
+        "defined",
+        "structured",
+    ],
+    "technical": [
+        "implemented",
+        "designed",
+        "architecture",
+        "algorithm",
+        "optimized",
+        "scalable",
+        "deployed",
+        "framework",
+        "api",
+        "database",
+    ],
+    "problem_solving": [
+        "identified",
+        "analyzed",
+        "solution",
+        "approach",
+        "debugged",
+        "resolved",
+        "hypothesis",
+        "tested",
+        "iterated",
+    ],
+    "confidence": [
+        "decided",
+        "led",
+        "initiated",
+        "proposed",
+        "recommended",
+        "owned",
+        "drove",
+        "delivered",
+    ],
 }
 
 _NEGATIVE_KEYWORDS: List[str] = ["um", "uh", "like", "you know", "basically", "sort of", "kind of"]
@@ -74,7 +120,9 @@ def _compute_scores_from_transcript(candidate_turns: List[str]) -> Dict[str, int
     penalty = int(_fluency_penalty(lower_text, word_count) * 50)
 
     return {
-        competency: max(30, min(99, 55 + word_bonus + int(_keyword_score(lower_text, keywords) * 25) - penalty))
+        competency: max(
+            30, min(99, 55 + word_bonus + int(_keyword_score(lower_text, keywords) * 25) - penalty)
+        )
         for competency, keywords in _POSITIVE_KEYWORDS.items()
     }
 
@@ -111,11 +159,9 @@ class ScoringService:
         overall = _weighted_overall(scores)
 
         grade = (
-            "A" if overall >= 85 else
-            "B" if overall >= 75 else
-            "C" if overall >= 65 else
-            "D" if overall >= 55 else
-            "F"
+            "A"
+            if overall >= 85
+            else "B" if overall >= 75 else "C" if overall >= 65 else "D" if overall >= 55 else "F"
         )
 
         scorecard: Dict[str, Any] = {
@@ -146,6 +192,7 @@ class ScoringService:
         session_id = scorecard["session_id"]
         try:
             from db import models
+
             report = (
                 self.db.query(models.InterviewReport)
                 .filter(models.InterviewReport.session_id == session_id)
@@ -155,7 +202,11 @@ class ScoringService:
                 report.score_breakdown = json.dumps(scorecard.get("scores", {}))
                 report.overall_score = scorecard.get("overall_score")
                 self.db.commit()
-                logger.info("Persisted scorecard for session %s (overall=%s)", session_id, scorecard.get("overall_score"))
+                logger.info(
+                    "Persisted scorecard for session %s (overall=%s)",
+                    session_id,
+                    scorecard.get("overall_score"),
+                )
         except Exception as e:
             logger.warning("Could not persist scorecard for session %s: %s", session_id, e)
             self.db.rollback()
@@ -166,6 +217,7 @@ class ScoringService:
             return None
         try:
             from db import models
+
             report = (
                 self.db.query(models.InterviewReport)
                 .filter(models.InterviewReport.session_id == session_id)

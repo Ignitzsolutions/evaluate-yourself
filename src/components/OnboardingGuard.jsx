@@ -4,11 +4,9 @@ import { useAuth } from "../context/AuthContext";
 import { Box, Button, CircularProgress, Typography } from "@mui/material";
 import BackendUnavailableState from "./BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, buildAuthRequiredError, getApiErrorMessage, isAuthRequiredError, isBackendUnavailableError } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 import { classifyOnboardingGuardError } from "../utils/onboardingGuardState";
-
-const API_BASE_URL = getApiBaseUrl();
 
 function getRecoveryTarget(pathname) {
   if (pathname.startsWith("/interview") || pathname.startsWith("/report")) {
@@ -41,7 +39,7 @@ export default function OnboardingGuard({ children }) {
         if (!token && !devBypass) {
           throw buildAuthRequiredError();
         }
-        const resp = await authFetch(`${API_BASE_URL}/api/profile/status`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/profile/status"), token, { method: "GET" });
         if (!resp.ok) {
           if (resp.status === 401 || resp.status === 403) {
             throw buildAuthRequiredError("Your session has expired. Please sign in again.");

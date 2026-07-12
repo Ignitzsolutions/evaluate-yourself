@@ -52,6 +52,14 @@ const Logo = ({ onClick }) => {
         alt="Evaluate Yourself Logo" 
         style={{ height: 'clamp(42px, 6vw, 60px)', width: 'auto' }}
       />
+      <Box sx={{ display: 'grid', lineHeight: 1.05 }}>
+        <Box sx={{ fontSize: { xs: 16, md: 18 }, fontWeight: 800, color: '#0f172a' }}>
+          Evaluate Yourself
+        </Box>
+        <Box sx={{ fontSize: 12, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#64748b' }}>
+          Interview Lab
+        </Box>
+      </Box>
     </Box>
   );
 };
@@ -176,6 +184,7 @@ export default function Navbar() {
           backgroundColor: 'rgba(255,255,255,0.75)',
           backdropFilter: 'blur(12px) saturate(140%)',
           borderBottom: '1px solid rgba(148,163,184,0.25)',
+          color: '#0f172a',
         }}
       >
         <Toolbar sx={{ justifyContent: 'space-between', minHeight: { xs: 70, md: 78 }, px: { xs: 2, md: 3 } }}>

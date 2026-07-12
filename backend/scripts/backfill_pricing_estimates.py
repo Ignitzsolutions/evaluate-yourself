@@ -41,7 +41,13 @@ APPROX_REALTIME_SECONDS_PER_SESSION = 900  # 15 min avg
 
 
 def _has_existing_usage(db, since: datetime) -> bool:
-    return db.query(models.LLMUsageEvent).filter(models.LLMUsageEvent.created_at >= since).limit(1).count() > 0
+    return (
+        db.query(models.LLMUsageEvent)
+        .filter(models.LLMUsageEvent.created_at >= since)
+        .limit(1)
+        .count()
+        > 0
+    )
 
 
 def backfill(days: int, dry_run: bool) -> int:
@@ -50,7 +56,9 @@ def backfill(days: int, dry_run: bool) -> int:
     created = 0
     try:
         if _has_existing_usage(db, cutoff):
-            logger.warning("Found existing usage events in the window — backfill is additive, not a reset.")
+            logger.warning(
+                "Found existing usage events in the window — backfill is additive, not a reset."
+            )
 
         sessions = (
             db.query(models.InterviewSession)
@@ -61,14 +69,25 @@ def backfill(days: int, dry_run: bool) -> int:
 
         for sess in sessions:
             for kind, model_name, pt, ct, ais in (
-                ("chat", DEFAULT_CHAT_MODEL, APPROX_PROMPT_TOKENS_PER_SESSION,
-                 APPROX_COMPLETION_TOKENS_PER_SESSION, 0),
-                ("realtime_audio", DEFAULT_REALTIME_MODEL, 0, 0,
-                 APPROX_REALTIME_SECONDS_PER_SESSION),
+                (
+                    "chat",
+                    DEFAULT_CHAT_MODEL,
+                    APPROX_PROMPT_TOKENS_PER_SESSION,
+                    APPROX_COMPLETION_TOKENS_PER_SESSION,
+                    0,
+                ),
+                (
+                    "realtime_audio",
+                    DEFAULT_REALTIME_MODEL,
+                    0,
+                    0,
+                    APPROX_REALTIME_SECONDS_PER_SESSION,
+                ),
             ):
                 cost = estimate_cost_micro_usd(
                     model_name,
-                    prompt_tokens=pt, completion_tokens=ct,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
                     audio_input_seconds=ais,
                 )
                 event = models.LLMUsageEvent(
@@ -102,8 +121,12 @@ def backfill(days: int, dry_run: bool) -> int:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    parser = argparse.ArgumentParser(description="Backfill llm_usage_events from historical sessions.")
-    parser.add_argument("--days", type=int, default=30, help="Look-back window in days (default 30).")
+    parser = argparse.ArgumentParser(
+        description="Backfill llm_usage_events from historical sessions."
+    )
+    parser.add_argument(
+        "--days", type=int, default=30, help="Look-back window in days (default 30)."
+    )
     parser.add_argument("--dry-run", action="store_true", help="Compute counts without writing.")
     args = parser.parse_args()
     n = backfill(days=args.days, dry_run=args.dry_run)

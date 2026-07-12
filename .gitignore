@@ -13,6 +13,7 @@ node_modules
 
 # Testing
 /coverage
+.playwright-cli/
 
 # Production build
 /build
@@ -44,6 +45,9 @@ transcripts/
 # Python
 __pycache__/
 *.pyc
+.venv/
+.mypy_cache/
+.uv/
 venv/
 backend/venv/
 *.db

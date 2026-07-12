@@ -4,10 +4,8 @@ import { Alert, Box, Button, CircularProgress, Stack, Typography } from "@mui/ma
 import { useAuth } from "../context/AuthContext";
 import BackendUnavailableState from "./BackendUnavailableState";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
-
-const API_BASE = getApiBaseUrl();
 
 export default function AdminRoute({ children }) {
   const location = useLocation();
@@ -43,7 +41,7 @@ export default function AdminRoute({ children }) {
           }
           return;
         }
-        const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/me"), token, { method: "GET" });
         if (!resp.ok) {
           if (!devBypass && resp.status === 401) {
             if (mounted) {

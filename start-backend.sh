@@ -14,16 +14,12 @@ if [ ! -d "${ROOT_DIR}/backend" ]; then
     exit 1
 fi
 
-# Check if virtual environment exists
-if [ ! -d "${ROOT_DIR}/.venv" ]; then
-    echo "⚠️  Virtual environment not found. Creating one..."
-    python3 -m venv "${ROOT_DIR}/.venv"
-    echo "✅ Virtual environment created"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "❌ uv is required to run the backend."
+    echo "   Install it with:"
+    echo "   curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
 fi
-
-# Activate virtual environment
-echo "📦 Activating virtual environment..."
-source "${ROOT_DIR}/.venv/bin/activate"
 
 # Check if .env file exists
 if [ ! -f "${ROOT_DIR}/backend/.env" ]; then
@@ -31,28 +27,28 @@ if [ ! -f "${ROOT_DIR}/backend/.env" ]; then
     echo "   Creating from .env.example..."
     if [ -f "${ROOT_DIR}/backend/.env.example" ]; then
         cp "${ROOT_DIR}/backend/.env.example" "${ROOT_DIR}/backend/.env"
-        echo "   Please edit backend/.env and add your Azure OpenAI keys"
+        echo "   Please edit backend/.env and add your provider credentials"
     else
         echo "   Please create backend/.env with your configuration"
     fi
 fi
 
 # Install/update dependencies
-echo "📥 Checking dependencies..."
-pip install -q -r "${ROOT_DIR}/backend/requirements.txt" || {
-    echo "❌ Failed to install dependencies"
+echo "📥 Syncing Python dependencies with uv..."
+uv sync --frozen || {
+    echo "❌ Failed to sync Python dependencies"
     exit 1
 }
 
 # Run DB migrations before booting API to avoid runtime schema drift failures.
 echo "🗄️ Applying database migrations..."
-python -m alembic -c "${ROOT_DIR}/backend/alembic.ini" upgrade head || {
+uv run python -m alembic -c "${ROOT_DIR}/backend/alembic.ini" upgrade head || {
     echo "❌ Failed to apply database migrations"
     exit 1
 }
 
 echo "🧪 Verifying schema health..."
-python "${ROOT_DIR}/backend/scripts/schema_smoke.py" || {
+uv run python "${ROOT_DIR}/backend/scripts/schema_smoke.py" || {
     echo "❌ Schema smoke failed"
     exit 1
 }
@@ -82,4 +78,4 @@ echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Start uvicorn
-uvicorn app:app --host 0.0.0.0 --port ${PORT} --reload
+uv run uvicorn app:app --host 0.0.0.0 --port ${PORT} --reload

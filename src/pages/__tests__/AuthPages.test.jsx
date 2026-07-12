@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import LoginPage from "../LoginPage";
 import RegisterPage from "../RegisterPage";
 import ForgotPasswordPage from "../ForgotPasswordPage";
+import SetPasswordPage from "../SetPasswordPage";
 
 const mockLogin = jest.fn();
 const mockRegister = jest.fn();
@@ -24,7 +25,7 @@ describe("auth pages", () => {
     mockRegister.mockClear();
   });
 
-  test("register page renders with registration form", () => {
+  test("register page shows the account creation flow", () => {
     render(
       <MemoryRouter>
         <RegisterPage />
@@ -32,19 +33,34 @@ describe("auth pages", () => {
     );
 
     expect(screen.getByText(/start practicing interviews with a setup that actually feels serious/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create account/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
   });
 
-  test("forgot password page renders with password recovery form", () => {
+  test("forgot password page shows the recovery flow", () => {
     render(
       <MemoryRouter>
         <ForgotPasswordPage />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/password recovery/i)).toBeInTheDocument();
+    expect(screen.getByText(/reset your password/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to sign in/i })).toBeInTheDocument();
   });
 
-  test("login page renders with login form", () => {
+  test("set password page requires a secure setup token", () => {
+    render(
+      <MemoryRouter initialEntries={["/set-password"]}>
+        <SetPasswordPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs a secure setup token/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /set password/i })).toBeDisabled();
+  });
+
+  test("login page shows the sign-in flow", () => {
     render(
       <MemoryRouter>
         <LoginPage />
@@ -52,5 +68,7 @@ describe("auth pages", () => {
     );
 
     expect(screen.getByText(/build interview confidence with realtime coaching/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 });

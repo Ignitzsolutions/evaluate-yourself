@@ -10,7 +10,9 @@ class PasswordService:
 
     @staticmethod
     def hash_password(plain: str) -> str:
-        return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt(rounds=PasswordService.ROUNDS)).decode("utf-8")
+        return bcrypt.hashpw(
+            plain.encode("utf-8"), bcrypt.gensalt(rounds=PasswordService.ROUNDS)
+        ).decode("utf-8")
 
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:

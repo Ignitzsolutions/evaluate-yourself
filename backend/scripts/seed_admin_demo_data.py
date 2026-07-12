@@ -4,6 +4,7 @@
 Usage:
   python backend/scripts/seed_admin_demo_data.py [--days 14] [--per-day 60] [--wipe]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,7 +28,6 @@ from backend.db.models import (  # noqa: E402
     RefreshTokenRecord,
     User,
 )
-
 
 DEMO_USERS = [
     ("u-anika", "anika.rao@acme.dev", "Anika Rao"),
@@ -278,10 +278,37 @@ def main():
                 # Spread across the day, business hours weighted
                 hour = random.choices(
                     range(24),
-                    weights=[1, 1, 1, 1, 1, 2, 3, 5, 7, 8, 9, 9, 8, 9, 9, 8, 7, 6, 5, 4, 3, 2, 2, 1],
+                    weights=[
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        2,
+                        3,
+                        5,
+                        7,
+                        8,
+                        9,
+                        9,
+                        8,
+                        9,
+                        9,
+                        8,
+                        7,
+                        6,
+                        5,
+                        4,
+                        3,
+                        2,
+                        2,
+                        1,
+                    ],
                 )[0]
                 minute = random.randint(0, 59)
-                ts = (now - timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=random.randint(0, 59), microsecond=0)
+                ts = (now - timedelta(days=day_offset)).replace(
+                    hour=hour, minute=minute, second=random.randint(0, 59), microsecond=0
+                )
                 db.add(synth_event(ts))
                 usage_rows += 1
 
@@ -313,6 +340,7 @@ def main():
 
         # Quick sanity totals
         from sqlalchemy import func as _f
+
         total = db.query(_f.count(LLMUsageEvent.id)).scalar()
         cost_micro = db.query(_f.coalesce(_f.sum(LLMUsageEvent.est_cost_usd_micro), 0)).scalar()
         print(f"usage rows in db: {total}, total est spend: ${cost_micro / 1_000_000:.2f}")

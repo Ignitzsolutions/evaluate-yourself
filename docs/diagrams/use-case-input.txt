@@ -4,8 +4,8 @@ Actors:
 - Candidate (primary)
 - Admin
 - Clerk Auth Service
-- Azure OpenAI Realtime API
-- Azure PostgreSQL
+- Realtime AI provider API
+- PostgreSQL
 
 Candidate use cases:
 1. Register/Login via email or phone OTP (through Clerk).

@@ -14,9 +14,9 @@ Backend modules (FastAPI):
 - Admin APIs for candidates, trial codes, and quality metrics.
 
 Data and infrastructure:
-- Azure PostgreSQL: users, user_profiles, interview_sessions, interview_reports, trial_codes, user_entitlements, interview_gaze_events.
+- PostgreSQL: users, user_profiles, interview_sessions, interview_reports, trial_codes, user_entitlements, interview_gaze_events.
 - Optional Redis for session events/caching.
-- Azure OpenAI Realtime for interviewer conversation.
+- Realtime provider layer for interviewer conversation.
 
 Main flow:
 1. User authenticates with Clerk.

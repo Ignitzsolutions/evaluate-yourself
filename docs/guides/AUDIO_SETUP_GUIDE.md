@@ -1,147 +1,80 @@
-# Audio Setup Guide - Interactive Voice Interview
+# Audio Setup Guide
+
+This guide covers the current realtime interview path.
 
 ## Quick Start
 
-1. **Backend Configuration** - Ensure Azure OpenAI keys are in `backend/.env`:
-   ```bash
-   AZURE_OPENAI_API_KEY=your-key-here
-   AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-   AZURE_OPENAI_DEPLOYMENT=gpt-4o-realtime
-   ```
+1. Configure the backend provider credentials in `backend/.env`:
 
-2. **Start Backend**:
-   ```bash
-   cd backend
-   uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-3. **Start Frontend**:
-   ```bash
-   npm start
-   ```
-
-4. **Test Interview**:
-   - Navigate to `http://localhost:3001/interview/behavioral`
-   - Click "Join Interview"
-   - Allow microphone and camera permissions
-   - AI should start speaking immediately
-
-## How It Works
-
-### Audio Pipeline
-
-1. **Browser captures microphone** → `getUserMedia()` with audio constraints
-2. **AudioContext processes audio** → Converts to PCM16 at 24kHz
-3. **ScriptProcessorNode** → Processes audio chunks (~85ms each)
-4. **Resampling** → Converts from browser sample rate (usually 48kHz) to 24kHz
-5. **PCM16 conversion** → Float32 [-1..1] → Int16 little-endian
-6. **Base64 encoding** → Converts binary to base64 string
-7. **WebSocket send** → Sends as JSON: `{type: 'input_audio_buffer.append', audio: base64}`
-8. **Backend forwards** → Directly forwards to Azure OpenAI Realtime API
-9. **Azure processes** → VAD detects speech, transcribes, responds
-
-### Key Components
-
-- **Frontend**: `src/hooks/useRealtimeInterview.js` - Handles audio capture and streaming
-- **Backend**: `backend/app.py` - WebSocket proxy to Azure OpenAI
-- **Audio Format**: PCM16, 24kHz, mono, little-endian
-
-## Troubleshooting
-
-### "Missing required parameter: 'item.content[0].audio'"
-
-**Cause**: Trying to create conversation item without audio data.
-
-**Fix**: Don't create `conversation.item.create` manually. Just start sending audio chunks - Azure Realtime handles VAD and creates items automatically.
-
-### "NotAllowedError" - Microphone permission denied
-
-**Fix**: 
-- Ensure `getUserMedia()` is called inside a user click handler
-- Check browser permissions (Chrome: Settings → Privacy → Site Settings → Microphone)
-- Try a different browser
-
-### Audio not being sent / Model not responding
-
-**Check**:
-1. Browser console - look for audio errors
-2. Backend logs - should show audio chunks being received
-3. WebSocket connection - ensure `connectionStatus === 'connected'`
-4. Audio format - must be PCM16 24kHz base64
-
-### Choppy/robot voice
-
-**Causes**:
-- Chunks too large (reduce buffer size)
-- No resampling (ensure resampling to 24kHz)
-- Network latency (check WebSocket ping)
-
-**Fix**: Current implementation uses 4096 buffer size (~85ms chunks) which is optimal.
-
-### Audio works once, then breaks after restart
-
-**Cause**: AudioContext or tracks not properly cleaned up.
-
-**Fix**: Current implementation properly stops tracks and disconnects nodes on cleanup.
-
-## Debugging
-
-### Frontend Logging
-
-Check browser console for:
-- `Audio setup: {inputSampleRate, targetSampleRate, contextState}`
-- `Recording started - sending audio chunks`
-- Any WebSocket errors
-
-### Backend Logging
-
-Check backend terminal for:
-- `⚠️ Warning: Odd PCM chunk size` - indicates format issue
-- `❌ Error forwarding to Azure` - connection or format issue
-- Audio chunk sizes (should be even numbers for PCM16)
-
-### Test Audio Format
-
-Add this to frontend to verify audio:
-```javascript
-// In processor.onaudioprocess
-const rms = Math.sqrt(inputData.reduce((sum, x) => sum + x*x, 0) / inputData.length);
-console.log('Audio RMS:', rms); // Should be 0.02-0.10 when speaking
+```env
+AI_PROVIDER=openai_native
+OPENAI_API_KEY=your-key
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview-2024-12-17
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+REALTIME_VOICE=alloy
 ```
 
-## Configuration
+2. Start the backend:
 
-### Sample Rate
-- **Target**: 24kHz (Azure OpenAI Realtime requirement)
-- **Browser default**: Usually 48kHz (auto-resampled)
-
-### Buffer Size
-- **Current**: 4096 samples (~85ms at 48kHz)
-- **Optimal range**: 2048-8192 samples
-
-### Audio Constraints
-```javascript
-{
-  echoCancellation: true,    // Reduces echo
-  noiseSuppression: true,    // Reduces background noise
-  autoGainControl: true      // Normalizes volume
-}
+```bash
+uv sync
+uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## Production Checklist
+3. Start the frontend:
 
-- [ ] AudioContext.resume() called after getUserMedia
-- [ ] Proper error handling for all audio errors
-- [ ] Cleanup on disconnect (stop tracks, disconnect nodes)
-- [ ] Logging for debugging
-- [ ] Fallback for older browsers (ScriptProcessorNode)
-- [ ] Network error handling
-- [ ] Reconnection logic
+```bash
+npm start
+```
 
-## Next Steps
+4. Join an interview, allow mic/camera, and confirm Sonia opens the session.
 
-If audio still doesn't work:
-1. Check browser console for specific errors
-2. Check backend logs for Azure connection errors
-3. Verify Azure OpenAI keys are correct
-4. Test with a simple audio test (see debugging section)
+## Runtime Shape
+
+Current path:
+
+1. Browser captures mic and camera with native APIs.
+2. Frontend creates a WebRTC session through `/api/realtime/webrtc`.
+3. Backend provisions the provider session and returns bootstrap data.
+4. The realtime provider handles server-grade speech transcription and audio response.
+5. Browser fallback speech capture remains UX-only and must not be treated as trusted scoring evidence.
+
+## What To Check First
+
+- `AI_PROVIDER` is set correctly.
+- `OPENAI_API_KEY` is present when `AI_PROVIDER=openai_native`.
+- Browser permissions for microphone and camera are granted.
+- `/api/realtime/webrtc` returns a valid session payload.
+- Interview page badges move through `Connecting`, `Listening`, `Thinking`, and `Sonia Speaking`.
+
+## Common Failures
+
+### Provider bootstrap fails
+
+- Confirm backend env vars are loaded.
+- Run `python backend/test_realtime_token.py`.
+- Check backend logs for the exact provider failure.
+
+### Microphone permission denied
+
+- Retry from the interview setup screen.
+- Re-grant browser permissions.
+- Confirm `getUserMedia` is called from a user gesture path.
+
+### Sonia stalls after a user turn
+
+- Inspect `/api/interview/{session_id}/next-turn`.
+- Confirm the UI shows degraded or recovery state instead of silently waiting.
+- Check whether the planner returned `recoverable_error` metadata.
+
+### Audio plays but transcript looks wrong
+
+- Treat browser transcript as continuity-only.
+- Verify trusted transcript capture on `/api/interview/{session_id}/capture`.
+
+## Production Expectations
+
+- Sonia should introduce herself deterministically.
+- User speaking should toggle the listening indicator promptly.
+- AI speaking should toggle the speaking indicator promptly.
+- Blocked autoplay must not block transcript progression or question count.

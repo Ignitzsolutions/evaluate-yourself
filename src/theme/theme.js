@@ -1,65 +1,62 @@
 import { createTheme, responsiveFontSizes } from '@mui/material/styles';
 
-// Define color palette following modern design principles
-// Using a more consistent and accessible color scheme
 const colors = {
   primary: {
-    main: '#0056B3', // Deeper, more accessible blue
-    light: '#4d8bdb',
-    dark: '#003b7a',
+    main: '#1d4ed8',
+    light: '#4f83ff',
+    dark: '#123b9a',
     contrastText: '#ffffff',
   },
   secondary: {
-    main: '#e63946', // More vibrant red for better visibility
-    light: '#ff6b70',
-    dark: '#b02a37',
+    main: '#0f172a',
+    light: '#334155',
+    dark: '#020617',
     contrastText: '#ffffff',
   },
   success: {
-    main: '#2e7d32',
-    light: '#4caf50',
-    dark: '#1b5e20',
+    main: '#0f766e',
+    light: '#14b8a6',
+    dark: '#115e59',
   },
   error: {
-    main: '#d32f2f',
-    light: '#ef5350',
-    dark: '#c62828',
+    main: '#dc2626',
+    light: '#ef4444',
+    dark: '#991b1b',
   },
   warning: {
-    main: '#ed6c02',
-    light: '#ff9800',
-    dark: '#e65100',
+    main: '#d97706',
+    light: '#f59e0b',
+    dark: '#b45309',
   },
   info: {
-    main: '#0288d1',
-    light: '#03a9f4',
-    dark: '#01579b',
+    main: '#0284c7',
+    light: '#38bdf8',
+    dark: '#0369a1',
   },
   grey: {
-    50: '#fafafa',
-    100: '#f5f5f5',
-    200: '#eeeeee',
-    300: '#e0e0e0',
-    400: '#bdbdbd',
-    500: '#9e9e9e',
-    600: '#757575',
-    700: '#616161',
-    800: '#424242',
-    900: '#212121',
+    50: '#f8fafc',
+    100: '#f1f5f9',
+    200: '#e2e8f0',
+    300: '#cbd5e1',
+    400: '#94a3b8',
+    500: '#64748b',
+    600: '#475569',
+    700: '#334155',
+    800: '#1e293b',
+    900: '#0f172a',
   },
   background: {
-    default: '#f8f9fa',
+    default: '#f7fafc',
     paper: '#ffffff',
-    dark: '#f0f2f5',
+    dark: '#edf2f7',
   },
   text: {
-    primary: '#212121',
-    secondary: '#616161',
-    disabled: '#9e9e9e',
+    primary: '#0f172a',
+    secondary: '#475569',
+    disabled: '#94a3b8',
   },
 };
 
-// Create base theme with improved typography
 let theme = createTheme({
   palette: {
     primary: colors.primary,
@@ -73,120 +70,102 @@ let theme = createTheme({
     text: colors.text,
   },
   typography: {
-    fontFamily: [
-      'Lato',
-      'Roboto',
-      '"Helvetica Neue"',
-      'Arial',
-      'sans-serif',
-    ].join(','),
-    h1: {
-      fontWeight: 700,
-      fontSize: '2.5rem',
-      lineHeight: 1.2,
-    },
-    h2: {
-      fontWeight: 700,
-      fontSize: '2rem',
-      lineHeight: 1.3,
-    },
-    h3: {
-      fontWeight: 600,
-      fontSize: '1.75rem',
-      lineHeight: 1.4,
-    },
-    h4: {
-      fontWeight: 600,
-      fontSize: '1.5rem',
-      lineHeight: 1.4,
-    },
-    h5: {
-      fontWeight: 600,
-      fontSize: '1.25rem',
-      lineHeight: 1.4,
-    },
-    h6: {
-      fontWeight: 600,
-      fontSize: '1rem',
-      lineHeight: 1.4,
-    },
-    subtitle1: {
-      fontSize: '1rem',
-      lineHeight: 1.5,
-    },
-    subtitle2: {
-      fontSize: '0.875rem',
-      lineHeight: 1.5,
-      fontWeight: 500,
-    },
-    body1: {
-      fontSize: '1rem',
-      lineHeight: 1.5,
-    },
-    body2: {
-      fontSize: '0.875rem',
-      lineHeight: 1.5,
-    },
+    fontFamily: ['Manrope', 'Inter', 'system-ui', 'sans-serif'].join(','),
+    h1: { fontWeight: 800, fontSize: '2.75rem', lineHeight: 1.04, letterSpacing: '-0.03em' },
+    h2: { fontWeight: 800, fontSize: '2.25rem', lineHeight: 1.08, letterSpacing: '-0.025em' },
+    h3: { fontWeight: 750, fontSize: '1.9rem', lineHeight: 1.12, letterSpacing: '-0.02em' },
+    h4: { fontWeight: 700, fontSize: '1.5rem', lineHeight: 1.18, letterSpacing: '-0.015em' },
+    h5: { fontWeight: 700, fontSize: '1.2rem', lineHeight: 1.25 },
+    h6: { fontWeight: 700, fontSize: '1rem', lineHeight: 1.3 },
+    subtitle1: { fontSize: '1rem', lineHeight: 1.55, color: colors.text.secondary },
+    subtitle2: { fontSize: '0.875rem', lineHeight: 1.5, fontWeight: 600 },
+    body1: { fontSize: '1rem', lineHeight: 1.6 },
+    body2: { fontSize: '0.875rem', lineHeight: 1.55 },
     button: {
-      textTransform: 'none', // More modern approach avoiding all-caps
-      fontWeight: 500,
+      textTransform: 'none',
+      fontWeight: 700,
+      letterSpacing: '0.01em',
     },
   },
   shape: {
-    borderRadius: 8, // More modern, slightly rounded corners
+    borderRadius: 18,
   },
-  // Improve spacing scale for more consistent UI rhythm
   spacing: (factor) => `${0.5 * factor}rem`,
-  // Enhance component-specific styling
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          width: '100%',
+          minWidth: 320,
+          minHeight: '100dvh',
+          overflowX: 'hidden',
+          backgroundColor: colors.background.default,
+          color: colors.text.primary,
+          textRendering: 'optimizeLegibility',
+          WebkitFontSmoothing: 'antialiased',
+        },
+        '::selection': {
+          backgroundColor: 'rgba(29, 78, 216, 0.16)',
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: 8,
-          padding: '0.5rem 1.25rem',
+          borderRadius: 999,
+          padding: '0.7rem 1.2rem',
+          minHeight: 44,
           boxShadow: 'none',
+          transition: 'transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease',
           '&:hover': {
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 10px 24px rgba(15, 23, 42, 0.08)',
+            transform: 'translateY(-1px)',
           },
         },
         contained: {
+          boxShadow: '0 12px 28px rgba(29, 78, 216, 0.18)',
           '&:hover': {
-            boxShadow: '0 6px 16px rgba(0, 0, 0, 0.12)',
+            boxShadow: '0 16px 34px rgba(29, 78, 216, 0.2)',
           },
+        },
+        outlined: {
+          borderColor: 'rgba(148, 163, 184, 0.5)',
+          backgroundColor: 'rgba(255,255,255,0.92)',
         },
       },
     },
     MuiPaper: {
       styleOverrides: {
         root: {
-          boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)',
-        },
-        elevation1: {
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
-        },
-        elevation2: {
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
-        },
-        elevation3: {
-          boxShadow: '0 6px 16px rgba(0, 0, 0, 0.1)',
-        },
-        elevation4: {
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+          backgroundImage: 'none',
+          boxShadow: '0 16px 44px rgba(15, 23, 42, 0.06)',
+          border: '1px solid rgba(148, 163, 184, 0.16)',
         },
       },
     },
     MuiAppBar: {
       styleOverrides: {
         root: {
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+          backgroundColor: 'rgba(255,255,255,0.82)',
+          color: colors.text.primary,
+          boxShadow: '0 1px 0 rgba(148,163,184,0.22)',
+          backdropFilter: 'blur(16px) saturate(140%)',
+        },
+      },
+    },
+    MuiToolbar: {
+      styleOverrides: {
+        root: {
+          minHeight: 76,
         },
       },
     },
     MuiCard: {
       styleOverrides: {
         root: {
-          boxShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
-          borderRadius: 12,
+          borderRadius: 24,
+          boxShadow: '0 18px 52px rgba(15, 23, 42, 0.08)',
+          border: '1px solid rgba(148, 163, 184, 0.14)',
           overflow: 'hidden',
         },
       },
@@ -205,26 +184,47 @@ let theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiOutlinedInput-root': {
-            borderRadius: 8,
+            borderRadius: 16,
+            backgroundColor: '#ffffff',
+            transition: 'box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease',
+            '&:hover .MuiOutlinedInput-notchedOutline': {
+              borderColor: 'rgba(29, 78, 216, 0.35)',
+            },
+            '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+              borderColor: colors.primary.main,
+              borderWidth: 1.5,
+            },
+          },
+          '& .MuiInputLabel-root': {
+            color: colors.text.secondary,
+            fontWeight: 600,
           },
         },
       },
     },
-    MuiTableCell: {
+    MuiInputBase: {
       styleOverrides: {
         root: {
-          padding: '0.75rem 1rem',
+          color: colors.text.primary,
         },
-        head: {
-          fontWeight: 600,
-          backgroundColor: colors.background.dark,
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        notchedOutline: {
+          borderColor: 'rgba(148, 163, 184, 0.34)',
+        },
+        input: {
+          paddingTop: '0.95rem',
+          paddingBottom: '0.95rem',
         },
       },
     },
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 8,
+          borderRadius: 999,
+          fontWeight: 700,
         },
       },
     },
@@ -232,6 +232,8 @@ let theme = createTheme({
       styleOverrides: {
         paper: {
           borderRight: 'none',
+          backgroundImage: 'none',
+          boxShadow: '-12px 0 42px rgba(15, 23, 42, 0.12)',
         },
       },
     },
@@ -240,15 +242,21 @@ let theme = createTheme({
         tooltip: {
           backgroundColor: colors.grey[800],
           fontSize: '0.75rem',
-          padding: '0.5rem 0.75rem',
-          borderRadius: 4,
+          padding: '0.55rem 0.8rem',
+          borderRadius: 10,
+        },
+      },
+    },
+    MuiDivider: {
+      styleOverrides: {
+        root: {
+          borderColor: 'rgba(148, 163, 184, 0.16)',
         },
       },
     },
   },
 });
 
-// Make typography responsive
 theme = responsiveFontSizes(theme);
 
 export default theme;

@@ -88,7 +88,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100dvh", display: "flex", flexDirection: "column", bgcolor: "background.default" }}>
       <DemoModeBanner variant="admin" />
       <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
       <Box
@@ -101,7 +101,7 @@ export default function AdminLayout() {
           p: 2,
           position: "sticky",
           top: 0,
-          height: "100vh",
+          height: "100dvh",
         }}
       >
         <Typography

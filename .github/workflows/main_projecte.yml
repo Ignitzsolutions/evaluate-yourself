@@ -1,5 +1,5 @@
 
-name: Build and deploy Python app to Azure Web App - projecte
+name: CI and deploy to server
 
 on:
   push:
@@ -12,6 +12,16 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read #This is required for actions/checkout
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +45,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+      
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # 🛠️ Local Build Section (Optional)
-      # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -50,27 +62,32 @@ jobs:
             libavformat-dev \
             libswscale-dev
 
-      - name: Create and Start virtual environment and Install dependencies
+      - name: Sync Python dependencies with uv
         run: |
-          python -m venv antenv
-          source antenv/bin/activate
-          # Upgrade pip, setuptools, wheel first (ensures reliable builds)
-          pip install --upgrade pip>=24.0 setuptools>=70.0 wheel>=0.41.0
-          pip install -r backend/requirements.txt
+          uv sync --frozen
+
+      - name: Check Python formatting
+        run: |
+          uv run black --check \
+            backend/services/auth \
+            backend/services/interview/scoring_service.py \
+            backend/scripts \
+            backend/tests/test_schema_smoke.py \
+            backend/tests/test_auth_migration_smoke.py \
+            backend/tests/test_interview_orchestration_backend.py \
+            backend/tests/test_replay_payload.py \
+            backend/tests/test_provider_adapter.py \
+            backend/tests/test_user_contact_sync.py
 
       - name: Run mypy on cleaned service modules
         run: |
-          source antenv/bin/activate
-          pip install mypy
-          cd backend
-          mypy --ignore-missing-imports services/auth/ services/interview/scoring_service.py
+          uv run mypy
 
       - name: Validate imports and app module
         run: |
-          source antenv/bin/activate
           python --version
-          python -c "import fastapi, uvicorn; print('✓ Core imports successful')"
-          python - <<'PY'
+          uv run python -c "import fastapi, uvicorn; print('✓ Core imports successful')"
+          uv run python - <<'PY'
           import importlib
           optional = ["cv2", "numpy", "scipy"]
           for name in optional:
@@ -80,13 +97,12 @@ jobs:
             except Exception as exc:
               print(f"ℹ Optional import missing: {name} ({exc.__class__.__name__})")
           PY
-          python -c "import jwt; print('✓ PyJWT (jwt) import successful')"
-          cd backend && python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
+          uv run python -c "import jwt; print('✓ PyJWT (jwt) import successful')"
+          cd backend && uv run python -c "import jwt; import app; print('✓ Backend app module loads successfully (matches startup: cd backend && uvicorn app:app)')"
 
       - name: Run targeted backend release checks
         run: |
-          source antenv/bin/activate
-          pytest -q \
+          uv run pytest -q \
             backend/tests/test_schema_smoke.py \
             backend/tests/test_auth_migration_smoke.py \
             backend/tests/test_interview_orchestration_backend.py \
@@ -95,13 +111,15 @@ jobs:
 
       - name: Run backend startup smoke against live local app
         env:
+          DATABASE_URL: sqlite:///${{ github.workspace }}/backend/ci-startup-smoke.db
+          REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET_KEY: ci-startup-smoke-secret-at-least-32-chars
-          AZURE_OPENAI_API_KEY: ci-startup-smoke-key
-          AZURE_OPENAI_ENDPOINT: https://ci-startup-smoke.openai.azure.com
+          OPENAI_API_KEY: ci-startup-smoke-key
         run: |
-          source antenv/bin/activate
+          rm -f "${{ github.workspace }}/backend/ci-startup-smoke.db"
+          uv run python -m alembic -c backend/alembic.ini upgrade head
           cd backend
-          PYTHONPATH=. uvicorn app:app --host 127.0.0.1 --port 8000 > ../backend-smoke.log 2>&1 &
+          PYTHONPATH=. uv run uvicorn app:app --host 127.0.0.1 --port 8000 > ../backend-smoke.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID' EXIT
           for attempt in $(seq 1 30); do
@@ -111,10 +129,8 @@ jobs:
             sleep 2
           done
           cd ..
-          python backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000
+          uv run python backend/scripts/startup_smoke.py --base-url http://127.0.0.1:8000
                 
-      # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
-      # Note: The artifact includes the entire repo root (.), ensuring backend/ folder exists in deployment
       - name: Verify deployment artifact structure
         run: |
           echo "Verifying backend/ folder exists in artifact..."
@@ -129,201 +145,109 @@ jobs:
           echo "✓ backend/ folder verified"
           echo "✓ backend/app.py verified"
           ls -la backend/ | head -10
-      
+
+      - name: Validate Docker Compose deployment config
+        run: |
+          docker compose config
+
+      - name: Package release bundle
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=.venv \
+            --exclude=node_modules \
+            --exclude=backend/venv \
+            --exclude=test-results \
+            --exclude=.playwright-cli \
+            -czf release.tar.gz .
+
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
-          name: python-app
-          path: |
-            .
-            !antenv/
-            !node_modules/
-            !backend/venv/
+          name: release-bundle
+          path: release.tar.gz
 
-  deploy:
+  deploy-via-ssh:
     runs-on: ubuntu-22.04
     needs: build
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: python-app
-    
+          name: release-bundle
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8331BDAA4880491C8C40056B471C008E }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EFD4EDE5F1F74B78B9C871194B590CDB }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_70042E13994748B3806C0F7016364C7B }}
-
-      - name: Validate required Azure app settings
+      - name: Validate deploy secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
         run: |
-          SETTINGS_JSON=$(az webapp config appsettings list \
-            --resource-group projecte_group \
-            --name projecte \
-            --output json)
-          export SETTINGS_JSON
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          settings = {
-              item.get("name"): str(item.get("value") or "").strip()
-              for item in json.loads(os.environ["SETTINGS_JSON"])
-          }
-          missing = [
-              key for key in (
-                  "DATABASE_URL",
-                  "REDIS_URL",
-                  "ALLOWED_ORIGINS",
-                  "JWT_SECRET_KEY",
-                  "AZURE_OPENAI_API_KEY",
-                  "AZURE_OPENAI_ENDPOINT",
-              )
-              if not settings.get(key)
-          ]
-          if missing:
-              print(f"Missing Azure app settings: {', '.join(missing)}", file=sys.stderr)
-              sys.exit(1)
-          if len(settings["JWT_SECRET_KEY"]) < 32:
-              print("JWT_SECRET_KEY must be at least 32 characters", file=sys.stderr)
-              sys.exit(1)
-          endpoint = settings["AZURE_OPENAI_ENDPOINT"]
-          if "openai.azure.com" not in endpoint and "cognitiveservices.azure.com" not in endpoint:
-              print("AZURE_OPENAI_ENDPOINT must be an Azure OpenAI endpoint", file=sys.stderr)
-              sys.exit(1)
-          print("✓ Required Azure app settings are present")
-          PY
-
-      - name: Set demo access defaults
-        run: |
-          az webapp config appsettings set \
-            --resource-group projecte_group \
-            --name projecte \
-            --settings \
-              ENV=production \
-              INTERVIEW_ACCESS_MODE=free \
-              TRIAL_MODE_ENABLED=false \
-              TRIAL_CODE_ENFORCEMENT=false \
-              DEV_AUTH_BYPASS=false
-          az webapp config appsettings delete \
-            --resource-group projecte_group \
-            --name projecte \
-            --setting-names DEV_USER_ID DEV_USER_EMAIL DEV_USER_NAME \
-            --output none || true
-
-      - name: Validate production auth posture
-        run: |
-          SETTINGS_JSON=$(az webapp config appsettings list \
-            --resource-group projecte_group \
-            --name projecte \
-            --output json)
-          export SETTINGS_JSON
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          settings = {
-              item.get("name"): str(item.get("value") or "").strip()
-              for item in json.loads(os.environ["SETTINGS_JSON"])
-          }
-          if settings.get("DEV_AUTH_BYPASS", "").lower() in {"1", "true", "yes", "on"}:
-              print("DEV_AUTH_BYPASS must be disabled for production deploys", file=sys.stderr)
-              sys.exit(1)
-          stale_dev_users = [
-              key for key in ("DEV_USER_ID", "DEV_USER_EMAIL", "DEV_USER_NAME")
-              if settings.get(key)
-          ]
-          if stale_dev_users:
-              print(f"Remove stale dev user app settings: {', '.join(stale_dev_users)}", file=sys.stderr)
-              sys.exit(1)
-          print("✓ Production auth posture is locked")
-          PY
-
-      - name: Ensure health check path
-        run: |
-          az webapp update \
-            --resource-group projecte_group \
-            --name projecte \
-            --set siteConfig.healthCheckPath=/health
-
-      - name: Ensure startup command
-        run: |
-          az webapp config set \
-            --resource-group projecte_group \
-            --name projecte \
-            --startup-file "test -d backend && cd backend; export PYTHONPATH=/home/site/wwwroot/__startup_packages__:/home/site/wwwroot:/home/site/wwwroot/backend:\${PYTHONPATH}; test -d /home/site/wwwroot/__startup_packages__/uvicorn || python -m pip install --no-cache-dir -r requirements.txt -t /home/site/wwwroot/__startup_packages__; python -m gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:\${WEBSITES_PORT:-8000} --timeout 600"
-
-      - name: Package deployment artifact
-        run: |
-          zip -r release.zip . -x "antenv/*" "node_modules/*" "backend/venv/*"
-
-      - name: Deploy to Azure Web App (retry)
-        run: |
-          for attempt in 1 2 3; do
-            echo "Deployment attempt $attempt/3"
-            if az webapp deploy \
-              --resource-group projecte_group \
-              --name projecte \
-              --src-path release.zip \
-              --type zip \
-              --clean true \
-              --restart true \
-              --track-status true; then
-              echo "Deployment succeeded"
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Deployment failed; retrying in 20s..."
-              sleep 20
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DEPLOY_ENV_FILE APP_BASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required deploy secret: ${name}"
+              exit 1
             fi
           done
-          echo "Deployment failed after 3 attempts"
-          exit 1
+          if [ -z "${DEPLOY_PORT}" ]; then
+            echo "DEPLOY_PORT not set; defaulting to 22"
+          fi
+
+      - name: Prepare SSH client
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Upload release bundle and deploy assets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+        run: |
+          printf '%s\n' "${DEPLOY_ENV_FILE}" > backend.env
+          scp -P "${DEPLOY_PORT:-22}" release.tar.gz backend.env deploy/server/remote-deploy.sh "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/"
+
+      - name: Deploy release on server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "chmod +x /tmp/remote-deploy.sh && /tmp/remote-deploy.sh /tmp/release.tar.gz /tmp/backend.env '${DEPLOY_PATH}'"
 
       - name: Smoke check deployed app routes
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
         run: |
-          APP_URL="https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
-
-          check_route() {
-            local path="$1"
-            local accepted_codes="$2"
-            local url="${APP_URL}${path}"
-            local code
-            code=$(curl -sS -o /tmp/deploy_route_check.out -w "%{http_code}" "${url}" || true)
-            for expected in ${accepted_codes}; do
-              if [ "${code}" = "${expected}" ]; then
-                echo "✓ ${path} -> ${code}"
-                return 0
-              fi
-            done
-            echo "❌ ${path} -> ${code} (expected one of: ${accepted_codes})"
-            head -c 200 /tmp/deploy_route_check.out || true
-            echo ""
-            exit 1
-          }
-
-          check_route "/" "200"
-          check_route "/health" "200"
-          check_route "/favicon.ico" "200 301 302 304"
-          check_route "/api/me" "401 403"
+          chmod +x deploy/server/post-deploy-smoke.sh
+          ./deploy/server/post-deploy-smoke.sh "${APP_BASE_URL}"
 
       - name: Run hosted Sonia certification
         env:
-          PW_CERT_BASE_URL: "https://projecte-btcnhqfxfcdahten.southindia-01.azurewebsites.net"
+          PW_CERT_BASE_URL: ${{ secrets.APP_BASE_URL }}
           PW_CERT_SESSION_URL: ${{ secrets.PW_CERT_SESSION_URL }}
           PW_CERT_STORAGE_STATE_JSON: ${{ secrets.PW_CERT_STORAGE_STATE_JSON }}
         run: |
           if [ -z "${PW_CERT_SESSION_URL}" ]; then
-            echo "❌ Missing PW_CERT_SESSION_URL secret for hosted Sonia certification"
-            exit 1
+            echo "Skipping hosted Sonia certification because PW_CERT_SESSION_URL is not configured"
+            exit 0
           fi
           STORAGE_STATE_PATH="${RUNNER_TEMP}/pw-cert-storage-state.json"
           if [ -n "${PW_CERT_STORAGE_STATE_JSON}" ]; then

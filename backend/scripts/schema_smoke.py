@@ -11,7 +11,6 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ROOT_DIR = BACKEND_DIR.parent
 if str(ROOT_DIR) not in sys.path:
@@ -20,7 +19,6 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from backend.db.database import engine  # noqa: E402
-
 
 REQUIRED_COLUMNS = {
     "users": {

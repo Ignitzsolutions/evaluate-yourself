@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Alert,
@@ -8,6 +8,7 @@ import {
   CardContent,
   Checkbox,
   Chip,
+  CircularProgress,
   FormControl,
   FormControlLabel,
   Grid,
@@ -20,18 +21,18 @@ import {
 } from "@mui/material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 import {
   buildInterviewConfig,
+  INTERVIEW_TYPES_REQUIRING_SKILLS,
   isInterviewFreeAccessMode,
   readSavedInterviewConfig,
   saveInterviewConfig,
 } from "../utils/accessMode";
 
 const FREE_ACCESS_MODE = isInterviewFreeAccessMode();
-const API_BASE = getApiBaseUrl();
-const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
+const DURATION_OPTIONS = [10, 15, 20, 30, 45, 60];
 
 export default function PreInterviewForm() {
   const navigate = useNavigate();
@@ -40,8 +41,7 @@ export default function PreInterviewForm() {
 
   const [selectedType, setSelectedType] = useState(location.state?.type || "technical");
 
-  const durationOptions = useMemo(() => [10, 15, 20, 30, 45, 60], []);
-  const [duration, setDuration] = useState(durationOptions[0]);
+  const [duration, setDuration] = useState(DURATION_OPTIONS[0]);
   const [difficulty, setDifficulty] = useState("easy");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
@@ -56,6 +56,7 @@ export default function PreInterviewForm() {
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillRetryTick, setSkillRetryTick] = useState(0);
   const requiresSkillCatalog = INTERVIEW_TYPES_REQUIRING_SKILLS.has(selectedType);
+  const skillSelectionBlocked = requiresSkillCatalog && (skillLoading || !skillCatalog);
 
   useEffect(() => {
     const locationType = location.state?.type;
@@ -73,7 +74,7 @@ export default function PreInterviewForm() {
     }
     const parsed = savedConfig.config;
     setSelectedType(locationType || parsed.type || "technical");
-    setDuration(Number(parsed.duration) || durationOptions[0]);
+    setDuration(Number(parsed.duration) || DURATION_OPTIONS[0]);
     setDifficulty(parsed.difficulty || "easy");
     setRole(parsed.role || "");
     setCompany(parsed.company || "");
@@ -81,7 +82,7 @@ export default function PreInterviewForm() {
     setInterviewStyle(parsed.interviewStyle || "neutral");
     setTranscriptConsent(Boolean(parsed.transcriptConsent));
     setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
-  }, [durationOptions, location.state?.recoveryMessage, location.state?.type]);
+  }, [location.state?.recoveryMessage, location.state?.type]);
 
   useEffect(() => {
     let mounted = true;
@@ -100,7 +101,7 @@ export default function PreInterviewForm() {
       try {
         const token = await getToken();
         const resp = await authFetch(
-          `${API_BASE}/api/interview/skill-catalog?interview_type=${encodeURIComponent(selectedType)}`,
+          apiUrl("/api/interview/skill-catalog", { interview_type: selectedType }),
           token,
           { method: "GET" }
         );
@@ -163,7 +164,7 @@ export default function PreInterviewForm() {
       const min = Number(skillCatalog.selection_rules.min || 0);
       const max = Number(skillCatalog.selection_rules.max || 0);
       if (selectedSkills.length < min || selectedSkills.length > max) {
-      setSkillError(`Select ${min === max ? `${min}` : `${min}-${max}`} stream(s) before starting.`);
+        setSkillError(`Select ${min === max ? `${min}` : `${min}-${max}`} stream(s) before starting.`);
         return;
       }
     }
@@ -188,11 +189,10 @@ export default function PreInterviewForm() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         py: { xs: 3, md: 6 },
         px: { xs: 2, md: 4 },
-        background:
-          "radial-gradient(900px 380px at 0% 0%, rgba(0,86,179,0.10), transparent 60%), radial-gradient(700px 320px at 100% 20%, rgba(230,57,70,0.08), transparent 60%), #f8f9fa",
+        bgcolor: "background.default",
       }}
     >
       <Card
@@ -202,19 +202,19 @@ export default function PreInterviewForm() {
           borderRadius: 3,
           border: "1px solid",
           borderColor: "divider",
-          boxShadow: "0 18px 60px rgba(0, 59, 122, 0.12)",
+          boxShadow: "none",
         }}
       >
         <CardContent sx={{ p: { xs: 2.5, md: 5 } }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} sx={{ mb: 4 }}>
             <Box>
               <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                {FREE_ACCESS_MODE ? "Sonia Demo Setup" : "Interview Configuration"}
+                Configure interview
               </Typography>
               <Typography color="text.secondary" sx={{ mt: 0.5 }}>
                 {FREE_ACCESS_MODE
-                  ? "Quick setup for a live Sonia beta demo. Confirm the basics, then join the interview immediately."
-                  : "Quick setup for a focused, production-ready session."}
+                  ? "Confirm the basics, then start Sonia. No trial code is required."
+                  : "Set the role, difficulty, and transcript consent before starting."}
               </Typography>
               <Chip label={`Type: ${formatInterviewTypeLabel(selectedType)}`} size="small" color="primary" sx={{ mt: 1.5 }} />
             </Box>
@@ -239,7 +239,7 @@ export default function PreInterviewForm() {
                 <FormControl fullWidth>
                   <InputLabel id="duration-label">Duration</InputLabel>
                   <Select labelId="duration-label" label="Duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                    {durationOptions.map((mins) => (
+                    {DURATION_OPTIONS.map((mins) => (
                       <MenuItem key={mins} value={mins}>{mins} minutes</MenuItem>
                     ))}
                   </Select>
@@ -318,9 +318,12 @@ export default function PreInterviewForm() {
                         `Select ${skillCatalog?.selection_rules?.min ?? 0}${skillCatalog?.selection_rules?.min === skillCatalog?.selection_rules?.max ? "" : `-${skillCatalog?.selection_rules?.max ?? 0}`} stream(s).`}
                     </Typography>
                     {skillLoading && (
-                      <Typography variant="body2" color="text.secondary">
-                        Loading interview streams...
-                      </Typography>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <CircularProgress size={18} />
+                        <Typography variant="body2" color="text.secondary">
+                          Loading interview streams...
+                        </Typography>
+                      </Stack>
                     )}
                     {!skillLoading && Array.isArray(skillCatalog?.tracks) && (
                       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
@@ -341,13 +344,12 @@ export default function PreInterviewForm() {
                       </Stack>
                     )}
                     {skillError && (
-                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
-                        <Typography variant="caption" color="error">
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} sx={{ mt: 1.5 }}>
+                        <Alert severity="error" sx={{ flex: 1 }}>
                           {skillError}
-                        </Typography>
+                        </Alert>
                         <Button
                           variant="outlined"
-                          size="small"
                           onClick={() => setSkillRetryTick((prev) => prev + 1)}
                           disabled={skillLoading}
                         >
@@ -397,7 +399,7 @@ export default function PreInterviewForm() {
               <Button variant="outlined" onClick={() => navigate("/interviews")}>
                 Cancel
               </Button>
-              <Button type="submit" variant="contained" disabled={requiresSkillCatalog && skillLoading}>
+              <Button type="submit" variant="contained" disabled={skillSelectionBlocked}>
                 {FREE_ACCESS_MODE ? "Start Sonia Demo" : "Start Interview"}
               </Button>
             </Stack>

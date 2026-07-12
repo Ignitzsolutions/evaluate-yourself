@@ -78,4 +78,26 @@ describe("apiClient network error handling", () => {
     expect(error.retryable).toBe(false);
     expect(getApiErrorMessage(error)).toBe("Trial code expired");
   });
+
+  test("classifies CRA proxy refused responses as backend unavailable", async () => {
+    const response = {
+      status: 500,
+      url: "/api/profile/status",
+      text: jest.fn().mockResolvedValue(
+        "Proxy error: Could not proxy request /api/profile/status from localhost:3000 to http://localhost:8000 (ECONNREFUSED).",
+      ),
+    };
+
+    const error = await buildApiErrorFromResponse(response, {
+      defaultMessage: "Fallback message",
+    });
+
+    expect(error.code).toBe("BACKEND_UNAVAILABLE");
+    expect(isBackendUnavailableError(error)).toBe(true);
+    expect(
+      getApiErrorMessage(error, {
+        backendLabel: "profile service",
+      }),
+    ).toBe("Cannot reach the profile service. Start the API server and try again.");
+  });
 });
