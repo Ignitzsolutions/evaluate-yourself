@@ -5080,8 +5080,8 @@ def _persist_practice_attempt(
         logging.warning("practice attempt persist failed: %s", exc)
         try:
             db.rollback()
-        except Exception:
-            pass
+        except Exception as rollback_exc:
+            logging.warning("practice attempt rollback failed: %s", rollback_exc)
         return {}
 
     # Lightweight progression hint: avg of last 5 vs previous 5 attempts.
