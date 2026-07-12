@@ -49,6 +49,21 @@ export default function AdminLoginPage() {
     setLoading(true);
     try {
       const data = await login(email, password);
+      // MFA path: backend tells us if the admin needs to enrol or just respond.
+      if (data?.mfa_required) {
+        // Stash the short-lived mfa_token where the next step can pick it up.
+        sessionStorage.setItem("ey.mfaToken", data.mfa_token || "");
+        if (data.mfa_enroll_required) {
+          // First-time admin: route through the enrollment flow.
+          navigate("/admin/mfa-enroll");
+        } else {
+          // Existing MFA user: drop into the challenge page (or admin login
+          // surface, which can render the 6-digit prompt inline). For now
+          // we reuse the enrollment page UI which handles the same shape.
+          navigate("/admin/mfa-enroll");
+        }
+        return;
+      }
       if (data.user?.is_admin) {
         navigate("/admin/dashboard");
       } else {

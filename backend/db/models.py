@@ -191,9 +191,10 @@ class TrialCode(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     code = Column(String, unique=True, index=True, nullable=False)
     code_suffix = Column(String, index=True, nullable=True)
+    display_name = Column(String(255), nullable=True)
     status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE|REDEEMED|REVOKED|EXPIRED|DELETED
     duration_minutes = Column(Integer, nullable=False, default=5)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_by_clerk_user_id = Column(String, nullable=False)
     redeemed_by_clerk_user_id = Column(String, nullable=True, index=True)
     redeemed_at = Column(DateTime(timezone=True), nullable=True)
@@ -449,4 +450,31 @@ class AuthAuditEvent(Base):
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
     detail = Column(Text, nullable=True)  # JSON details
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Communication practice progression
+# ─────────────────────────────────────────────────────────────────────
+
+class CommunicationPracticeAttempt(Base):
+    """Single user attempt at a communication-practice prompt.
+
+    Persisted by /api/communication-practice/evaluate-turn so the dashboard
+    can show progression (sparkline + improvement trend + flag history).
+    """
+    __tablename__ = "communication_practice_attempts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True, nullable=False)
+    pack_id = Column(String, index=True, nullable=False)
+    prompt_id = Column(String, index=True, nullable=True)
+    target_sentence = Column(Text, nullable=True)
+    spoken_text = Column(Text, nullable=True)
+    score = Column(Integer, nullable=False, default=0)  # 0-100
+    coverage = Column(Integer, nullable=False, default=0)  # 0-100 (percent)
+    duration_seconds = Column(Integer, nullable=False, default=0)
+    filler_per_100 = Column(Integer, nullable=False, default=0)
+    pacing_band = Column(String, nullable=True)
+    quality_flags = Column(Text, nullable=True)  # JSON array
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

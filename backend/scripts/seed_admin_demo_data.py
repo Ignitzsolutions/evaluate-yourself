@@ -25,6 +25,7 @@ from backend.db.database import SessionLocal  # noqa: E402
 from backend.db.models import (  # noqa: E402
     AuthAuditEvent,
     LLMUsageEvent,
+    RefreshTokenRecord,
     User,
 )
 
@@ -164,12 +165,97 @@ def synth_audit(now: datetime) -> AuthAuditEvent:
     )
 
 
+def seed_locked_user(db, now: datetime):
+    """Seed a user with a recent burst of failed logins + an account_locked event."""
+    locked_user = ("u-locked-demo", "locked.demo@acme.dev", "Locked Demo")
+    uid, email, name = locked_user
+    u = db.query(User).filter(User.id == uid).first()
+    if not u:
+        db.add(User(
+            id=uid, clerk_user_id=uid, email=email, full_name=name,
+            is_active=True, is_deleted=False, is_admin=False, email_verified=True,
+            created_at=now - timedelta(days=10),
+        ))
+    for i in range(5):
+        db.add(AuthAuditEvent(
+            id=str(uuid.uuid4()), user_id=uid, email=email,
+            event_type="login_failure", outcome="failure",
+            ip_address="203.0.113.42", user_agent="Mozilla/5.0 (suspicious-bot)",
+            detail=json.dumps({"reason": "bad_password", "attempt": i + 1}),
+            created_at=now - timedelta(minutes=30 - i * 3),
+        ))
+    db.add(AuthAuditEvent(
+        id=str(uuid.uuid4()), user_id=uid, email=email,
+        event_type="account_locked", outcome="success",
+        ip_address="203.0.113.42", user_agent="Mozilla/5.0 (suspicious-bot)",
+        detail=json.dumps({"reason": "max_failures", "lock_minutes": 15}),
+        created_at=now - timedelta(minutes=10),
+    ))
+    db.commit()
+
+
+def seed_sessions(db, now: datetime):
+    """Seed a handful of refresh tokens across demo users."""
+    devices = [
+        ("MacBook Pro", "Mozilla/5.0 (Macintosh; Intel Mac OS X) Chrome/130", "73.15.22.18"),
+        ("iPhone 16", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari", "73.15.22.19"),
+        ("Windows Desktop", "Mozilla/5.0 (Windows NT 10.0) Firefox/132", "98.211.4.77"),
+        ("iPad", "Mozilla/5.0 (iPad; CPU OS 18_0) Safari", "73.15.22.20"),
+        ("Pixel 9", "Mozilla/5.0 (Linux; Android 14) Chrome/130", "182.64.91.5"),
+        ("MacBook Air", "Mozilla/5.0 (Macintosh; Intel Mac OS X) Safari/17", "73.15.22.30"),
+    ]
+    picks = [DEMO_USERS[0], DEMO_USERS[1], DEMO_USERS[2]]
+    rows = 0
+    for idx, (uid, _email, _name) in enumerate(picks * 2):
+        device, ua, ip = devices[idx % len(devices)]
+        issued = now - timedelta(days=random.randint(0, 5), hours=random.randint(0, 23))
+        db.add(RefreshTokenRecord(
+            jti=f"demo-jti-{uuid.uuid4().hex[:12]}",
+            user_id=uid,
+            family_id=f"demo-fam-{uid}-{idx}",
+            parent_jti=None,
+            device_label=device,
+            ip_address=ip,
+            user_agent=ua,
+            issued_at=issued,
+            last_used_at=issued + timedelta(hours=random.randint(1, 36)),
+            expires_at=issued + timedelta(days=30),
+        ))
+        rows += 1
+    db.commit()
+    return rows
+
+
+def seed_mfa_user(db, now: datetime):
+    """Seed a placeholder MFA-enrolled user via audit trail (real secret managed by enroll flow)."""
+    uid, email, name = ("u-mfa-demo", "mfa.demo@acme.dev", "MFA Demo")
+    u = db.query(User).filter(User.id == uid).first()
+    if not u:
+        db.add(User(
+            id=uid, clerk_user_id=uid, email=email, full_name=name,
+            is_active=True, is_deleted=False, is_admin=False, email_verified=True,
+            created_at=now - timedelta(days=5),
+        ))
+    db.add(AuthAuditEvent(
+        id=str(uuid.uuid4()), user_id=uid, email=email,
+        event_type="mfa_pass", outcome="success",
+        ip_address="73.15.22.18", user_agent="Mozilla/5.0 Chrome/130",
+        detail=json.dumps({"factor": "totp"}),
+        created_at=now - timedelta(hours=2),
+    ))
+    db.commit()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--per-day", type=int, default=60)
     ap.add_argument("--audit-per-day", type=int, default=8)
     ap.add_argument("--wipe", action="store_true", help="Delete existing demo rows first")
+    ap.add_argument("--with-locked-user", action="store_true", help="Seed a locked-out user + failure trail")
+    ap.add_argument("--with-sessions", action="store_true", help="Seed refresh tokens across demo users")
+    ap.add_argument("--with-mfa-user", action="store_true", help="Seed an MFA-enrolled demo user")
+    ap.add_argument("--full", action="store_true", help="Seed everything (locked + sessions + mfa)")
     args = ap.parse_args()
 
     db = SessionLocal()
@@ -240,6 +326,18 @@ def main():
         db.commit()
 
         print(f"seeded {usage_rows + 12} usage events and {audit_rows} audit events")
+
+        want_full = args.full or not (args.with_locked_user or args.with_sessions or args.with_mfa_user)
+        if args.with_locked_user or want_full:
+            seed_locked_user(db, now)
+            print("seeded locked-user trail")
+        if args.with_sessions or want_full:
+            n = seed_sessions(db, now)
+            print(f"seeded {n} refresh-token sessions")
+        if args.with_mfa_user or want_full:
+            seed_mfa_user(db, now)
+            print("seeded mfa-enrolled demo user")
+
         # Quick sanity totals
         from sqlalchemy import func as _f
 

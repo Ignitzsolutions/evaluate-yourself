@@ -14,6 +14,8 @@ jest.mock("../../context/AuthContext", () => ({
   useAuthActions: () => ({
     login: mockLogin,
     register: mockRegister,
+    signOut: jest.fn(),
+    completeMfaLogin: jest.fn(),
   }),
 }));
 

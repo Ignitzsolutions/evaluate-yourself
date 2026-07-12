@@ -47,6 +47,22 @@ uv run uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
 
+### Demo mode (run with no API keys)
+
+You can boot the entire app — admin dashboard, communication-practice scoring, and a simulated voice mic — without any real OpenAI / realtime keys:
+
+```bash
+# 1. Copy the example env (placeholder key triggers demo mode automatically)
+cp backend/.env.example backend/.env
+# 2. (optional) Seed the admin dashboard with realistic data
+python backend/scripts/seed_admin_demo_data.py --wipe
+# 3. Start backend + frontend
+(cd backend && uvicorn app:app --host 127.0.0.1 --port 8088 --reload) &
+REACT_APP_API_URL=http://127.0.0.1:8088 npm start
+```
+
+When `OPENAI_API_KEY` is empty or a placeholder, a "Demo mode" banner appears, the LLM provider returns deterministic canned responses, and `/api/realtime/sessions` returns a friendly stub instead of erroring. Set a real key to switch back to live behavior — no other config change required.
+
 ### Python tooling
 
 The backend Python source of truth is now:

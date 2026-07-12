@@ -41,6 +41,9 @@ import AdminExportsPage from "./pages/admin/AdminExportsPage";
 import AdminConfigPage from "./pages/admin/AdminConfigPage";
 import AdminQuestionBankPage from "./pages/admin/AdminQuestionBankPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import AdminMfaEnrollPage from "./pages/auth/AdminMfaEnrollPage";
+import { RuntimeModeProvider } from "./contexts/RuntimeModeContext";
+import DemoModeBanner from "./components/DemoModeBanner";
 
 function AppShell({ navbar = false, footer = false }) {
   return (
@@ -83,13 +86,15 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <RuntimeModeProvider>
+        <DemoModeBanner variant="inline" />
 
-      <BrowserRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-        }}
-      >
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
         <Routes>
           {/* Landing route without footer */}
           <Route element={<LandingLayout />}>
@@ -110,6 +115,7 @@ export default function App() {
             <Route path="/set-password/*" element={<SetPasswordPage />} />
             <Route path="/admin" element={<AdminEntryPage />} />
             <Route path="/admin/login/*" element={<AdminLoginPage />} />
+            <Route path="/admin/mfa-enroll" element={<AdminMfaEnrollPage />} />
           </Route>
 
           {/* Auth-protected onboarding route (unguarded) */}
@@ -207,7 +213,8 @@ export default function App() {
             element={<NotFoundPage />}
           />
         </Routes>
-      </BrowserRouter>
+        </BrowserRouter>
+      </RuntimeModeProvider>
     </ThemeProvider>
   );
 }

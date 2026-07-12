@@ -17,6 +17,30 @@ import { Mic, Stop, Refresh, PlayArrow } from "@mui/icons-material";
 import { useAuth } from "../context/AuthContext";
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage } from "../utils/apiClient";
 import { apiUrl } from "../utils/apiBaseUrl";
+import PracticeHistoryPanel from "./communication/PracticeHistoryPanel";
+
+const FLAG_GUIDANCE = {
+  LOW_PROMPT_COVERAGE: { label: "Missed key words", hint: "Include more of the target sentence." },
+  STARTS_WITH_LOWERCASE: { label: "Capitalization issue", hint: "Start the sentence with a capital letter." },
+  MISSING_TERMINAL_PUNCTUATION: { label: "Missing end punctuation", hint: "Finish with a period, question mark, or exclamation mark." },
+  TOO_SHORT: { label: "Response too short", hint: "Give a complete sentence with all core ideas." },
+  HIGH_FILLER_DENSITY: { label: "Too many filler words", hint: "Pause briefly instead of using filler words." },
+  MODERATE_FILLER_DENSITY: { label: "Some filler words", hint: "Slow down and remove extra fillers." },
+};
+
+const PACE_COPY = {
+  ideal: { label: "On track", hint: "" },
+  fast: { label: "A bit fast", hint: "Slow down slightly so each phrase is clear." },
+  slow: { label: "A bit slow", hint: "Keep a steadier pace and connect short phrases." },
+};
+
+const humanizeFallback = (value) =>
+  String(value || "unknown")
+    .replace(/_/g, " ")
+    .toLowerCase();
+
+const getPaceCopy = (pacingBand) =>
+  PACE_COPY[String(pacingBand || "").toLowerCase()] || { label: humanizeFallback(pacingBand), hint: "" };
 
 const getSpeechRecognitionCtor = () =>
   (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition)) || null;
@@ -38,6 +62,22 @@ export default function CommunicationPracticePage() {
   const recognitionRef = useRef(null);
   const voiceStartAtRef = useRef(0);
   const speechSupported = useMemo(() => Boolean(getSpeechRecognitionCtor()), []);
+  const hasSpokenText = spokenText.trim().length > 0;
+  const hasResult = Boolean(result);
+  const canEvaluate = Boolean(currentPrompt) && hasSpokenText && !loading;
+  const canTryNextSentence = Boolean(currentPrompt) && hasResult && !loading;
+  const primaryAction = hasResult ? "next" : hasSpokenText ? "evaluate" : "capture";
+  const paceCopy = getPaceCopy(result?.communication_metrics?.pacing_band);
+  const remediationHints = useMemo(() => {
+    if (!result) return [];
+    const hints = [];
+    (result.quality_flags || []).forEach((flag) => {
+      const hint = FLAG_GUIDANCE[flag]?.hint;
+      if (hint && !hints.includes(hint)) hints.push(hint);
+    });
+    if (paceCopy.hint && !hints.includes(paceCopy.hint)) hints.push(paceCopy.hint);
+    return hints.slice(0, 3);
+  }, [result, paceCopy.hint]);
 
   const fetchNextPrompt = useCallback(async (packId, flags = [], completed = []) => {
     if (!packId) return;
@@ -56,7 +96,7 @@ export default function CommunicationPracticePage() {
       });
       if (!response.ok) {
         throw await buildApiErrorFromResponse(response, {
-          defaultMessage: "Could not fetch the next practice sentence.",
+          defaultMessage: "Could not load the next sentence. Tap “Try next sentence” to retry.",
         });
       }
       const data = await response.json();
@@ -65,7 +105,7 @@ export default function CommunicationPracticePage() {
       setDurationSeconds(0);
       setResult(null);
     } catch (err) {
-      setError(getApiErrorMessage(err, { defaultMessage: "Could not load practice prompt." }));
+      setError(getApiErrorMessage(err, { defaultMessage: "Could not load a practice sentence. Switch packs or tap “Try next sentence”." }));
     } finally {
       setLoading(false);
     }
@@ -81,7 +121,7 @@ export default function CommunicationPracticePage() {
         const response = await authFetch(apiUrl("/api/communication-practice/packs"), token, { method: "GET" });
         if (!response.ok) {
           throw await buildApiErrorFromResponse(response, {
-            defaultMessage: "Could not load communication practice packs.",
+            defaultMessage: "Could not load practice packs. Refresh and pick a pack to continue.",
           });
         }
         const data = await response.json();
@@ -93,7 +133,7 @@ export default function CommunicationPracticePage() {
         }
       } catch (err) {
         if (!mounted) return;
-        setError(getApiErrorMessage(err, { defaultMessage: "Could not load communication practice packs." }));
+        setError(getApiErrorMessage(err, { defaultMessage: "Could not load practice packs. Refresh and pick a pack to continue." }));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -114,6 +154,11 @@ export default function CommunicationPracticePage() {
     setCompletedPromptIds([]);
     fetchNextPrompt(selectedPackId, [], []);
   }, [selectedPackId, fetchNextPrompt]);
+
+  const handleSpokenTextChange = useCallback((value) => {
+    setSpokenText(value);
+    setResult(null);
+  }, []);
 
   const startVoiceCapture = () => {
     const SpeechRecognitionCtor = getSpeechRecognitionCtor();
@@ -158,7 +203,7 @@ export default function CommunicationPracticePage() {
     }
   };
 
-  const evaluateAttempt = async () => {
+  const evaluateAttempt = useCallback(async () => {
     if (!currentPrompt) return;
     if (!spokenText.trim()) {
       setError("Speak or type your response before evaluation.");
@@ -181,24 +226,59 @@ export default function CommunicationPracticePage() {
       });
       if (!response.ok) {
         throw await buildApiErrorFromResponse(response, {
-          defaultMessage: "Could not evaluate this speaking attempt.",
+          defaultMessage: "Could not check this response. Keep your text and press “Check response” again.",
         });
       }
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError(getApiErrorMessage(err, { defaultMessage: "Could not evaluate this attempt." }));
+      setError(getApiErrorMessage(err, { defaultMessage: "Could not check this response. Keep your text and press “Check response” again." }));
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPrompt, spokenText, getToken, selectedPackId, durationSeconds]);
 
-  const nextPrompt = async () => {
+  const nextPrompt = useCallback(async () => {
     if (!currentPrompt) return;
+    if (!result) {
+      setError("Check your response before moving to the next sentence.");
+      return;
+    }
     const nextCompleted = Array.from(new Set([...completedPromptIds, currentPrompt.id]));
     setCompletedPromptIds(nextCompleted);
     await fetchNextPrompt(selectedPackId, result?.quality_flags || [], nextCompleted);
-  };
+  }, [currentPrompt, result, completedPromptIds, fetchNextPrompt, selectedPackId]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+
+      const key = String(event.key || "").toLowerCase();
+      const target = event.target;
+      const isEditableTarget =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key === "enter") {
+        if (canEvaluate) {
+          event.preventDefault();
+          evaluateAttempt();
+        }
+        return;
+      }
+
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === "n") {
+        if (isEditableTarget) return;
+        if (canTryNextSentence) {
+          event.preventDefault();
+          nextPrompt();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canEvaluate, canTryNextSentence, evaluateAttempt, nextPrompt]);
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
@@ -208,6 +288,8 @@ export default function CommunicationPracticePage() {
           Voice-first guided speaking drills with instant grammar and fluency coaching.
         </Typography>
       </Stack>
+
+      <PracticeHistoryPanel refreshKey={result?.created_at || result?.score || 0} />
 
       <Card sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
         <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
@@ -233,36 +315,50 @@ export default function CommunicationPracticePage() {
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Target sentence</Typography>
               <Typography sx={{ p: 2, borderRadius: 2, bgcolor: "grey.100" }}>
-                {currentPrompt?.sentence || "No prompt available in this pack."}
+                {currentPrompt?.sentence || "No sentence is available in this pack yet. Pick another pack, then tap “Try next sentence”."}
               </Typography>
             </Box>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <Button
-                variant="contained"
+                variant={primaryAction === "capture" ? "contained" : "outlined"}
                 startIcon={listening ? <Stop /> : <Mic />}
                 onClick={listening ? stopVoiceCapture : startVoiceCapture}
                 disabled={loading || !speechSupported}
               >
-                {listening ? "Stop capture" : "Start voice capture"}
+                {listening ? "Stop recording" : "Record response"}
               </Button>
               <Button
-                variant="outlined"
+                variant={primaryAction === "evaluate" ? "contained" : "outlined"}
                 startIcon={<PlayArrow />}
                 onClick={evaluateAttempt}
-                disabled={loading || !currentPrompt}
+                disabled={!canEvaluate}
               >
-                Evaluate attempt
+                Check response
               </Button>
               <Button
-                variant="outlined"
+                variant={primaryAction === "next" ? "contained" : "outlined"}
                 startIcon={<Refresh />}
                 onClick={nextPrompt}
-                disabled={loading || !currentPrompt}
+                disabled={!canTryNextSentence}
               >
-                Next sentence
+                Try next sentence
               </Button>
             </Stack>
+            <Typography variant="caption" color="text.secondary">
+              Flow: 1) Record/type response → 2) Check response → 3) Try next sentence.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Next step: {primaryAction === "capture" ? "Record your response." : primaryAction === "evaluate" ? "Check your response." : "Move to the next sentence."}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Shortcuts: Ctrl/Cmd+Enter checks response. Alt+N moves to next sentence (outside text inputs).
+            </Typography>
+            {!result && (
+              <Typography variant="caption" color="text.secondary">
+                First time here? Record (or type) one sentence, tap “Check response”, then use “Try next sentence” to keep practicing.
+              </Typography>
+            )}
 
             {!speechSupported && (
               <Alert severity="info">Voice capture is not supported in this browser. You can still type your response and evaluate it.</Alert>
@@ -273,7 +369,7 @@ export default function CommunicationPracticePage() {
               multiline
               minRows={3}
               value={spokenText}
-              onChange={(event) => setSpokenText(event.target.value)}
+              onChange={(event) => handleSpokenTextChange(event.target.value)}
               disabled={loading}
             />
 
@@ -283,11 +379,14 @@ export default function CommunicationPracticePage() {
                   <Typography variant="h6">Feedback</Typography>
                   <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
                     <Chip color="primary" label={`Score ${result.score}/100`} />
-                    <Chip label={`Coverage ${(Number(result.coverage_ratio || 0) * 100).toFixed(0)}%`} />
-                    <Chip label={`Pace ${result.communication_metrics?.pacing_band || "n/a"}`} />
+                    <Chip label={`Matched target ${(Number(result.coverage_ratio || 0) * 100).toFixed(0)}%`} />
+                    <Chip label={`Speaking pace ${paceCopy.label}`} />
                   </Stack>
-                  <Typography variant="body2"><strong>Improved sentence:</strong> {result.improved_sentence}</Typography>
-                  <Typography variant="body2"><strong>Coaching:</strong></Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Score = overall speaking quality. Matched target = how much key meaning you included. Speaking pace = how easy your speed was to follow.
+                  </Typography>
+                  <Typography variant="body2"><strong>Better wording:</strong> {result.improved_sentence}</Typography>
+                  <Typography variant="body2"><strong>Coach notes:</strong></Typography>
                   <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
                     {(result.coaching || []).map((item) => (
                       <li key={item}>
@@ -295,10 +394,22 @@ export default function CommunicationPracticePage() {
                       </li>
                     ))}
                   </ul>
+                  {remediationHints.length > 0 && (
+                    <>
+                      <Typography variant="body2"><strong>Try this next:</strong></Typography>
+                      <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+                        {remediationHints.map((hint) => (
+                          <li key={hint}>
+                            <Typography variant="body2">{hint}</Typography>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   {(result.quality_flags || []).length > 0 && (
                     <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
                       {(result.quality_flags || []).map((flag) => (
-                        <Chip key={flag} size="small" label={flag} variant="outlined" />
+                        <Chip key={flag} size="small" label={FLAG_GUIDANCE[flag]?.label || humanizeFallback(flag)} variant="outlined" />
                       ))}
                     </Stack>
                   )}
