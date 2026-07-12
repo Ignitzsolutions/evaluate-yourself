@@ -21,11 +21,12 @@ export default function LoginPage() {
       await login(email, password);
       navigate("/onboarding");
     } catch (err) {
-      if (err?.code === "PASSWORD_NOT_SET") {
-        navigate("/set-password", { state: { email } });
+      const detail = err?.detail || err?.error || err;
+      if (detail?.code === "PASSWORD_NOT_SET") {
+        navigate("/set-password", { state: { email, setupToken: detail?.setup_token } });
         return;
       }
-      setError(err?.message || err?.detail || "Login failed.");
+      setError(detail?.message || err?.message || "Login failed.");
     } finally {
       setLoading(false);
     }

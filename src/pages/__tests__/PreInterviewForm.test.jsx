@@ -73,7 +73,7 @@ describe("PreInterviewForm", () => {
     );
 
     expect(await screen.findByText("Previous interview session ended unexpectedly.")).toBeInTheDocument();
-    expect(screen.getByText("Sonia Demo Setup")).toBeInTheDocument();
+    expect(screen.getByText("Configure interview")).toBeInTheDocument();
     expect(screen.getByText(/Free access is active for the hosted beta demo/i)).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("Target Role")).toHaveValue("Backend Engineer");

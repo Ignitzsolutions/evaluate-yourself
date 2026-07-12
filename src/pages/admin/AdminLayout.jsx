@@ -87,7 +87,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100dvh", display: "flex", bgcolor: "background.default" }}>
       <Box
         component="aside"
         sx={{
@@ -98,7 +98,7 @@ export default function AdminLayout() {
           p: 2,
           position: "sticky",
           top: 0,
-          height: "100vh",
+          height: "100dvh",
         }}
       >
         <Typography

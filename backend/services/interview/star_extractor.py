@@ -17,22 +17,64 @@ from services.interview.llm_cache import get as cache_get, put as cache_put
 # ─── Keyword fallback (original heuristics) ───────────────────────────────────
 
 _STAR_SITUATION = {
-    "situation", "context", "background", "project", "company", "role",
-    "team", "working", "was working", "at the time",
+    "situation",
+    "context",
+    "background",
+    "project",
+    "company",
+    "role",
+    "team",
+    "working",
+    "was working",
+    "at the time",
 }
 _STAR_TASK = {
-    "task", "goal", "objective", "needed", "responsible", "assigned",
-    "challenge", "problem", "issue",
+    "task",
+    "goal",
+    "objective",
+    "needed",
+    "responsible",
+    "assigned",
+    "challenge",
+    "problem",
+    "issue",
 }
 _STAR_ACTION = {
-    "i did", "i took", "i built", "i led", "i implemented", "i designed",
-    "i created", "i worked", "i wrote", "i fixed", "i decided", "i started",
-    "i reached out", "i proposed", "i set up", "i developed", "i coordinated",
+    "i did",
+    "i took",
+    "i built",
+    "i led",
+    "i implemented",
+    "i designed",
+    "i created",
+    "i worked",
+    "i wrote",
+    "i fixed",
+    "i decided",
+    "i started",
+    "i reached out",
+    "i proposed",
+    "i set up",
+    "i developed",
+    "i coordinated",
 }
 _STAR_RESULT = {
-    "result", "outcome", "impact", "improved", "reduced", "increased",
-    "achieved", "delivered", "shipped", "saved", "success", "learned",
-    "led to", "this resulted", "as a result", "ultimately",
+    "result",
+    "outcome",
+    "impact",
+    "improved",
+    "reduced",
+    "increased",
+    "achieved",
+    "delivered",
+    "shipped",
+    "saved",
+    "success",
+    "learned",
+    "led to",
+    "this resulted",
+    "as a result",
+    "ultimately",
 }
 
 _STAR_SETS = {
@@ -54,26 +96,14 @@ def _keyword_star(answer: str) -> Dict[str, Any]:
 
 # ─── LLM client helper ────────────────────────────────────────────────────────
 
+
 def _get_llm_client():
     try:
-        from openai import AzureOpenAI, OpenAI
+        from openai import OpenAI
     except ImportError:
         return None, None
 
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-
-    if azure_key and azure_endpoint and azure_key != "your-azure-openai-api-key-here":
-        deployment = (os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "") or "").strip()
-        if not deployment:
-            return None, None
-        client = AzureOpenAI(
-            api_key=azure_key,
-            azure_endpoint=azure_endpoint.rstrip("/"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-        )
-        return client, deployment
 
     if openai_key and openai_key != "your-openai-api-key-here":
         client = OpenAI(api_key=openai_key)
@@ -146,6 +176,7 @@ def _clean_snippet(snippet: Optional[str], answer: str) -> Optional[str]:
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
+
 def extract_star(answer: str) -> Dict[str, Any]:
     """Extract STAR components from a candidate answer.
 
@@ -157,10 +188,10 @@ def extract_star(answer: str) -> Dict[str, Any]:
     if not answer or not answer.strip():
         return {
             "situation": {"detected": False, "snippet": None},
-            "task":      {"detected": False, "snippet": None},
-            "action":    {"detected": False, "snippet": None},
-            "result":    {"detected": False, "snippet": None},
-            "source":    "keyword_fallback",
+            "task": {"detected": False, "snippet": None},
+            "action": {"detected": False, "snippet": None},
+            "result": {"detected": False, "snippet": None},
+            "source": "keyword_fallback",
         }
 
     answer_stripped = answer.strip()
@@ -193,10 +224,7 @@ def extract_star(answer: str) -> Dict[str, Any]:
 def star_score_0_100(star_result: Dict[str, Any]) -> int:
     """Convert STAR extraction result to a 0-100 structure score."""
     components = ("situation", "task", "action", "result")
-    detected = sum(
-        1 for c in components
-        if star_result.get(c, {}).get("detected", False)
-    )
+    detected = sum(1 for c in components if star_result.get(c, {}).get("detected", False))
     return int(round(detected / 4 * 100))
 
 

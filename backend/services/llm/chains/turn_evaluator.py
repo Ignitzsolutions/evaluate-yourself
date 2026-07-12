@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover
     Field = lambda *args, **kwargs: None  # type: ignore
 
 try:
-    from langchain_openai import ChatOpenAI, AzureChatOpenAI
+    from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage
 
     LANGCHAIN_AVAILABLE = True
@@ -46,22 +46,9 @@ def _get_langchain_client():
     if not LANGCHAIN_AVAILABLE:
         return None
 
-    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
 
     try:
-        if azure_key and azure_endpoint and azure_key != "your-azure-openai-api-key-here":
-            deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-            return AzureChatOpenAI(
-                api_key=azure_key,
-                azure_endpoint=azure_endpoint.rstrip("/"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-                deployment_name=deployment,
-                temperature=0,
-                max_tokens=500,
-            )
-
         if openai_key and openai_key != "your-openai-api-key-here":
             return ChatOpenAI(
                 api_key=openai_key,
@@ -198,9 +185,15 @@ def _evaluate_with_heuristics(user_turn: str, interview_type: str) -> Dict[str, 
         "depth": max(1, min(5, int(legacy.get("depth_score", 3)))),
         "relevance": max(1, min(5, int(legacy.get("relevance_score", 3)))),
         "confidence": str(legacy.get("confidence_signal", "med")).lower(),
-        "star_completeness": legacy.get("star_completeness") if isinstance(legacy.get("star_completeness"), dict) else {},
+        "star_completeness": (
+            legacy.get("star_completeness")
+            if isinstance(legacy.get("star_completeness"), dict)
+            else {}
+        ),
         "technical_correctness": legacy.get("technical_correctness"),
-        "rationale": "; ".join(legacy.get("notes", [])[:2]) if isinstance(legacy.get("notes"), list) else "",
+        "rationale": (
+            "; ".join(legacy.get("notes", [])[:2]) if isinstance(legacy.get("notes"), list) else ""
+        ),
     }
 
 

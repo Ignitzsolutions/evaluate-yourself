@@ -1,6 +1,6 @@
-# Realtime API Troubleshooting
+# Realtime Troubleshooting
 
-If the Real Time (WebRTC) interview fails when starting, use this checklist.
+If the interview fails at startup, use this checklist.
 
 ## 1. Run the token test
 
@@ -10,41 +10,50 @@ From the project root:
 python backend/test_realtime_token.py
 ```
 
-This prints the raw Azure response. Typical outcomes:
+This validates the current provider token/bootstrap path.
 
-- **200** – Token created; Real Time API is reachable. If the app still fails, the issue is likely SDP/WebRTC or frontend.
-- **500 Internal Server Error** – Azure’s Realtime backend is failing. See “500 from Azure” below.
-- **400 “API version not supported”** – The api-version sent for this resource is not supported.
-- **401** – Wrong or invalid `AZURE_OPENAI_API_KEY`.
-- **404** – Wrong base URL or Realtime not exposed on this resource.
+Typical outcomes:
 
-## 2. When you get 500 from Azure
+- `200`: provider bootstrap is reachable
+- `401` or `403`: invalid key or missing model access
+- `404`: wrong provider base URL or unsupported realtime endpoint
+- `429`: provider rate limit
+- `5xx`: provider-side failure or malformed request contract
 
-Azure returns a generic 500 for the `client_secrets` call in these situations:
+## 2. Verify environment
 
-1. **Realtime not enabled for this resource**  
-   In Azure Portal (or AI Foundry), confirm that:
-   - The resource supports OpenAI and has Realtime/audio models.
-   - You are in a supported region (e.g. **Sweden Central**, **East US 2**).
+For `AI_PROVIDER=openai_native`:
 
-2. **Wrong deployment name**  
-   `AZURE_OPENAI_DEPLOYMENT` in `backend/.env` must match the **exact** deployment name in the portal (e.g. `gpt-realtime`).  
-   Check: **Azure Portal → your resource → Model deployments** and use the deployment name shown there.
+```env
+OPENAI_API_KEY=...
+OPENAI_API_BASE=https://api.openai.com/v1
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview-2024-12-17
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+REALTIME_VOICE=alloy
+```
 
-3. **Resource type**  
-   Docs and samples use `{resource}.openai.azure.com`. Your `.env` may use `*.cognitiveservices.azure.com`; the backend converts that to `*.openai.azure.com`.  
-   If you still get 500, try creating a dedicated **Azure OpenAI** resource (not only multi-service Cognitive Services) in Sweden Central and deploying a Realtime model there, then point `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_DEPLOYMENT` to that resource and deployment.
+For `AI_PROVIDER=sarvam_hybrid`, the current backend intentionally returns a not-implemented path until the gateway is built.
 
-## 3. Environment variables
+## 3. Check the interview bootstrap route
 
-In `backend/.env` you should have at least:
+Verify:
 
-- `AZURE_OPENAI_ENDPOINT` – e.g. `https://your-resource-swedencentral.cognitiveservices.azure.com` or `https://your-resource.openai.azure.com`
-- `AZURE_OPENAI_API_KEY` – API key for that resource
-- `AZURE_OPENAI_DEPLOYMENT` – Deployment name (e.g. `gpt-realtime`)
-- `AZURE_OPENAI_API_VERSION` – e.g. `2025-08-28` (optional; backend has a default)
+- `POST /api/realtime/webrtc` succeeds
+- the response includes the expected session bootstrap fields
+- the frontend sends one canonical `session.update`
 
-## 4. Useful links
+## 4. Check planner continuity
 
-- [Use the GPT Realtime API via WebRTC (Azure)](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/realtime-audio-webrtc)
-- Realtime models in Sweden Central: e.g. `gpt-realtime` (2025-08-28), `gpt-4o-realtime-preview` (2024-12-17)
+If Sonia opens but does not continue:
+
+- inspect `/api/interview/{session_id}/next-turn`
+- look for `recoverable_error` or degraded planner metadata
+- verify the client shows recovery state instead of stalling silently
+
+## 5. Check trusted evidence capture
+
+If transcripts or scoring look inconsistent:
+
+- inspect `/api/interview/{session_id}/capture`
+- verify trusted server transcript artifacts exist
+- confirm fallback browser transcript is not being used as authoritative scoring evidence

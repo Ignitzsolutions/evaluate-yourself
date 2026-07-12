@@ -13,6 +13,7 @@ node_modules
 
 # Testing
 /coverage
+.playwright-cli/
 
 # Production build
 /build

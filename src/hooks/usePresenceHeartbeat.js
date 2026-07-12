@@ -7,9 +7,8 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 
-const API_BASE = getApiBaseUrl();
 const INTERVAL_MS = 30_000;
 
 export function usePresenceHeartbeat({ enabled = true } = {}) {
@@ -25,7 +24,7 @@ export function usePresenceHeartbeat({ enabled = true } = {}) {
         if (!token) return;
         const route = typeof window !== "undefined" ? window.location.pathname : "";
         lastRouteRef.current = route;
-        await authFetch(`${API_BASE}/api/me/heartbeat`, token, {
+        await authFetch(apiUrl("/api/me/heartbeat"), token, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ route }),

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { authFetch, buildApiErrorFromResponse, getApiErrorMessage, isBackendUnavailableError } from '../utils/apiClient';
-import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { apiUrl, wsUrl } from '../utils/apiBaseUrl';
 import { isDevAuthBypassEnabled } from '../utils/devAuthBypass';
 import { classifyConversationItem, extractTranscriptText } from '../utils/realtimeTranscript';
 import { shouldAcceptBrowserSpeechResult } from '../utils/realtimeSpeechGuards';
@@ -41,17 +41,22 @@ import {
   CallEnd,
 } from '@mui/icons-material';
 import {
+  Card,
+  CardContent,
+  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   Button,
+  Chip,
+  Divider,
   Typography,
   Box,
+  Stack,
 } from '@mui/material';
 import '../ui.css';
 
-const API_BASE_URL = getApiBaseUrl();
 const REALTIME_VOICE = (process.env.REACT_APP_REALTIME_VOICE || 'alloy').trim() || 'alloy';
 const DEFAULT_SONIA_AVATAR_SRC = '/assets/presentation/sonia-avatar.png';
 const resolveSoniaAvatarSrc = () => {
@@ -104,6 +109,49 @@ const NO_GAZE_METRICS = {
   calibrationValid: false,
   algorithmVersion: GAZE_ALGORITHM_VERSION,
   source: GAZE_ALGORITHM_VERSION,
+};
+
+const shellSx = {
+  minHeight: '100dvh',
+  position: 'relative',
+  overflowX: 'hidden',
+  background: 'radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 28%), radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 30%), linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%)',
+  color: '#0f172a',
+  py: { xs: 2, md: 3 },
+  px: { xs: 2, md: 3 },
+};
+
+const heroSx = {
+  border: '1px solid rgba(15, 23, 42, 0.08)',
+  borderRadius: 4,
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.94) 45%, rgba(239,246,255,0.92) 100%)',
+  boxShadow: '0 20px 60px rgba(15, 23, 42, 0.08)',
+  backdropFilter: 'blur(16px)',
+  p: { xs: 2, md: 2.5 },
+};
+
+const stageCardSx = {
+  borderRadius: 4,
+  border: '1px solid rgba(15, 23, 42, 0.08)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.96) 100%)',
+  boxShadow: '0 18px 50px rgba(15, 23, 42, 0.10)',
+  overflow: 'hidden',
+  position: 'relative',
+};
+
+const railCardSx = {
+  borderRadius: 4,
+  border: '1px solid rgba(15, 23, 42, 0.08)',
+  background: 'rgba(255,255,255,0.92)',
+  boxShadow: '0 12px 30px rgba(15, 23, 42, 0.06)',
+  overflow: 'hidden',
+};
+
+const liveChipBaseSx = {
+  borderRadius: 999,
+  px: 0.5,
+  fontWeight: 700,
+  letterSpacing: '0.02em',
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -888,19 +936,7 @@ export default function InterviewSessionRoom() {
   }, [micMuted]);
 
   const buildGazeWsUrl = useCallback((token) => {
-    const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000';
-    const base = API_BASE_URL || fallbackOrigin;
-    let url;
-    try {
-      url = new URL(`/ws/gaze/${sessionId}`, base);
-    } catch {
-      url = new URL(`/ws/gaze/${sessionId}`, fallbackOrigin);
-    }
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (token) {
-      url.searchParams.set('token', token);
-    }
-    return url.toString();
+    return wsUrl(`/ws/gaze/${sessionId}`, { token });
   }, [sessionId]);
 
   const settleGazeFinalize = useCallback((payload) => {
@@ -1524,7 +1560,6 @@ export default function InterviewSessionRoom() {
 
       const decision = await requestNextInterviewTurn({
         authFetch,
-        baseUrl: API_BASE_URL,
         token,
         sessionId,
         payload: {
@@ -2013,10 +2048,10 @@ export default function InterviewSessionRoom() {
             }
             tryStartOpeningTurn();
           } else if (msgType === 'error') {
-            const errMsg = msg.error?.message || 'Azure API error';
+            const errMsg = msg.error?.message || 'Realtime provider error';
             if (errMsg.includes("response.modalities")) {
-              console.warn('Ignored Azure warning:', errMsg);
-              incrementDroppedEvent('azure_unknown_response_modalities');
+              console.warn('Ignored realtime provider warning:', errMsg);
+              incrementDroppedEvent('provider_unknown_response_modalities');
             } else {
               setError(errMsg);
               addTranscript('system', `Error: ${errMsg}`);
@@ -2176,7 +2211,7 @@ export default function InterviewSessionRoom() {
       if (!token) {
         throw new Error('Authentication token unavailable for interview session');
       }
-      const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
+      const resp = await authFetch(apiUrl('/api/realtime/webrtc'), token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2436,7 +2471,7 @@ export default function InterviewSessionRoom() {
       // Send canonical transcript payload
       const token = await getToken();
 
-      const captureResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/capture`, token, {
+      const captureResp = await authFetch(apiUrl(`/api/interview/${sessionId}/capture`), token, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -2457,7 +2492,7 @@ export default function InterviewSessionRoom() {
         throw captureError;
       }
 
-      const saveResp = await authFetch(`${API_BASE_URL}/api/interview/${sessionId}/transcript`, token, {
+      const saveResp = await authFetch(apiUrl(`/api/interview/${sessionId}/transcript`), token, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
@@ -2857,6 +2892,34 @@ export default function InterviewSessionRoom() {
     return 'Ready';
   }, [aiSpeaking, micActive, status]);
 
+  const liveStatePills = [
+    {
+      label: 'Listening',
+      active: micActive && !aiSpeaking && status !== 'connecting' && status !== 'idle',
+      tone: 'ok',
+    },
+    {
+      label: 'Sonia Speaking',
+      active: aiSpeaking || fillerIsPlaying,
+      tone: 'live',
+    },
+    {
+      label: 'Thinking',
+      active: isThinking || status === 'connecting' || status === 'idle',
+      tone: 'neutral',
+    },
+    {
+      label: 'Recovery Mode',
+      active: Boolean(continuityWarning?.message || captureWarning || status === 'error' || status === 'disconnected' || status === 'failed'),
+      tone: 'warn',
+    },
+    {
+      label: 'Resuming',
+      active: hasJoined && status === 'connecting',
+      tone: 'neutral',
+    },
+  ];
+
   const runtimeBadges = useMemo(() => {
     const badges = [];
     if (hasJoined && status === 'connecting') {
@@ -2902,8 +2965,22 @@ export default function InterviewSessionRoom() {
 
   if (!effectiveUser) {
     return (
-      <Box sx={{ p: 4 }}>
-        <Typography variant="h6">Please sign in to access the interview.</Typography>
+      <Box sx={shellSx}>
+        <Box sx={{ maxWidth: 1240, mx: 'auto', pt: { xs: 8, md: 12 }, px: { xs: 2, md: 4 } }}>
+          <Card sx={heroSx}>
+            <CardContent sx={{ p: { xs: 2.5, md: 3.5 } }}>
+              <Typography variant="overline" sx={{ color: '#2563eb', fontWeight: 800, letterSpacing: '0.16em' }}>
+                Interview Studio
+              </Typography>
+              <Typography variant="h5" sx={{ mt: 1, fontWeight: 800, color: '#0f172a' }}>
+                Please sign in to enter the stage.
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Authentication is required before Sonia can open the room and replay data can be loaded.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
       </Box>
     );
   }
@@ -2912,217 +2989,511 @@ export default function InterviewSessionRoom() {
   const showCaptureRecoveryAction = isCaptureEndError(endError);
 
   return (
-    <div className="session-shell meet-shell">
-      {/* Top Bar */}
-      <div className="session-topbar meet-topbar">
-        <div className="meet-topbar-left">
-          <Typography style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a' }}>
-            {FREE_ACCESS_MODE ? 'Sonia Demo Session' : 'Interview Session'}
-          </Typography>
-          <span className="meet-subtle">
-            {FREE_ACCESS_MODE ? 'Open beta demo' : interviewType} • {effectiveDurationMinutes}m target ({planTier})
-          </span>
-        </div>
-        <div className="meet-topbar-right" aria-hidden="true" />
-      </div>
+    <Box className="session-shell meet-shell" sx={shellSx}>
+      <Box sx={{ maxWidth: 1540, mx: 'auto', display: 'grid', gap: 2.5 }}>
+        <Card sx={heroSx}>
+          <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+              <Stack spacing={1.25} sx={{ minWidth: 0 }}>
+                <Chip
+                  label={FREE_ACCESS_MODE ? 'Sonia Demo Session' : 'Interview Session'}
+                  size="small"
+                  sx={{ ...liveChipBaseSx, alignSelf: 'flex-start', background: 'rgba(37, 99, 235, 0.10)', color: '#1d4ed8' }}
+                />
+                <Typography variant="h4" sx={{ fontWeight: 850, letterSpacing: '-0.03em', color: '#0f172a' }}>
+                  {FREE_ACCESS_MODE ? 'Open Interview Studio' : 'Interview Stage'}
+                </Typography>
+                <Typography variant="body1" sx={{ color: '#475569', maxWidth: 820 }}>
+                  {stageAssistLabel}
+                </Typography>
+              </Stack>
+              <Stack spacing={1} sx={{ alignItems: { xs: 'flex-start', md: 'flex-end' } }}>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
+                  <Chip label={interviewType} variant="outlined" sx={{ borderColor: 'rgba(15, 23, 42, 0.12)', color: '#0f172a' }} />
+                  <Chip label={`${effectiveDurationMinutes}m target`} variant="outlined" sx={{ borderColor: 'rgba(15, 23, 42, 0.12)', color: '#0f172a' }} />
+                  <Chip label={planTier} variant="outlined" sx={{ borderColor: 'rgba(15, 23, 42, 0.12)', color: '#0f172a' }} />
+                </Box>
+                <Typography variant="caption" sx={{ color: '#64748b' }}>
+                  {gazeStatus.label} · {stageStatusLabel}
+                </Typography>
+              </Stack>
+            </Box>
+            <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }} aria-label="Interview status">
+              {runtimeBadges.map((badge) => (
+                <Chip
+                  key={badge.label}
+                  label={badge.label}
+                  size="small"
+                  variant={badge.tone === 'live' || badge.tone === 'ok' ? 'filled' : 'outlined'}
+                  sx={{
+                    ...liveChipBaseSx,
+                    borderColor: 'rgba(15, 23, 42, 0.10)',
+                    background:
+                      badge.tone === 'live'
+                        ? 'rgba(14, 165, 233, 0.12)'
+                        : badge.tone === 'ok'
+                          ? 'rgba(34, 197, 94, 0.10)'
+                          : badge.tone === 'warn'
+                            ? 'rgba(245, 158, 11, 0.10)'
+                            : 'rgba(15, 23, 42, 0.04)',
+                    color: '#0f172a',
+                  }}
+                />
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
 
-      {(status === 'error' || status === 'disconnected' || status === 'failed') && (
-        <div className="meet-conn-banner">
-          {networkOnline
-            ? 'Connection issue detected. Click Reconnect to continue.'
-            : 'Internet disconnected. Interview is paused until your network returns.'}
-        </div>
-      )}
-
-      {captureWarning === 'fallback' && (
-        <div className="meet-capture-banner meet-capture-banner--warn">
-          ⚠️ Transcription issue detected — browser fallback is active. Check your microphone and browser permissions.
-        </div>
-      )}
-      {captureWarning === 'no_audio' && (
-        <div className="meet-capture-banner meet-capture-banner--error">
-          🎙️ No speech detected yet. Please check your microphone is unmuted and permissions are granted.
-        </div>
-      )}
-      {captureWarning === 'audio_blocked' && (
-        <div className="meet-capture-banner meet-capture-banner--warn">
-          🔊 Sonia audio is blocked by the browser. Use the stage button to enable playback.
-        </div>
-      )}
-      {continuityWarning?.message && (
-        <div className={`meet-capture-banner ${continuityWarning.tone === 'error' ? 'meet-capture-banner--error' : 'meet-capture-banner--warn'}`}>
-          {continuityWarning.message}
-        </div>
-      )}
-
-      <div className="meet-runtime-badges" aria-label="Interview status">
-        {runtimeBadges.map((badge) => (
-          <span key={badge.label} className={`meet-runtime-badge ${badge.tone}`}>
-            {badge.label}
-          </span>
-        ))}
-      </div>
-
-      {/* Main Stage */}
-      <div className="meet-stage-wrap">
-        <div className="meet-stage">
-        <div className={`meet-gaze-badge ${gazeStatus.tone}`}>
-          {gazeStatus.label}
-        </div>
-          <div className="meet-stage-meta">
-            <span>{interviewType}</span>
-            <span>•</span>
-            <span>{effectiveDurationMinutes}m target</span>
-            <span>•</span>
-            <span>{stageStatusLabel}</span>
-          </div>
-          <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
-            {soniaAvatarSrc && !avatarLoadError && (
-              <img
-                src={soniaAvatarSrc}
-                alt="Sonia interviewer avatar"
-                className={`meet-sonia-avatar-image ${aiSpeaking ? 'speaking' : 'idle'}`}
-                onError={() => setAvatarLoadError(true)}
-                onLoad={() => setAvatarLoadError(false)}
-              />
-            )}
-            {avatarLoadError && (
-              <div className="meet-sonia-orb" aria-hidden="true">
-                <div className="meet-sonia-ring outer" />
-                <div className="meet-sonia-ring" />
-                <div className="meet-sonia-core" />
-                <div className="meet-sonia-wave">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="meet-nameplate">Sonia</div>
-          <div className="meet-agent-status">{stageAssistLabel}</div>
-          {captureWarning === 'audio_blocked' && (
-            <div className="meet-stage-audio-cta">
-              <div className="meet-stage-audio-copy">Sonia is connected. Browser autoplay is blocking her voice.</div>
-              <Button variant="contained" onClick={handleResumeSoniaAudio}>
-                Enable Sonia Audio
-              </Button>
-            </div>
-          )}
-          <div className={`meet-stage-status ${micActive ? 'listening' : aiSpeaking ? 'speaking' : ''}`}>
-            {stageStatusLabel}
-          </div>
-          {hasJoined && (
-            <div className={`meet-self-view ${selfViewHidden ? 'collapsed' : ''}`}>
-              <div className="meet-self-header">
-                <div className="meet-self-meta">
-                  <span>You</span>
-                  <span className={`meet-self-chip ${(micMuted || cameraOff) ? 'warn' : micActive ? 'live' : 'ok'}`}>
-                    {micMuted ? 'Mic Off' : 'Mic On'} · {cameraOff ? 'Cam Off' : 'Cam On'} · {micActive ? 'Listening' : aiSpeaking ? 'Sonia Live' : 'Ready'}
-                  </span>
-                </div>
-                <div className="meet-self-actions">
-                  <button
-                    type="button"
-                    className={`meet-self-action-btn ${micMuted ? 'off' : 'on'}`}
-                    onClick={() => setMicMuted(prev => !prev)}
-                    aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'}
-                    title={micMuted ? 'Unmute microphone' : 'Mute microphone'}
-                  >
-                    {micMuted ? <MicOff fontSize="inherit" /> : <Mic fontSize="inherit" />}
-                  </button>
-                  <button
-                    type="button"
-                    className={`meet-self-action-btn ${cameraOff ? 'off' : 'on'}`}
-                    onClick={() => setCameraOff(prev => !prev)}
-                    aria-label={cameraOff ? 'Turn on camera' : 'Turn off camera'}
-                    title={cameraOff ? 'Turn on camera' : 'Turn off camera'}
-                  >
-                    {cameraOff ? <VideocamOff fontSize="inherit" /> : <Videocam fontSize="inherit" />}
-                  </button>
-                  <button
-                    type="button"
-                    className="meet-self-toggle"
-                    onClick={() => setSelfViewHidden((prev) => !prev)}
-                    aria-label={selfViewHidden ? 'Expand self view' : 'Collapse self view'}
-                  >
-                    {selfViewHidden ? 'Show' : 'Hide'}
-                  </button>
-                </div>
-              </div>
-              <video
-                ref={localVideoRef}
-                className={`meet-self-video ${cameraOff ? 'off' : ''} ${selfViewHidden ? 'preview-hidden' : ''}`}
-                autoPlay
-                muted
-                playsInline
-              />
-              {!selfViewHidden && cameraOff && (
-                <div className="meet-self-video-overlay">Camera Off</div>
-              )}
-            </div>
-          )}
-          <canvas ref={gazeCanvasRef} className="meet-hidden-canvas" />
-        </div>
-      </div>
-
-      {/* Bottom Controls */}
-      <div className="meet-controls">
-        {!hasJoined ? (
-          <div className="meet-controls-row">
-            <Button
-              variant="contained"
-              onClick={() => {
-                setHasJoined(true);
-                handleConnect();
-              }}
-                disabled={!configValidated || hasJoined || !networkOnline || status === 'connecting' || status === 'connected' || status === 'ready'}
-              sx={{ minWidth: { xs: '170px', md: '200px' }, borderRadius: '999px', backgroundColor: '#2563eb', '&:hover': { backgroundColor: '#1d4ed8' }, fontSize: { xs: '14px', md: '15px' }, fontWeight: 600, padding: { xs: '10px 22px', md: '10px 30px' }, textTransform: 'none' }}
-            >
-              Join Interview
-            </Button>
-          </div>
-        ) : (
-          <div className="meet-controls-row">
-            {(status === 'error' || status === 'disconnected' || status === 'failed') && (
-              <Button
-                variant="outlined"
-                onClick={handleConnect}
-                disabled={!networkOnline || status === 'connecting' || endInProgressRef.current}
-                sx={{ borderRadius: '999px', textTransform: 'none', minWidth: '120px' }}
-              >
-                Reconnect
-              </Button>
-            )}
-            <button
-              type="button"
-              className="meet-control-btn end"
-              onClick={() => handleDisconnect()}
-              disabled={endInProgressRef.current}
-              aria-label="End call"
-              title="End call"
-            >
-              <CallEnd />
-            </button>
-          </div>
+        {(status === 'error' || status === 'disconnected' || status === 'failed') && (
+          <Alert
+            severity="warning"
+            sx={{
+              borderRadius: 3,
+              border: '1px solid rgba(245, 158, 11, 0.20)',
+              background: 'rgba(255, 251, 235, 0.96)',
+            }}
+          >
+            {networkOnline
+              ? 'Connection issue detected. Reconnect to continue the interview.'
+              : 'Internet disconnected. The interview is paused until your network returns.'}
+          </Alert>
         )}
-      </div>
 
-      {/* Error Banner */}
-      {error && (
-        <div className="meet-error">
-          {error}
-        </div>
-      )}
+        {captureWarning === 'fallback' && (
+          <Alert severity="warning" sx={{ borderRadius: 3 }}>
+            Transcription issue detected. Browser fallback is active while microphone capture recovers.
+          </Alert>
+        )}
+        {captureWarning === 'no_audio' && (
+          <Alert severity="error" sx={{ borderRadius: 3 }}>
+            No speech detected yet. Check microphone permissions and mute state.
+          </Alert>
+        )}
+        {captureWarning === 'audio_blocked' && (
+          <Alert severity="warning" sx={{ borderRadius: 3 }}>
+            Sonia audio is blocked by the browser. Use the playback action to continue.
+          </Alert>
+        )}
+        {continuityWarning?.message && (
+          <Alert severity={continuityWarning.tone === 'error' ? 'error' : 'warning'} sx={{ borderRadius: 3 }}>
+            {continuityWarning.message}
+          </Alert>
+        )}
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(340px, 0.85fr)' },
+            gap: 2.5,
+            alignItems: 'start',
+          }}
+        >
+          <Card sx={stageCardSx}>
+            <CardContent sx={{ p: { xs: 2.25, md: 3 } }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', alignItems: 'flex-start', mb: 2 }}>
+                <Stack spacing={1}>
+                  <Chip
+                    label={stageStatusLabel}
+                    size="small"
+                    sx={{
+                      ...liveChipBaseSx,
+                      alignSelf: 'flex-start',
+                      background:
+                        stageStatusLabel === 'Sonia Speaking'
+                          ? 'rgba(14, 165, 233, 0.12)'
+                          : stageStatusLabel === 'Listening'
+                            ? 'rgba(34, 197, 94, 0.10)'
+                            : stageStatusLabel === 'Reconnect Needed'
+                              ? 'rgba(245, 158, 11, 0.12)'
+                              : 'rgba(15, 23, 42, 0.04)',
+                      color: '#0f172a',
+                    }}
+                  />
+                  <Typography variant="h3" sx={{ fontWeight: 850, letterSpacing: '-0.04em', lineHeight: 1, color: '#0f172a' }}>
+                    Sonia
+                  </Typography>
+                  <Typography variant="body1" sx={{ color: '#475569', maxWidth: 760 }}>
+                    {stageAssistLabel}
+                  </Typography>
+                </Stack>
+                <Stack spacing={1} sx={{ alignItems: 'flex-end' }}>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <Chip label={gazeStatus.label} variant="outlined" sx={{ borderColor: 'rgba(15, 23, 42, 0.12)', color: '#0f172a' }} />
+                    <Chip label={networkOnline ? 'Network stable' : 'Network unavailable'} variant="outlined" sx={{ borderColor: 'rgba(15, 23, 42, 0.12)', color: '#0f172a' }} />
+                  </Box>
+                  <Typography variant="caption" sx={{ color: '#64748b', textAlign: 'right', maxWidth: 260 }}>
+                    {hasJoined ? 'The room is live. Your turn state and Sonia state stay visible while the session runs.' : 'Join when ready to enter the interview stage.'}
+                  </Typography>
+                </Stack>
+              </Box>
+
+              <Box
+                sx={{
+                  position: 'relative',
+                  minHeight: { xs: 420, md: 560 },
+                  borderRadius: 4,
+                  overflow: 'hidden',
+                  background: 'linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)',
+                  border: '1px solid rgba(37, 99, 235, 0.12)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+                }}
+              >
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    background:
+                      'radial-gradient(circle at center, rgba(37, 99, 235, 0.16), transparent 34%), radial-gradient(circle at bottom, rgba(14, 165, 233, 0.10), transparent 30%)',
+                  }}
+                />
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    px: 2,
+                    py: 3,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Stack spacing={2} sx={{ alignItems: 'center', width: '100%', maxWidth: 680 }}>
+                    <Box
+                      sx={{
+                        width: { xs: 260, sm: 320, md: 360 },
+                        height: { xs: 260, sm: 320, md: 360 },
+                        borderRadius: '50%',
+                        position: 'relative',
+                        display: 'grid',
+                        placeItems: 'center',
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(219,234,254,0.45) 100%)',
+                        border: '1px solid rgba(37, 99, 235, 0.14)',
+                        boxShadow: aiSpeaking ? '0 0 0 18px rgba(59, 130, 246, 0.08), 0 24px 60px rgba(15, 23, 42, 0.12)' : '0 24px 60px rgba(15, 23, 42, 0.10)',
+                        transition: 'box-shadow 180ms ease',
+                      }}
+                    >
+                      <div className={`meet-avatar-ring ${aiSpeaking ? 'speaking' : ''} ${status === 'connecting' || status === 'idle' ? 'idle' : ''}`}>
+                        {soniaAvatarSrc && !avatarLoadError && (
+                          <img
+                            src={soniaAvatarSrc}
+                            alt="Sonia interviewer avatar"
+                            className={`meet-sonia-avatar-image ${aiSpeaking ? 'speaking' : 'idle'}`}
+                            onError={() => setAvatarLoadError(true)}
+                            onLoad={() => setAvatarLoadError(false)}
+                          />
+                        )}
+                        {avatarLoadError && (
+                          <div className="meet-sonia-orb" aria-hidden="true">
+                            <div className="meet-sonia-ring outer" />
+                            <div className="meet-sonia-ring" />
+                            <div className="meet-sonia-core" />
+                            <div className="meet-sonia-wave">
+                              <span />
+                              <span />
+                              <span />
+                              <span />
+                              <span />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </Box>
+
+                    <Box sx={{ display: 'grid', gap: 1 }}>
+                      <Typography variant="overline" sx={{ color: '#2563eb', fontWeight: 800, letterSpacing: '0.18em' }}>
+                        Sonia
+                      </Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                        {aiSpeaking ? 'Sonia is speaking' : micActive ? 'Listening for your answer' : status === 'connecting' ? 'Preparing the room' : 'Ready for the next turn'}
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: '#475569', maxWidth: 560, mx: 'auto' }}>
+                        {stageAssistLabel}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {liveStatePills.map((pill) => (
+                        <Chip
+                          key={pill.label}
+                          label={pill.label}
+                          size="small"
+                          variant={pill.active ? 'filled' : 'outlined'}
+                          sx={{
+                            ...liveChipBaseSx,
+                            borderColor: 'rgba(15, 23, 42, 0.12)',
+                            background: pill.active
+                              ? pill.tone === 'live'
+                                ? 'rgba(14, 165, 233, 0.12)'
+                                : pill.tone === 'ok'
+                                  ? 'rgba(34, 197, 94, 0.10)'
+                                  : pill.tone === 'warn'
+                                    ? 'rgba(245, 158, 11, 0.10)'
+                                    : 'rgba(15, 23, 42, 0.08)'
+                              : 'rgba(255,255,255,0.76)',
+                            color: '#0f172a',
+                          }}
+                        />
+                      ))}
+                    </Box>
+
+                    {captureWarning === 'audio_blocked' && (
+                      <Box
+                        sx={{
+                          mt: 1,
+                          width: '100%',
+                          maxWidth: 540,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 2,
+                          p: 1.5,
+                          borderRadius: 3,
+                          background: 'rgba(255,255,255,0.82)',
+                          border: '1px solid rgba(15, 23, 42, 0.08)',
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#334155', textAlign: 'left' }}>
+                          Sonia is connected. Browser autoplay is blocking her voice.
+                        </Typography>
+                        <Button variant="contained" onClick={handleResumeSoniaAudio} sx={{ borderRadius: 999, textTransform: 'none' }}>
+                          Enable Audio
+                        </Button>
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+
+                {hasJoined && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      left: { xs: 12, md: 18 },
+                      right: { xs: 12, md: 18 },
+                      bottom: { xs: 12, md: 18 },
+                    }}
+                  >
+                    <Card
+                      sx={{
+                        borderRadius: 4,
+                        background: 'rgba(255,255,255,0.92)',
+                        border: '1px solid rgba(15, 23, 42, 0.08)',
+                        boxShadow: '0 18px 40px rgba(15, 23, 42, 0.12)',
+                      }}
+                    >
+                      <CardContent sx={{ p: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                          <Stack spacing={0.5}>
+                            <Typography variant="overline" sx={{ color: '#64748b', fontWeight: 800, letterSpacing: '0.14em' }}>
+                              You
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 700 }}>
+                              {micMuted ? 'Microphone muted' : micActive ? 'You are live and the system is listening' : aiSpeaking ? 'Sonia is speaking now' : 'Ready to answer'}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748b' }}>
+                              {cameraOff ? 'Camera off' : 'Camera on'} · {micMuted ? 'Mic off' : 'Mic on'} · {gazeStatus.label}
+                            </Typography>
+                          </Stack>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className={`meet-self-action-btn ${micMuted ? 'off' : 'on'}`}
+                              onClick={() => setMicMuted((prev) => !prev)}
+                              aria-label={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                              title={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+                            >
+                              {micMuted ? <MicOff fontSize="inherit" /> : <Mic fontSize="inherit" />}
+                            </button>
+                            <button
+                              type="button"
+                              className={`meet-self-action-btn ${cameraOff ? 'off' : 'on'}`}
+                              onClick={() => setCameraOff((prev) => !prev)}
+                              aria-label={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                              title={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                            >
+                              {cameraOff ? <VideocamOff fontSize="inherit" /> : <Videocam fontSize="inherit" />}
+                            </button>
+                            <button
+                              type="button"
+                              className="meet-self-toggle"
+                              onClick={() => setSelfViewHidden((prev) => !prev)}
+                              aria-label={selfViewHidden ? 'Expand self view' : 'Collapse self view'}
+                            >
+                              {selfViewHidden ? 'Show' : 'Hide'}
+                            </button>
+                          </Box>
+                        </Box>
+                        <Box sx={{ mt: 1.5, position: 'relative' }}>
+                          <video
+                            ref={localVideoRef}
+                            className={`meet-self-video ${cameraOff ? 'off' : ''} ${selfViewHidden ? 'preview-hidden' : ''}`}
+                            autoPlay
+                            muted
+                            playsInline
+                          />
+                          {!selfViewHidden && cameraOff && (
+                            <div className="meet-self-video-overlay">Camera Off</div>
+                          )}
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Box>
+                )}
+                <canvas ref={gazeCanvasRef} className="meet-hidden-canvas" />
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Stack spacing={2.5}>
+            <Card sx={railCardSx}>
+              <CardContent sx={{ p: 2.5 }}>
+                <Typography variant="overline" sx={{ color: '#64748b', fontWeight: 800, letterSpacing: '0.16em' }}>
+                  Live State
+                </Typography>
+                <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+                  {liveStatePills.map((pill) => (
+                    <Box
+                      key={pill.label}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 1.5,
+                        px: 1.5,
+                        py: 1.25,
+                        borderRadius: 3,
+                        border: '1px solid rgba(15, 23, 42, 0.08)',
+                        background: pill.active
+                          ? pill.tone === 'live'
+                            ? 'rgba(239, 246, 255, 0.96)'
+                            : pill.tone === 'ok'
+                              ? 'rgba(240, 253, 244, 0.96)'
+                              : pill.tone === 'warn'
+                                ? 'rgba(255, 251, 235, 0.96)'
+                                : 'rgba(248, 250, 252, 0.98)'
+                          : 'rgba(255,255,255,0.82)',
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                        {pill.label}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label={pill.active ? 'Active' : 'Idle'}
+                        variant={pill.active ? 'filled' : 'outlined'}
+                        sx={{
+                          ...liveChipBaseSx,
+                          height: 24,
+                          background: pill.active
+                            ? pill.tone === 'live'
+                              ? 'rgba(14, 165, 233, 0.12)'
+                              : pill.tone === 'ok'
+                                ? 'rgba(34, 197, 94, 0.10)'
+                                : pill.tone === 'warn'
+                                  ? 'rgba(245, 158, 11, 0.10)'
+                                  : 'rgba(15, 23, 42, 0.08)'
+                            : 'transparent',
+                          color: '#0f172a',
+                        }}
+                      />
+                    </Box>
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={railCardSx}>
+              <CardContent sx={{ p: 2.5 }}>
+                <Typography variant="overline" sx={{ color: '#64748b', fontWeight: 800, letterSpacing: '0.16em' }}>
+                  Session Controls
+                </Typography>
+                <Stack spacing={1.25} sx={{ mt: 1.5 }}>
+                  {!hasJoined ? (
+                    <Button
+                      variant="contained"
+                      onClick={() => {
+                        setHasJoined(true);
+                        handleConnect();
+                      }}
+                      disabled={!configValidated || hasJoined || !networkOnline || status === 'connecting' || status === 'connected' || status === 'ready'}
+                      sx={{
+                        minHeight: 48,
+                        borderRadius: 999,
+                        backgroundColor: '#0f172a',
+                        '&:hover': { backgroundColor: '#111827' },
+                        fontSize: '0.95rem',
+                        fontWeight: 700,
+                        textTransform: 'none',
+                      }}
+                    >
+                      Join Interview
+                    </Button>
+                  ) : (
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                      {(status === 'error' || status === 'disconnected' || status === 'failed') && (
+                        <Button
+                          variant="outlined"
+                          onClick={handleConnect}
+                          disabled={!networkOnline || status === 'connecting' || endInProgressRef.current}
+                          sx={{ borderRadius: 999, textTransform: 'none', minHeight: 44 }}
+                        >
+                          Reconnect
+                        </Button>
+                      )}
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleDisconnect()}
+                        disabled={endInProgressRef.current}
+                        startIcon={<CallEnd />}
+                        sx={{ borderRadius: 999, textTransform: 'none', minHeight: 44 }}
+                      >
+                        End Session
+                      </Button>
+                    </Stack>
+                  )}
+                  <Divider />
+                  <Typography variant="body2" sx={{ color: '#475569' }}>
+                    {hasJoined
+                      ? 'Keep the room open while Sonia speaks. The live badge row shows the current interaction state at a glance.'
+                      : 'Join when you are ready. The interview opens in the same room once the session connects.'}
+                  </Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={railCardSx}>
+              <CardContent sx={{ p: 2.5 }}>
+                <Typography variant="overline" sx={{ color: '#64748b', fontWeight: 800, letterSpacing: '0.16em' }}>
+                  Room Notes
+                </Typography>
+                <Stack spacing={1.25} sx={{ mt: 1.5 }}>
+                  <Box sx={{ p: 1.5, borderRadius: 3, background: 'rgba(248, 250, 252, 0.96)', border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                      {gazeStatus.label}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>
+                      {cameraOff ? 'Camera is off, so gaze tracking is limited.' : 'Gaze tracking is active and the stage can use it for coaching signals.'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 1.5, borderRadius: 3, background: 'rgba(248, 250, 252, 0.96)', border: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                      {FREE_ACCESS_MODE ? 'Open demo session' : 'Controlled interview session'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>
+                      {stageAssistLabel}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Box>
+
+        {error && (
+          <Alert severity="error" sx={{ borderRadius: 3 }}>
+            {error}
+          </Alert>
+        )}
+      </Box>
 
       {/* Permission Modal */}
       <Dialog
@@ -3192,6 +3563,6 @@ export default function InterviewSessionRoom() {
           </Button>
         </DialogActions>
       </Dialog>
-    </div>
+    </Box>
   );
 }

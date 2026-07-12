@@ -1,0 +1,15 @@
+---
+description: Accessibility rules
+globs:
+  - "src/**/*.jsx"
+alwaysApply: false
+---
+
+Use semantic buttons and links for interactive elements.
+
+Maintain visible keyboard focus.
+
+Do not rely only on color to communicate status.
+
+Forms must keep visible labels and render recoverable errors near the affected control.
+

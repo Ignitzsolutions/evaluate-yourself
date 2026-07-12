@@ -24,10 +24,10 @@ Repository context and route index for Claude-driven work.
 | `/presentation` | `LandingLayout` | `src/pages/PresentationPage.jsx` | Product presentation |
 | `/pricing` | `PublicLayout` | `src/pages/PricingPage.jsx` | Pricing view |
 | `/checkout/:planKey` | `PublicLayout` | `src/pages/CheckoutPage.jsx` | Redirect-based checkout for plan payment methods |
-| `/test-realtime` | `PublicLayout` | `src/pages/RealtimeTestPage.jsx` | Realtime connection checks |
 | `/login/*` | `AuthLayout` | `src/pages/LoginPage.jsx` | User login |
 | `/register/*` | `AuthLayout` | `src/pages/RegisterPage.jsx` | User signup |
 | `/forgot-password/*` | `AuthLayout` | `src/pages/ForgotPasswordPage.jsx` | Password recovery |
+| `/set-password/*` | `AuthLayout` | `src/pages/SetPasswordPage.jsx` | Secure first-time password setup |
 | `/admin` | `AuthLayout` | `src/pages/AdminEntryPage.jsx` | Admin entry routing |
 | `/admin/login/*` | `AuthLayout` | `src/pages/AdminLoginPage.jsx` | Admin login |
 | `/onboarding` | `PrivateRoute + MainLayout` | `src/pages/OnboardingPage.jsx` | First-time onboarding |
@@ -43,7 +43,7 @@ Repository context and route index for Claude-driven work.
 
 Admin subroutes under `/admin/dashboard`:
 
-- `overview`, `candidates`, `candidates/:clerkUserId`, `interviews`, `question-bank`, `trials`, `exports`, `config`
+- `overview`, `live`, `security`, `candidates`, `candidates/:clerkUserId`, `interviews`, `question-bank`, `trials`, `exports`, `config`
 
 ## 3) Backend route index
 
@@ -66,7 +66,6 @@ Admin subroutes under `/admin/dashboard`:
 | `/api/interview/reports*` | GET/POST/PUT | Report create/list/detail/feedback/download/replay |
 | `/api/interview/sessions/{session_id}*` | GET | Session detail + gaze events |
 | `/api/interview/{session_id}/next-turn` | POST | Next generated turn |
-| `/api/interview/{session_id}/adaptive-turn` | POST | Adaptive follow-up turn |
 | `/api/interview/{session_id}/capture` | POST | Capture interview artifacts/events |
 | `/api/interview/{session_id}/transcript` | POST | Transcript ingest/persistence |
 | `/api/analytics/summary`, `/trends`, `/skills` | GET | Candidate analytics aggregation |
@@ -109,6 +108,16 @@ These are local assistant skills used for repo work. They are not application ru
 | `playwright` | Browser-level verification for routing, viewport fit, and end-to-end candidate flows |
 | `gh-fix-ci` | GitHub Actions failure inspection and CI remediation |
 | `remotion-best-practices` | Future video/replay overlay work if report playback moves into Remotion-rendered assets |
+| `frontend-ui-engineering` | Frontend implementation tasks that need production UX structure, state handling, and interaction quality |
+| `web-design-guidelines` | Visual design and layout guidance when changing public-facing or SaaS UI surfaces |
+| `vercel-react-best-practices` | React performance, rendering, async, and component-architecture decisions where applicable |
+| `shadcn` | shadcn/ui-specific component guidance only if the repo adds or touches shadcn components |
+| `accessibility` | Accessibility implementation or audit work |
+| `performance`, `core-web-vitals` | Performance and Core Web Vitals audits or targeted optimization |
+| `seo` | SEO-specific page/content/metadata review |
+| `web-quality-audit` | Broad web-quality audits across accessibility, performance, SEO, and best practices |
+
+Use these skills only when the task calls for them. Do not load every installed skill by default.
 
 ## 6) Editing rules for this repo
 
@@ -117,3 +126,41 @@ These are local assistant skills used for repo work. They are not application ru
 3. Keep root clean: guides in `docs/guides/`, historical docs in `docs/archive/`.
 4. Never expose secrets to frontend bundles; keep keys server-side only.
 5. Keep checkout redirect configuration frontend-safe: use public payment URLs only, never provider secret keys.
+
+## 7) Production application workflow
+
+Before implementing product changes:
+
+1. Restate the user goal.
+2. Describe the shortest successful user flow.
+3. List all required UI states.
+4. Identify reusable components.
+5. Identify accessibility, security, and data risks.
+6. Ask only for information that blocks implementation.
+
+Implementation rules:
+
+1. Use only the existing design tokens and components.
+2. Do not create one-off colors, spacing values, or component variants.
+3. Use semantic HTML.
+4. Maintain keyboard navigation and visible focus.
+5. Use one clear primary action per screen.
+6. Do not add decorative gradients, glass effects, excessive cards, or animation.
+7. Do not use vague placeholder copy.
+8. Preserve user input during failures.
+9. Implement empty, loading, partial, success, and error states.
+10. Keep the UI responsive at mobile, tablet, and desktop widths.
+11. Validate external and AI-generated data before rendering.
+12. Require confirmation before consequential AI tool calls.
+13. Never expose secrets or perform authorization only in the browser.
+
+After implementation:
+
+1. Run type checking.
+2. Run linting.
+3. Run component tests.
+4. Run end-to-end tests.
+5. Run accessibility checks.
+6. Check mobile and keyboard behavior.
+7. Review loading, empty, and error states.
+8. Report any unresolved risks or assumptions.
