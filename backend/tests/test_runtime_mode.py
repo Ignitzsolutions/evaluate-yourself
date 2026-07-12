@@ -1,7 +1,6 @@
 """Smoke tests for /api/system/runtime-mode + demo provider."""
 
 import importlib
-import os
 
 import pytest
 from fastapi.testclient import TestClient
