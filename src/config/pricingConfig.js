@@ -44,7 +44,7 @@ export const pricingPlans = [
     priceSubLabel: "Per month",
     bestFor: "Students & early job seekers",
     ctaLabel: "Start Launchpad",
-    accentColor: "#2563eb",
+    accentColor: "#0f766e",
     summaryMetric: "3 practice tracks",
     introLine: "Everything you need to start practicing consistently:",
     features: [
@@ -162,7 +162,7 @@ export const paymentGatewayConfig = {
       key: "google_pay",
       label: "Google Pay",
       helper: "Wallet checkout on supported browsers and Android devices.",
-      accent: "#2563eb",
+      accent: "#0f766e",
     },
   ],
 };

@@ -12,6 +12,7 @@ BACKEND_DIR = ROOT_DIR / "backend"
 def run_alembic(database_url: str, *args: str) -> None:
     env = os.environ.copy()
     env["DATABASE_URL"] = database_url
+    env["ENV"] = "testing"
     env.pop("ADMIN_CLERK_USER_IDS", None)
     subprocess.run(
         [sys.executable, "-m", "alembic", *args],
@@ -53,4 +54,4 @@ def test_self_hosted_auth_migration_reaches_single_head(tmp_path):
             .scalars()
             .all()
         )
-        assert heads == ["20260430_0014"]
+        assert heads == ["20260628_0015"]

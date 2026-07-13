@@ -54,8 +54,8 @@ export default function LoginPage() {
           {loading ? <CircularProgress size={20} color="inherit" /> : "Sign In"}
         </Button>
         <Box sx={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-          <Link to="/forgot-password" style={{ color: "#2563eb" }}>Forgot password?</Link>
-          <Link to="/register" style={{ color: "#2563eb" }}>Create account</Link>
+          <Link to="/forgot-password" style={{ color: "#0f766e" }}>Forgot password?</Link>
+          <Link to="/register" style={{ color: "#0f766e" }}>Create account</Link>
         </Box>
       </form>
     </AuthShell>

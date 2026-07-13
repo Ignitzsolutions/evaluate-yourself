@@ -57,7 +57,7 @@ export default function RegisterPage() {
           {loading ? <CircularProgress size={20} color="inherit" /> : "Create Account"}
         </Button>
         <Box sx={{ textAlign: "center", fontSize: 13 }}>
-          Already have an account? <Link to="/login" style={{ color: "#2563eb" }}>Sign in</Link>
+          Already have an account? <Link to="/login" style={{ color: "#0f766e" }}>Sign in</Link>
         </Box>
       </form>
     </AuthShell>

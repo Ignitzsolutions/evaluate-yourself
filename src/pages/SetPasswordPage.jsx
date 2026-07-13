@@ -125,7 +125,7 @@ export default function SetPasswordPage() {
           {loading ? <CircularProgress size={20} color="inherit" /> : "Set Password"}
         </Button>
         <Box sx={{ textAlign: "center", fontSize: 13 }}>
-          <Link to="/login" style={{ color: "#2563eb" }}>Back to Sign In</Link>
+          <Link to="/login" style={{ color: "#0f766e" }}>Back to Sign In</Link>
         </Box>
       </form>
     </AuthShell>

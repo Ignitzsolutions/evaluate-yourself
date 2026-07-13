@@ -124,7 +124,7 @@ export default function Dashboard() {
           inset: 0,
           pointerEvents: "none",
           background:
-            "radial-gradient(900px 380px at 4% 0%, rgba(30,136,229,.10), transparent 58%), radial-gradient(700px 320px at 96% 8%, rgba(15,23,42,.06), transparent 56%)",
+            "radial-gradient(900px 380px at 4% 0%, rgba(15,118,110,.10), transparent 58%), radial-gradient(700px 320px at 96% 8%, rgba(15,23,42,.06), transparent 56%)",
         }}
       />
 
@@ -138,7 +138,7 @@ export default function Dashboard() {
               <Chip
                 label="Syncing"
                 size="small"
-                sx={{ borderRadius: 999, bgcolor: alpha("#1E88E5", 0.08), color: "#155eab", fontWeight: 700 }}
+                sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
               />
             )}
             {syncStatus === "ok" && backendUser && (
@@ -179,7 +179,7 @@ export default function Dashboard() {
                     <Chip
                       label="Current focus"
                       size="small"
-                      sx={{ width: "fit-content", borderRadius: 999, bgcolor: alpha("#1E88E5", 0.08), color: "#155eab", fontWeight: 700 }}
+                      sx={{ width: "fit-content", borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
                     />
                     <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: "-0.05em", lineHeight: 1.02 }}>
                       Start a session, review the last one, or inspect your trend line.
@@ -232,7 +232,7 @@ export default function Dashboard() {
                         }}
                       >
                         <Stack spacing={1}>
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "#155eab" }}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "#0f766e" }}>
                             {tile.icon}
                             <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>
                               {tile.label}
@@ -255,11 +255,11 @@ export default function Dashboard() {
                   sx={{
                     p: 2.5,
                     borderRadius: 4,
-                    background: alpha("#1E88E5", 0.04),
-                    border: "1px solid rgba(30,136,229,.10)",
+                    background: alpha("#0f766e", 0.04),
+                    border: "1px solid rgba(15,118,110,.10)",
                   }}
                 >
-                  <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#155eab" }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
                     Coach note
                   </Typography>
                   <Typography sx={{ mt: 1, fontSize: 16, lineHeight: 1.8, color: "#334155" }}>
@@ -285,7 +285,7 @@ export default function Dashboard() {
               }}
             >
               <Stack spacing={2.3}>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#155eab" }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
                   Session summary
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: "-0.03em" }}>
@@ -343,7 +343,7 @@ export default function Dashboard() {
             <Stack spacing={2.5}>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
                 <Box>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#155eab" }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
                     Recent sessions
                   </Typography>
                   <Typography variant="h5" sx={{ mt: 0.8, fontWeight: 800, letterSpacing: "-0.03em" }}>
@@ -354,7 +354,7 @@ export default function Dashboard() {
                   <Chip
                     label="Loading"
                     size="small"
-                    sx={{ borderRadius: 999, bgcolor: alpha("#1E88E5", 0.08), color: "#155eab", fontWeight: 700 }}
+                    sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
                   />
                 )}
               </Box>
@@ -413,7 +413,7 @@ export default function Dashboard() {
                         <Chip
                           label={`${report.score ?? "--"}%`}
                           size="small"
-                          sx={{ borderRadius: 999, bgcolor: alpha("#1E88E5", 0.08), color: "#155eab", fontWeight: 700 }}
+                          sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
                         />
                         <Button
                           variant="outlined"

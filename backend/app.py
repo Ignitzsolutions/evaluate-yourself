@@ -2222,9 +2222,12 @@ async def create_realtime_session(
     # fallbacks fire for sk-dev-* / placeholder-* keys, not just empty ones.
     try:
         from services.feature_flags import openai_configured as _oai_ok
+
         _has_real_key = _oai_ok()
     except Exception:
-        _has_real_key = bool(OPENAI_REALTIME_API_KEY) and OPENAI_REALTIME_API_KEY != "your-openai-api-key-here"
+        _has_real_key = (
+            bool(OPENAI_REALTIME_API_KEY) and OPENAI_REALTIME_API_KEY != "your-openai-api-key-here"
+        )
     if not _has_real_key:
         return {
             "demo_mode": True,
@@ -4881,6 +4884,7 @@ async def list_communication_practice_packs(
     db: Session = Depends(get_db),
 ):
     from services.feature_flags import communication_practice_enabled
+
     if not communication_practice_enabled():
         raise HTTPException(status_code=404, detail="Communication practice is disabled.")
 
@@ -4908,6 +4912,7 @@ async def get_next_communication_practice_prompt(
     db: Session = Depends(get_db),
 ):
     from services.feature_flags import communication_practice_enabled
+
     if not communication_practice_enabled():
         raise HTTPException(status_code=404, detail="Communication practice is disabled.")
 
@@ -4943,6 +4948,7 @@ async def evaluate_communication_practice_turn(
     db: Session = Depends(get_db),
 ):
     from services.feature_flags import communication_practice_enabled
+
     if not communication_practice_enabled():
         raise HTTPException(status_code=404, detail="Communication practice is disabled.")
 
@@ -5021,20 +5027,23 @@ async def evaluate_communication_practice_turn(
         "communication_metrics": communication_metrics,
         "improved_sentence": improved_sentence,
         "coaching": coaching[:3],
-        **(_persist_practice_attempt(
-            db=db,
-            user_id=current_user.id,
-            pack_id=payload.pack_id,
-            prompt_id=payload.prompt_id,
-            target_sentence=payload.target_sentence,
-            spoken_text=spoken_text,
-            score=score,
-            coverage=coverage,
-            duration_seconds=duration_seconds,
-            filler_per_100=filler_density,
-            pacing_band=pacing_band,
-            quality_flags=quality_flags,
-        ) or {}),
+        **(
+            _persist_practice_attempt(
+                db=db,
+                user_id=current_user.id,
+                pack_id=payload.pack_id,
+                prompt_id=payload.prompt_id,
+                target_sentence=payload.target_sentence,
+                spoken_text=spoken_text,
+                score=score,
+                coverage=coverage,
+                duration_seconds=duration_seconds,
+                filler_per_100=filler_density,
+                pacing_band=pacing_band,
+                quality_flags=quality_flags,
+            )
+            or {}
+        ),
     }
 
 
@@ -5118,6 +5127,7 @@ async def communication_practice_history(
 ):
     """Per-user practice progression rollup used by the history panel."""
     from services.feature_flags import communication_practice_enabled
+
     if not communication_practice_enabled():
         raise HTTPException(status_code=404, detail="Communication practice is disabled.")
 
@@ -5168,7 +5178,11 @@ async def communication_practice_history(
         return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
     last_week = [a for a in attempts if _naive(a.created_at) and _naive(a.created_at) >= week_ago]
-    prev_week = [a for a in attempts if _naive(a.created_at) and two_weeks_ago <= _naive(a.created_at) < week_ago]
+    prev_week = [
+        a
+        for a in attempts
+        if _naive(a.created_at) and two_weeks_ago <= _naive(a.created_at) < week_ago
+    ]
     score_trend = None
     if last_week and prev_week:
         score_trend = round(
@@ -5199,7 +5213,11 @@ async def communication_practice_history(
         slot["attempts"] += 1
         slot["score_sum"] += int(a.score or 0)
     per_pack_progress = [
-        {"pack_id": v["pack_id"], "attempts": v["attempts"], "avg_score": round(v["score_sum"] / v["attempts"], 1)}
+        {
+            "pack_id": v["pack_id"],
+            "attempts": v["attempts"],
+            "avg_score": round(v["score_sum"] / v["attempts"], 1),
+        }
         for v in per_pack.values()
     ]
 
@@ -5219,7 +5237,11 @@ async def communication_practice_history(
                 "score": int(a.score or 0),
                 "created_at": (a.created_at.isoformat() if a.created_at else None),
             }
-            for a in sorted(attempts, key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:10]
+            for a in sorted(
+                attempts,
+                key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )[:10]
         ],
     }
 
@@ -5775,7 +5797,7 @@ async def download_interview_report(
                 "Brand",
                 parent=styles["Heading1"],
                 fontSize=16,
-                textColor=colors.HexColor("#1d4ed8"),
+                textColor=colors.HexColor("#0f766e"),
             ),
         )
     )
@@ -5831,7 +5853,7 @@ async def download_interview_report(
                         y - 4,
                         3 * value,
                         8,
-                        fillColor=colors.HexColor("#2563eb"),
+                        fillColor=colors.HexColor("#0f766e"),
                         strokeColor=None,
                     )
                 )

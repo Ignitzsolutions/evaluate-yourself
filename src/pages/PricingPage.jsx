@@ -60,7 +60,7 @@ export default function PricingPage() {
         minHeight: "100dvh",
         py: { xs: 6, md: 10 },
         background:
-          "radial-gradient(900px 360px at 10% 0%, rgba(37,99,235,0.16), transparent 60%), radial-gradient(700px 300px at 90% 10%, rgba(15,23,42,0.08), transparent 60%), #f8fafc",
+          "radial-gradient(900px 360px at 10% 0%, rgba(15,118,110,0.14), transparent 60%), radial-gradient(700px 300px at 90% 10%, rgba(15,23,42,0.08), transparent 60%), #f7f6f3",
       }}
     >
       <Container maxWidth="lg" sx={{ px: { xs: 2, md: 3 } }}>
@@ -88,8 +88,8 @@ export default function PricingPage() {
                   label={trialConfig.label}
                   sx={{
                     alignSelf: "flex-start",
-                    bgcolor: "rgba(37,99,235,0.1)",
-                    color: "#1d4ed8",
+                    bgcolor: "rgba(15,118,110,0.1)",
+                    color: "#0f766e",
                     fontWeight: 800,
                   }}
                 />
@@ -138,8 +138,8 @@ export default function PricingPage() {
                           borderRadius: "50%",
                           display: "grid",
                           placeItems: "center",
-                          bgcolor: "rgba(37,99,235,0.1)",
-                          color: "#1d4ed8",
+                          bgcolor: "rgba(15,118,110,0.1)",
+                          color: "#0f766e",
                         }}
                       >
                         {item.icon}

@@ -125,10 +125,10 @@ export default function CheckoutPage() {
                       width: 52,
                       height: 52,
                       borderRadius: 1.5,
-                      bgcolor: "#eff6ff",
+                    bgcolor: "#f0fdfa",
                       display: "grid",
                       placeItems: "center",
-                      color: "#1d4ed8",
+                    color: "#0f766e",
                     }}
                   >
                     <PaymentsRounded />
@@ -234,8 +234,8 @@ export default function CheckoutPage() {
                             textAlign: "left",
                             color: "text.primary",
                             "&.Mui-selected": {
-                              bgcolor: "rgba(29, 78, 216, 0.08)",
-                              borderColor: "rgba(29, 78, 216, 0.45)",
+                              bgcolor: "rgba(15, 118, 110, 0.08)",
+                              borderColor: "rgba(15, 118, 110, 0.45)",
                             },
                           }}
                         >
@@ -280,10 +280,10 @@ export default function CheckoutPage() {
                   onClick={handleRedirect}
                   sx={{
                     borderRadius: 2,
-                    bgcolor: "#1d4ed8",
+                    bgcolor: "#0f766e",
                     py: 1.35,
                     fontWeight: 800,
-                    "&:hover": { bgcolor: "#1e40af" },
+                    "&:hover": { bgcolor: "#115e59" },
                   }}
                 >
                   Continue to {selectedPaymentMethod?.label || "payment"}

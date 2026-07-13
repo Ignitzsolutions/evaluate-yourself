@@ -2969,7 +2969,7 @@ export default function InterviewSessionRoom() {
         <Box sx={{ maxWidth: 1240, mx: 'auto', pt: { xs: 8, md: 12 }, px: { xs: 2, md: 4 } }}>
           <Card sx={heroSx}>
             <CardContent sx={{ p: { xs: 2.5, md: 3.5 } }}>
-              <Typography variant="overline" sx={{ color: '#2563eb', fontWeight: 800, letterSpacing: '0.16em' }}>
+              <Typography variant="overline" sx={{ color: '#0f766e', fontWeight: 800, letterSpacing: '0.16em' }}>
                 Interview Studio
               </Typography>
               <Typography variant="h5" sx={{ mt: 1, fontWeight: 800, color: '#0f172a' }}>
@@ -2998,7 +2998,7 @@ export default function InterviewSessionRoom() {
                 <Chip
                   label={FREE_ACCESS_MODE ? 'Sonia Demo Session' : 'Interview Session'}
                   size="small"
-                  sx={{ ...liveChipBaseSx, alignSelf: 'flex-start', background: 'rgba(37, 99, 235, 0.10)', color: '#1d4ed8' }}
+                  sx={{ ...liveChipBaseSx, alignSelf: 'flex-start', background: 'rgba(15, 118, 110, 0.10)', color: '#0f766e' }}
                 />
                 <Typography variant="h4" sx={{ fontWeight: 850, letterSpacing: '-0.03em', color: '#0f172a' }}>
                   {FREE_ACCESS_MODE ? 'Open Interview Studio' : 'Interview Stage'}
@@ -3200,7 +3200,7 @@ export default function InterviewSessionRoom() {
                     </Box>
 
                     <Box sx={{ display: 'grid', gap: 1 }}>
-                      <Typography variant="overline" sx={{ color: '#2563eb', fontWeight: 800, letterSpacing: '0.18em' }}>
+                      <Typography variant="overline" sx={{ color: '#0f766e', fontWeight: 800, letterSpacing: '0.18em' }}>
                         Sonia
                       </Typography>
                       <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>

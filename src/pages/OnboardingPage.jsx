@@ -378,7 +378,7 @@ export default function OnboardingPage() {
         minHeight: "100dvh",
         py: { xs: 3, md: 5 },
         background:
-          "radial-gradient(900px 360px at 0% 0%, rgba(37,99,235,0.14), transparent 60%), radial-gradient(800px 320px at 100% 0%, rgba(14,116,144,0.12), transparent 60%), #f8fafc",
+          "radial-gradient(900px 360px at 0% 0%, rgba(15,118,110,0.14), transparent 60%), radial-gradient(800px 320px at 100% 0%, rgba(14,116,144,0.12), transparent 60%), #f7f6f3",
       }}
     >
       <Container maxWidth="lg">
@@ -420,7 +420,7 @@ export default function OnboardingPage() {
                         cursor: "pointer",
                         border: "1px solid",
                         borderColor: form.userCategory === "student" ? "primary.main" : "divider",
-                        bgcolor: form.userCategory === "student" ? "rgba(37,99,235,0.06)" : "background.paper",
+                        bgcolor: form.userCategory === "student" ? "rgba(15,118,110,0.06)" : "background.paper",
                       }}
                     >
                       <CardContent>
@@ -440,7 +440,7 @@ export default function OnboardingPage() {
                         cursor: "pointer",
                         border: "1px solid",
                         borderColor: form.userCategory === "professional" ? "primary.main" : "divider",
-                        bgcolor: form.userCategory === "professional" ? "rgba(37,99,235,0.06)" : "background.paper",
+                        bgcolor: form.userCategory === "professional" ? "rgba(15,118,110,0.06)" : "background.paper",
                       }}
                     >
                       <CardContent>

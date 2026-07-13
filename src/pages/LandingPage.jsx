@@ -173,16 +173,16 @@ export default function LandingPage() {
               <Paper
                 elevation={2}
                 sx={{
-                  p: { xs: 3, md: 4 },
-                  borderRadius: 2.5,
+                  p: { xs: 3, md: 4.5 },
+                  borderRadius: { xs: 3, md: 4 },
                   width: "100%",
                   maxWidth: 520,
                   background: "linear-gradient(180deg, #ffffff 0%, #faf8f3 100%)",
-                  border: "1px solid rgba(148,163,184,.16)",
-                  boxShadow: "0 18px 44px rgba(15,23,42,.08)",
+                  border: "1px solid rgba(120,113,108,.14)",
+                  boxShadow: "0 24px 60px rgba(15,23,42,.10)",
                 }}
               >
-                <Stack spacing={2.25}>
+                <Stack spacing={2.5}>
                   <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#0f766e" }}>
                     Interview Studio
                   </Typography>
@@ -192,7 +192,7 @@ export default function LandingPage() {
                   <Typography sx={{ fontSize: 15, lineHeight: 1.7, opacity: 0.72 }}>
                     The session is built to feel formal and useful: one interviewer, one question at a time, then a report that shows where your answers were strong and where they broke down.
                   </Typography>
-                  <Stack spacing={1.4} sx={{ pt: 1 }}>
+                  <Stack spacing={1.5} sx={{ pt: 1 }}>
                     {[
                       "Live interview flow instead of a quiz-style prompt list",
                       "Evidence-backed report after each session",
@@ -202,10 +202,12 @@ export default function LandingPage() {
                         key={item}
                         elevation={0}
                         sx={{
-                          p: 1.6,
-                          borderRadius: 1.5,
-                          backgroundColor: "rgba(245,245,244,.78)",
-                          border: "1px solid rgba(120,113,108,.14)",
+                          px: { xs: 1.8, md: 2.1 },
+                          py: { xs: 1.55, md: 1.7 },
+                          borderRadius: 3,
+                          backgroundColor: "rgba(255,255,255,.82)",
+                          border: "1px solid rgba(120,113,108,.16)",
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,.85), 0 8px 22px rgba(15,23,42,.045)",
                         }}
                       >
                         <Typography sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.55, color: "#0f172a" }}>

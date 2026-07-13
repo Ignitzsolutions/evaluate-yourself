@@ -208,16 +208,16 @@ export default function Navbar() {
                     py: { xs: 0.7, md: 0.9 },
                     fontSize: { xs: 13, md: 14 },
                     border: isActivePath(item.path)
-                      ? '1px solid rgba(59,130,246,0.35)'
+                      ? '1px solid rgba(15,118,110,0.35)'
                       : '1px solid transparent',
                     background: isActivePath(item.path)
-                      ? 'rgba(59,130,246,0.12)'
+                      ? 'rgba(15,118,110,0.12)'
                       : 'transparent',
                     '&:hover': {
                       backgroundColor: 'rgba(15,23,42,0.06)',
                     },
                     '&:focus-visible': {
-                      outline: '2px solid rgba(59,130,246,0.5)',
+                      outline: '2px solid rgba(15,118,110,0.5)',
                       outlineOffset: 2,
                     },
                   }}

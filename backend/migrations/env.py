@@ -13,11 +13,12 @@ if str(BACKEND_DIR) not in sys.path:
 # Load .env if present
 try:
     from dotenv import load_dotenv
+
     backend_dir = BACKEND_DIR
-    root_env = backend_dir.parent / '.env'
-    backend_env = backend_dir / '.env'
+    root_env = backend_dir.parent / ".env"
+    backend_env = backend_dir / ".env"
     if root_env.exists():
-        load_dotenv(dotenv_path=root_env, override=True)
+        load_dotenv(dotenv_path=root_env, override=False)
     if backend_env.exists():
         load_dotenv(dotenv_path=backend_env, override=False)
 except Exception:
