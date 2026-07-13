@@ -32,11 +32,15 @@ mkdir -p "${RELEASE_DIR}"
 tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
 cp "${ENV_FILE_PATH}" "${RELEASE_DIR}/backend/.env"
 
+if [ -e "${CURRENT_LINK}" ] && [ ! -L "${CURRENT_LINK}" ]; then
+  mv "${CURRENT_LINK}" "${DEPLOY_PATH}/legacy-current-${TIMESTAMP}"
+fi
+
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 cd "${CURRENT_LINK}"
 
 docker compose up -d --build --remove-orphans
-docker compose exec -T backend bash -lc 'cd /app/backend && uv run python -m alembic -c alembic.ini upgrade head && uv run python scripts/schema_smoke.py'
+docker compose exec -T backend bash -lc 'cd /app/backend && /opt/venv/bin/python -m alembic -c alembic.ini upgrade head && /opt/venv/bin/python scripts/schema_smoke.py'
 
 find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | head -n -3 | xargs -r rm -rf
 
