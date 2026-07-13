@@ -96,6 +96,7 @@ export default function PricingPage() {
               </Stack>
               <Typography
                 variant="h3"
+                component="h1"
                 sx={{
                   fontWeight: 900,
                   letterSpacing: "-0.045em",

@@ -7,6 +7,12 @@ export default function AuthShell({
   highlights = [],
   children,
 }) {
+  const statusItems = [
+    ["Access", "Free launch"],
+    ["Runtime", "Live workspace"],
+    ["Reports", "Saved evidence"],
+  ];
+
   return (
     <div className="clerk-shell">
       <div className="clerk-bg-orb orb-a" />
@@ -47,6 +53,15 @@ export default function AuthShell({
           <div className="clerk-hero-note">
             Designed as an interview workspace, not a generic SaaS dashboard. The focus is on clarity, state, and the live coaching loop.
           </div>
+
+          <dl className="clerk-status-strip" aria-label="Workspace status">
+            {statusItems.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <div className="clerk-form-wrap">{children}</div>

@@ -844,23 +844,23 @@ body{
 }
 
 .clerk-panel{
-  width: min(1100px, 95vw);
+  width: min(1120px, 95vw);
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
-  gap: 28px;
+  gap: 24px;
   align-items: stretch;
-  background: rgba(255,255,255,0.72);
+  background: rgba(255,255,255,0.82);
   border: 1px solid rgba(148,163,184,.25);
-  box-shadow: 0 30px 90px rgba(15,23,42,.14);
-  border-radius: 18px;
-  padding: 28px;
+  box-shadow: 0 34px 90px rgba(15,23,42,.12);
+  border-radius: 34px;
+  padding: clamp(20px, 3vw, 32px);
   backdrop-filter: blur(10px);
   position: relative;
   z-index: 1;
 }
 
 .clerk-hero{
-  padding: 24px 28px;
+  padding: clamp(18px, 3vw, 30px);
   display: grid;
   gap: 18px;
   align-content: center;
@@ -944,14 +944,46 @@ body{
   line-height: 1.5;
   color: #475569;
   padding: 14px 16px;
-  background: rgba(255,255,255,.72);
+  background: rgba(255,255,255,.86);
   border: 1px solid rgba(148,163,184,.2);
-  border-radius: 12px;
+  border-radius: 18px;
+}
+
+.clerk-status-strip{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.clerk-status-strip div{
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(15,118,110,.12);
+  border-radius: 18px;
+  background: rgba(240,253,250,.58);
+}
+
+.clerk-status-strip dt{
+  margin: 0 0 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.clerk-status-strip dd{
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .clerk-form-wrap{
   display: grid;
   place-items: center;
+  padding: clamp(8px, 2vw, 20px);
 }
 .clerk-form-caption{
   width: min(420px, 100%);
@@ -1023,9 +1055,16 @@ body{
   .clerk-panel{
     grid-template-columns: 1fr;
     padding: 20px;
+    border-radius: 28px;
   }
   .clerk-hero p{
     max-width: none;
+  }
+}
+
+@media (max-width: 620px){
+  .clerk-status-strip{
+    grid-template-columns: 1fr;
   }
 }
 
