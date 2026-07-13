@@ -35,7 +35,7 @@ def upgrade():
     conn = op.get_bind()
 
     # All existing users came through Clerk, so their emails are verified
-    conn.execute(sa.text("UPDATE users SET email_verified = 1 WHERE email IS NOT NULL"))
+    conn.execute(sa.text("UPDATE users SET email_verified = true WHERE email IS NOT NULL"))
 
     # Seed admin flag from the env-var allowlist used until now
     admin_ids_raw = os.getenv("ADMIN_CLERK_USER_IDS", "")
@@ -44,7 +44,7 @@ def upgrade():
         placeholders = ", ".join(f":id{i}" for i in range(len(admin_ids)))
         params = {f"id{i}": v for i, v in enumerate(admin_ids)}
         conn.execute(
-            sa.text(f"UPDATE users SET is_admin = 1 WHERE clerk_user_id IN ({placeholders})"),
+            sa.text(f"UPDATE users SET is_admin = true WHERE clerk_user_id IN ({placeholders})"),
             params,
         )
 
