@@ -73,7 +73,7 @@ services:
     container_name: evaluate-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
     volumes:
       - ./deploy/nginx/reverse-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

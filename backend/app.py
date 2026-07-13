@@ -482,7 +482,9 @@ def run_startup_migrations_if_enabled() -> None:
 async def startup_event():
     validate_production_requirements()
     run_startup_migrations_if_enabled()
-    validate_environment(strict=True)
+    # Keep auth/profile/report routes online even when the realtime provider is not
+    # configured. Realtime endpoints still fail explicitly at request time.
+    validate_environment(strict=False)
     logging.info("🔐 Auth: self-hosted JWT (HS256) + bcrypt")
 
 

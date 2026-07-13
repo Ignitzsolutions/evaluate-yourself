@@ -370,20 +370,15 @@ body{
   display: grid;
   gap: 18px;
   border: 1px solid rgba(120,113,108,.16);
-  border-radius: 34px;
-  padding: clamp(20px, 3vw, 30px);
+  border-radius: 42px;
+  padding: clamp(22px, 3vw, 32px);
   background:
     linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,248,243,.94)),
     #ffffff;
   box-shadow: 0 34px 80px rgba(15,23,42,.12);
 }
 .landing-studio-card::before{
-  content: "";
-  position: absolute;
-  inset: 14px;
-  border: 1px solid rgba(15,118,110,.08);
-  border-radius: 25px;
-  pointer-events: none;
+  display: none;
 }
 .landing-studio-top{
   position: relative;
@@ -416,7 +411,7 @@ body{
   align-content: center;
   justify-items: center;
   gap: 22px;
-  border-radius: 28px;
+  border-radius: 34px;
   padding: 34px 24px;
   background:
     radial-gradient(260px 180px at 50% 18%, rgba(15,118,110,.14), transparent 65%),
@@ -426,7 +421,7 @@ body{
 .landing-sonia-avatar{
   width: 120px;
   height: 120px;
-  border-radius: 38px;
+  border-radius: 42px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, #0f766e, #0f172a);
@@ -747,18 +742,18 @@ body{
   }
   .landing-studio-card,
   .landing-report-card{
-    border-radius: 24px;
+    border-radius: 30px;
     padding: 18px;
   }
   .landing-sonia-stage{
     min-height: 230px;
-    border-radius: 20px;
+    border-radius: 26px;
     padding: 28px 16px;
   }
   .landing-sonia-avatar{
     width: 96px;
     height: 96px;
-    border-radius: 30px;
+    border-radius: 34px;
   }
 }
 
