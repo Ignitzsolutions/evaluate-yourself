@@ -5,6 +5,8 @@
   --brand:#0f766e;            /* primary */
   --brand-ink:#0f172a;
   --radius:16px;
+  --surface-radius:24px;
+  --surface-radius-lg:28px;
   --shadow:0 18px 56px rgba(15,23,42,.08);
 }
 
@@ -285,7 +287,7 @@ body{
   margin: 0 auto;
 }
 .landing-hero{
-  padding: clamp(54px, 8vw, 104px) 0 clamp(42px, 7vw, 82px);
+  padding: clamp(46px, 7vw, 86px) 0 clamp(42px, 7vw, 78px);
 }
 .landing-hero-grid,
 .landing-report-grid{
@@ -296,7 +298,7 @@ body{
 }
 .landing-hero-copy{
   display: grid;
-  gap: 24px;
+  gap: 20px;
 }
 .landing-kicker{
   width: fit-content;
@@ -321,17 +323,17 @@ body{
   text-wrap: balance;
 }
 .landing-hero h1{
-  max-width: 780px;
-  font-size: clamp(46px, 7vw, 88px);
-  line-height: .93;
+  max-width: 720px;
+  font-size: clamp(42px, 6vw, 72px);
+  line-height: .98;
 }
 .landing-lede,
 .landing-section-heading p,
 .landing-final-inner p{
   margin: 0;
   color: #475569;
-  font-size: clamp(17px, 1.5vw, 20px);
-  line-height: 1.68;
+  font-size: clamp(16px, 1.35vw, 19px);
+  line-height: 1.62;
 }
 .landing-lede{
   max-width: 670px;
@@ -368,14 +370,14 @@ body{
 .landing-studio-card{
   position: relative;
   display: grid;
-  gap: 18px;
+  gap: 16px;
   border: 1px solid rgba(120,113,108,.16);
-  border-radius: 42px;
-  padding: clamp(22px, 3vw, 32px);
+  border-radius: var(--surface-radius-lg);
+  padding: clamp(20px, 2.6vw, 28px);
   background:
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,248,243,.94)),
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,248,243,.96)),
     #ffffff;
-  box-shadow: 0 34px 80px rgba(15,23,42,.12);
+  box-shadow: 0 24px 64px rgba(15,23,42,.10);
 }
 .landing-studio-card::before{
   display: none;
@@ -406,27 +408,28 @@ body{
 .landing-sonia-stage{
   position: relative;
   z-index: 1;
-  min-height: 280px;
+  min-height: 260px;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 22px;
-  border-radius: 34px;
-  padding: 34px 24px;
+  gap: 20px;
+  border: 1px solid rgba(148,163,184,.18);
+  border-radius: var(--surface-radius);
+  padding: 30px 22px;
   background:
     radial-gradient(260px 180px at 50% 18%, rgba(15,118,110,.14), transparent 65%),
     #f8fafc;
   text-align: center;
 }
 .landing-sonia-avatar{
-  width: 120px;
-  height: 120px;
-  border-radius: 42px;
+  width: 112px;
+  height: 112px;
+  border-radius: 26px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, #0f766e, #0f172a);
   color: #ffffff;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 24px 44px rgba(15,118,110,.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 18px 34px rgba(15,118,110,.20);
 }
 .landing-sonia-avatar svg{
   width: 54px;
@@ -458,7 +461,7 @@ body{
 }
 .landing-signal-grid div{
   border: 1px solid rgba(120,113,108,.14);
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 14px;
   background: rgba(255,255,255,.84);
 }
@@ -504,7 +507,7 @@ body{
 .landing-workflow-step,
 .landing-plan-card{
   border: 1px solid rgba(120,113,108,.16);
-  border-radius: 26px;
+  border-radius: var(--surface-radius);
   background: rgba(255,255,255,.78);
   box-shadow: 0 18px 42px rgba(15,23,42,.055);
 }
@@ -537,7 +540,7 @@ body{
   background: linear-gradient(180deg, rgba(247,246,243,.8), rgba(255,255,255,.9));
 }
 .landing-report-card{
-  border-radius: 30px;
+  border-radius: var(--surface-radius-lg);
   padding: 26px;
   background: #0f172a;
   color: #ffffff;
@@ -565,7 +568,7 @@ body{
 }
 .landing-report-score{
   margin: 26px 0;
-  border-radius: 24px;
+  border-radius: var(--surface-radius);
   padding: 20px;
   background: rgba(255,255,255,.08);
 }
@@ -698,8 +701,9 @@ body{
   .landing-nav{
     grid-column: 1 / -1;
     justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: 2px;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-bottom: 0;
   }
   .landing-hero-grid,
   .landing-report-grid,
@@ -723,8 +727,9 @@ body{
   }
   .landing-actions{
     justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: 2px;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-bottom: 0;
   }
   .landing-brand-logo{
     width: 44px;
@@ -732,28 +737,29 @@ body{
     border-radius: 14px;
   }
   .landing-hero{
-    padding-top: 36px;
+    padding-top: 34px;
   }
   .landing-hero h1{
-    font-size: clamp(38px, 13vw, 54px);
+    font-size: clamp(36px, 11vw, 48px);
+    line-height: 1.02;
   }
   .landing-signal-grid{
     grid-template-columns: 1fr;
   }
   .landing-studio-card,
   .landing-report-card{
-    border-radius: 30px;
+    border-radius: var(--surface-radius);
     padding: 18px;
   }
   .landing-sonia-stage{
-    min-height: 230px;
-    border-radius: 26px;
-    padding: 28px 16px;
+    min-height: 212px;
+    border-radius: 20px;
+    padding: 24px 16px;
   }
   .landing-sonia-avatar{
-    width: 96px;
-    height: 96px;
-    border-radius: 34px;
+    width: 88px;
+    height: 88px;
+    border-radius: 22px;
   }
 }
 
