@@ -1,560 +1,325 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUser, useClerk } from "../context/AuthContext";
-import { Box, Container, Typography, Button, Card, Grid } from "@mui/material";
-import { PlayArrow, Assessment, Settings, CheckRounded } from "@mui/icons-material";
-import { Divider, Stack, Paper } from "@mui/material";
-import { pricingPlans } from "../config/pricingConfig";
+import { Button } from "@mui/material";
+import {
+  CheckRounded,
+  GraphicEqRounded,
+  InsightsRounded,
+  PlayArrow,
+  PsychologyRounded,
+  QueryStatsRounded,
+  RecordVoiceOverRounded,
+  ShieldOutlined,
+  TrendingUpRounded,
+} from "@mui/icons-material";
+
 import WaitlistSignupForm from "../components/WaitlistSignupForm";
+import { useClerk, useUser } from "../context/AuthContext";
+import { pricingPlans } from "../config/pricingConfig";
 import "../ui.css";
+
+const practiceSignals = [
+  "Live interviewer-led sessions",
+  "Technical, behavioral, and 360 tracks",
+  "Evidence-backed report after every session",
+];
+
+const signalCards = [
+  {
+    icon: RecordVoiceOverRounded,
+    title: "Conversation Quality",
+    body: "Sonia listens for pacing, clarity, structure, and whether your answer actually resolves the question.",
+  },
+  {
+    icon: PsychologyRounded,
+    title: "Reasoning Depth",
+    body: "Follow-ups pressure-test tradeoffs, assumptions, and the details that real interviewers probe.",
+  },
+  {
+    icon: QueryStatsRounded,
+    title: "Progress Evidence",
+    body: "Reports connect transcript evidence to coaching priorities, not vague encouragement.",
+  },
+];
+
+const reportRows = [
+  { label: "Opening structure", value: "Strong", tone: "good" },
+  { label: "Technical depth", value: "Needs proof", tone: "warn" },
+  { label: "Pacing", value: "148 WPM", tone: "good" },
+  { label: "Follow-up readiness", value: "Practice", tone: "neutral" },
+];
+
+const workflowSteps = [
+  {
+    step: "01",
+    title: "Choose the round",
+    body: "Pick behavioral, technical, or 360 interview setup with role context.",
+  },
+  {
+    step: "02",
+    title: "Talk to Sonia",
+    body: "Answer naturally while the app tracks listening, speaking, transcript, and evidence state.",
+  },
+  {
+    step: "03",
+    title: "Review the report",
+    body: "Use scored evidence, pacing notes, and next-practice priorities to improve.",
+  },
+];
 
 export default function LandingPage() {
   const { isSignedIn } = useUser();
   const { signOut } = useClerk();
-  const nav = useNavigate();
+  const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const scrollTop = window.scrollY;
-      setIsScrolled(scrollTop > 50);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const handleScroll = () => setIsScrolled(window.scrollY > 36);
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  const startPath = isSignedIn ? "/interviews" : "/interview-config";
+
   return (
-    <div style={{ minHeight: "100vh", display: "grid", gridTemplateRows: "auto 1fr", background: "#fff" }}>
-      {/* Glossy header */}
-      <header className="glossy-header">
-        <div className="glossy-inner">
-          {/* Left: Logo */}
-          <div className="brand-section">
-            <Link to="/" style={{ display: "flex", alignItems: "center", gap: "8px", textDecoration: "none", color: "inherit" }}>
-              <img
-                src="/assets/logo.png"
-                alt="Evaluate Yourself Logo"
-                style={{
-                  width: isScrolled ? 40 : 56,
-                  height: isScrolled ? 40 : 56,
-                  borderRadius: "12px",
-                  transition: "width 0.3s ease-in-out, height 0.3s ease-in-out"
-                }}
-              />
-              <span style={{ display: "grid", lineHeight: 1.1 }}>
-                <strong style={{
-                  fontSize: isScrolled ? "15px" : "18px",
-                  transition: "font-size 0.3s ease-in-out"
-                }}>Evaluate Yourself</strong>
-                <span style={{ fontSize: "11px", color: "#78716c", fontWeight: 700 }}>
-                  An Ignitz product
-                </span>
-              </span>
-            </Link>
-          </div>
+    <div className="landing-page">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
 
-          {/* Center: Navigation */}
-          <nav className="nav-center">
+      <header className={`landing-header ${isScrolled ? "is-scrolled" : ""}`}>
+        <div className="landing-header-inner">
+          <Link to="/" className="landing-brand" aria-label="Evaluate Yourself home">
+            <img
+              src="/assets/logo.png"
+              alt="Evaluate Yourself logo"
+              width="52"
+              height="52"
+              fetchpriority="high"
+              className="landing-brand-logo"
+            />
+            <span className="landing-brand-copy">
+              <strong translate="no">Evaluate Yourself</strong>
+              <span>An Ignitz Product</span>
+            </span>
+          </Link>
 
+          <nav className="landing-nav" aria-label="Primary">
+            <a href="#how-it-works">How It Works</a>
+            <a href="#report">Report</a>
+            <Link to="/pricing">Pricing</Link>
           </nav>
 
-          {/* Right: Action buttons */}
-          <div className="nav-right">
+          <div className="landing-actions">
             {!isSignedIn ? (
               <>
-                <Link to="/pricing" className="btn btn-ghost" style={{
-                  textDecoration: "none",
-                  fontSize: isScrolled ? "13px" : "14px",
-                  padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
-                }}>Pricing</Link>
-                <Link to="/login" className="btn btn-primary" style={{
-                  textDecoration: "none",
-                  fontSize: isScrolled ? "13px" : "14px",
-                  padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
-                }}>Login</Link>
-                <Link to="/register" className="btn btn-primary" style={{
-                  textDecoration: "none",
-                  fontSize: isScrolled ? "13px" : "14px",
-                  padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
-                }}>Register</Link>
+                <Link to="/login" className="landing-link-button">
+                  Sign In
+                </Link>
+                <Link to="/register" className="landing-primary-link">
+                  Create Account
+                </Link>
               </>
             ) : (
               <>
-                <button onClick={() => nav("/dashboard")} className="btn" style={{
-                  background: "#111827",
-                  color: "#fff",
-                  fontSize: isScrolled ? "13px" : "14px",
-                  padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
-                }}>Go to App</button>
-                <button onClick={signOut} className="btn btn-ghost" style={{
-                  fontSize: isScrolled ? "13px" : "14px",
-                  padding: isScrolled ? "6px 10px" : "8px 12px",
-                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
-                }}>Logout</button>
+                <button type="button" className="landing-link-button" onClick={() => navigate("/dashboard")}>
+                  Go to App
+                </button>
+                <button type="button" className="landing-primary-link" onClick={signOut}>
+                  Logout
+                </button>
               </>
             )}
           </div>
         </div>
       </header>
 
-      {/* HERO SECTION */}
-      <Box className="hero" sx={{ pt: { xs: 6, md: 10 }, pb: { xs: 6, md: 10 } }}>
-        <Container maxWidth="lg" sx={{ px: { xs: 2, md: 3 } }}>
-          <Grid container spacing={{ xs: 4, md: 6 }} alignItems="center">
+      <main id="main-content">
+        <section className="landing-hero" aria-labelledby="landing-title">
+          <div className="landing-shell landing-hero-grid">
+            <div className="landing-hero-copy">
+              <p className="landing-kicker">AI Interview Studio by Ignitz</p>
+              <h1 id="landing-title">Practice real interviews. Understand how you perform. Get interview-ready.</h1>
+              <p className="landing-lede">
+                Evaluate Yourself gives candidates a live AI interviewer, structured evidence capture, and a coaching
+                report that makes the next practice session obvious.
+              </p>
 
-            {/* LEFT CONTENT */}
-            <Grid item xs={12} md={6}>
-              <Stack spacing={3} textAlign="left">
-                <Typography
-                  sx={{
-                    width: "fit-content",
-                    px: 1.5,
-                    py: 0.6,
-                    borderRadius: 1.5,
-                    bgcolor: "rgba(15,118,110,.09)",
-                    color: "#0f766e",
-                    fontSize: 12,
-                    fontWeight: 800,
-                    letterSpacing: ".08em",
-                    textTransform: "uppercase",
-                  }}
+              <div className="landing-cta-row">
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<PlayArrow aria-hidden="true" />}
+                  onClick={() => navigate(startPath)}
                 >
-                  An Ignitz product
-                </Typography>
-                <Typography
-                  variant="h2"
-                  sx={{ fontWeight: 800, lineHeight: 1.2, fontSize: { xs: "2.1rem", sm: "2.6rem", md: "3.2rem" } }}
-                >
-                  Practice real interviews.<br />
-                  Understand how you perform.<br />
-                  Get interview-ready.
-                </Typography>
+                  Start Practicing
+                </Button>
+                <Button variant="outlined" size="large" onClick={() => navigate("/pricing")}>
+                  View Pricing
+                </Button>
+              </div>
 
-                <Typography sx={{ fontSize: { xs: 15, md: 18 }, opacity: 0.65, lineHeight: 1.6, maxWidth: 540 }}>
-                  Evaluate Yourself is a real-time AI interview platform that lets you experience realistic interviews,
-                  observes how you communicate and reason under pressure, and shows you exactly how to improve before the real one.
-                </Typography>
+              <ul className="landing-proof-list" aria-label="Platform highlights">
+                {practiceSignals.map((item) => (
+                  <li key={item}>
+                    <CheckRounded aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-                <Box sx={{ display: "flex", gap: 2, pt: 1, flexWrap: "wrap" }}>
-                  {!isSignedIn ? (
-                    <>
-                      <Button variant="contained" size="large" onClick={() => nav("/interview-config")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
-                        Start practicing
-                      </Button>
-                      <Button variant="outlined" size="large" onClick={() => nav("/pricing")} sx={{ px: { xs: 2.5, md: 3 }, fontSize: { xs: 14, md: 16 } }}>
-                        View pricing
-                      </Button>
-                    </>
-                  ) : (
-                    <Button variant="contained" size="large" onClick={() => nav("/interviews")} sx={{ px: { xs: 3, md: 4 }, fontSize: { xs: 14, md: 16 } }}>
-                      Start practicing
-                    </Button>
-                  )}
-                </Box>
+            <div className="landing-studio-card" aria-label="Interview studio preview">
+              <div className="landing-studio-top">
+                <div>
+                  <span className="landing-status-dot" />
+                  Sonia Is Live
+                </div>
+                <span>Round 1 · Technical</span>
+              </div>
+              <div className="landing-sonia-stage">
+                <div className="landing-sonia-avatar" aria-hidden="true">
+                  <GraphicEqRounded />
+                </div>
+                <div>
+                  <p className="landing-stage-label">Sonia</p>
+                  <h2>“Walk me through your approach before you optimize it.”</h2>
+                </div>
+              </div>
+              <div className="landing-signal-grid">
+                <div>
+                  <span>Listening</span>
+                  <strong>Active</strong>
+                </div>
+                <div>
+                  <span>Evidence</span>
+                  <strong>Trusted</strong>
+                </div>
+                <div>
+                  <span>Next Turn</span>
+                  <strong>Adaptive</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-                {!isSignedIn && (
-                  <WaitlistSignupForm
-                    sourcePage="landing"
-                    intent="free_trial"
-                    title="Want early access without creating an account?"
-                    helperText="Join the launch waitlist for free-trial reminders and release updates."
-                  />
-                )}
-              </Stack>
-            </Grid>
+        <section className="landing-section" aria-labelledby="signal-title">
+          <div className="landing-shell">
+            <div className="landing-section-heading">
+              <p className="landing-kicker">What Gets Measured</p>
+              <h2 id="signal-title">The interview feels live because the system watches the right signals.</h2>
+            </div>
 
-            {/* RIGHT SUMMARY */}
-            <Grid item xs={12} md={6} sx={{ display: "flex", justifyContent: "center" }}>
-              <Paper
-                elevation={2}
-                sx={{
-                  p: { xs: 3, md: 4.5 },
-                  borderRadius: { xs: 3, md: 4 },
-                  width: "100%",
-                  maxWidth: 520,
-                  background: "linear-gradient(180deg, #ffffff 0%, #faf8f3 100%)",
-                  border: "1px solid rgba(120,113,108,.14)",
-                  boxShadow: "0 24px 60px rgba(15,23,42,.10)",
-                }}
-              >
-                <Stack spacing={2.5}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#0f766e" }}>
-                    Interview Studio
-                  </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-                    Structured practice with a clear before-and-after view.
-                  </Typography>
-                  <Typography sx={{ fontSize: 15, lineHeight: 1.7, opacity: 0.72 }}>
-                    The session is built to feel formal and useful: one interviewer, one question at a time, then a report that shows where your answers were strong and where they broke down.
-                  </Typography>
-                  <Stack spacing={1.5} sx={{ pt: 1 }}>
-                    {[
-                      "Live interview flow instead of a quiz-style prompt list",
-                      "Evidence-backed report after each session",
-                      "Behavioral, technical, and 360 interview tracks in one workspace",
-                    ].map((item) => (
-                      <Paper
-                        key={item}
-                        elevation={0}
-                        sx={{
-                          px: { xs: 1.8, md: 2.1 },
-                          py: { xs: 1.55, md: 1.7 },
-                          borderRadius: 3,
-                          backgroundColor: "rgba(255,255,255,.82)",
-                          border: "1px solid rgba(120,113,108,.16)",
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,.85), 0 8px 22px rgba(15,23,42,.045)",
-                        }}
-                      >
-                        <Typography sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.55, color: "#0f172a" }}>
-                          {item}
-                        </Typography>
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Stack>
-              </Paper>
-            </Grid>
-
-          </Grid>
-        </Container>
-      </Box>
-
-                  
-      <Divider sx={{ my: 2 }} />
-
-      {/* SECTION 1 */}
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, px: { xs: 2, md: 3 } }}>
-        <Stack spacing={6} textAlign="center">
-          <Typography variant="h3" sx={{ fontWeight: 700, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>Practice a Real Interview</Typography>
-          <Grid container spacing={4}>
-            {[
-              { title: "Conversational flow", body: "Speak, pause, think, ask for clarification and continue naturally." },
-              { title: "No rehearsed answers", body: "You don’t memorize — you respond in real time." },
-              { title: "Human-like interviewer", body: "Questions and follow-ups react to you." }
-            ].map((item, i) => (
-              <Grid item xs={12} md={4} key={i}>
-                <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>{item.title}</Typography>
-                  <Typography sx={{ opacity: 0.7, fontSize: 16 }}>{item.body}</Typography>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        </Stack>
-      </Container>
-
-      <Divider sx={{ my: 2 }} />
-
-      {/* SECTION 2 */}
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, px: { xs: 2, md: 3 } }}>
-        <Stack spacing={6} textAlign="center">
-          <Typography variant="h3" sx={{ fontWeight: 700, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>Experience How You Perform</Typography>
-
-          <Grid container spacing={4} justifyContent="center">
-
-            {/* CARD 1 */}
-            <Grid item xs={12} md={5}>
-              <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
-                <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
-                  We observe how you answer,<br /> not just what you answer.
-                </Typography>
-
-                <Typography sx={{ fontSize: 16, opacity: 0.7, mb: 3 }}>
-                  The system listens and evaluates in real time, tracking:
-                </Typography>
-
-                <Grid container spacing={1.8} justifyContent="center">
-                  {[
-                    "Pace and flow of communication",
-                    "Clarity of explanation",
-                    "Technical depth and reasoning",
-                    "Confidence under pressure",
-                    "Understanding the real question"
-                  ].map((text, i) => (
-                    <Grid item xs={12} sm={6} key={i}>
-                      <Paper elevation={1} sx={{ p: 1.7, borderRadius: 1.5 }}>
-                        <Typography sx={{ fontSize: 14, fontWeight: 600, opacity: 0.8 }}>
-                          {text}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Card>
-            </Grid>
-
-            {/* CARD 2 */}
-            <Grid item xs={12} md={5}>
-              <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
-                <Typography variant="h5" sx={{ fontWeight: 700, mb: 3 }}>
-                  Adaptive Follow-Ups,<br /> Just Like Real Interviews
-                </Typography>
-
-                <Grid container spacing={2.2} justifyContent="center" sx={{ mb: 3 }}>
-                  {[
-                    { icon: <PlayArrow sx={{ fontSize: 26, opacity: 0.8 }} />, label: "Probes deeper when answers are shallow" },
-                    { icon: <Settings sx={{ fontSize: 26, opacity: 0.8 }} />, label: "Clarifies when you sound unclear" },
-                    { icon: <Assessment sx={{ fontSize: 26, opacity: 0.8 }} />, label: "Raises the bar when you're strong" }
-                  ].slice(0, 2).map((item, i) => (  // taking only 2 cards as requested
-                    <Grid item xs={12} key={i}>
-                      <Paper elevation={1} sx={{ p: 1.8, borderRadius: 1.5, display: "flex", alignItems: "center", gap: 1.4 }}>
-                        {item.icon}
-                        <Typography sx={{ fontSize: 14, fontWeight: 600, opacity: 0.85 }}>
-                          {item.label}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
-
-                <Typography sx={{ fontSize: 16, opacity: 0.6 }}>
-                  The interviewer reacts to you, challenges you when you're strong, and guides you when you're stuck.
-                </Typography>
-              </Card>
-            </Grid>
-
-          </Grid>
-        </Stack>
-      </Container>
-
-
-      <Divider sx={{ my: 2 }} />
-
-      {/* SECTION 3 */}
-      <Container maxWidth="lg" sx={{ py: { xs: 5, md: 8 }, px: { xs: 2, md: 3 } }}>
-        <Stack spacing={7} textAlign="center" alignItems="center">
-
-          <Typography variant="h3" sx={{ fontWeight: 800, opacity: 0.9, fontSize: { xs: "2rem", md: "2.8rem" } }}>
-            Actionable Feedback Report
-          </Typography>
-
-          <Grid container spacing={5} justifyContent="center" sx={{ width: "100%", maxWidth: 1200 }}>
-
-            {/* CARD 1 */}
-            <Grid item xs={12} md={5}>
-              <Card sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, boxShadow: 1.2, height: "100%" }}>
-                <Stack spacing={1.5} alignItems="center">
-                  <Assessment sx={{ fontSize: 34, opacity: 0.8 }} />
-                  <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.9 }}>
-                    Breakdown & Patterns
-                  </Typography>
-                </Stack>
-
-                <Stack spacing={1.4} sx={{ mt: 2.5 }}>
-                  {[
-                    "Where your answers broke down",
-                    "Detected patterns across the interview",
-                    "Common mistakes real interviewers notice",
-                    "Why those mistakes matter in real rounds"
-                  ].map((text, i) => (
-                    <Paper key={i} elevation={1} sx={{ p: 1.7, borderRadius: 1.5, width: "100%" }}>
-                      <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
-                        {text}
-                      </Typography>
-                    </Paper>
-                  ))}
-                </Stack>
-              </Card>
-            </Grid>
-
-            {/* CARD 2 */}
-            <Grid item xs={12} md={5}>
-              <Card sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, boxShadow: 1.2, height: "100%" }}>
-                <Stack spacing={1.5} alignItems="center">
-                  <Settings sx={{ fontSize: 32, opacity: 0.8 }} />
-                  <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.9 }}>
-                    What to Improve Next
-                  </Typography>
-                </Stack>
-
-                <Stack spacing={1.4} sx={{ mt: 2.5 }}>
-                  {[
-                    "What to change in communication or logic",
-                    "How to structure answers better",
-                    "What to practice in the next session",
-                    "Signals of confidence vs hesitation"
-                  ].map((text, i) => (
-                    <Paper key={i} elevation={1} sx={{ p: 1.7, borderRadius: 1.5, width: "100%" }}>
-                      <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
-                        {text}
-                      </Typography>
-                    </Paper>
-                  ))}
-                </Stack>
-              </Card>
-            </Grid>
-
-          </Grid>
-
-          {/* REPORT SUMMARY BOX */}
-          <Paper elevation={2} sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, maxWidth: 780, mt: 3 }}>
-            <Typography sx={{ fontSize: 17, fontWeight: 600, opacity: 0.65, lineHeight: 1.6 }}>
-              No vague advice. No generic scores.<br />
-              Just clear, repeatable, interviewer-grade improvement guidance.
-            </Typography>
-          </Paper>
-
-          <Stack spacing={1.5} alignItems="center" sx={{ width: "100%", mt: 3 }}>
-            <Typography variant="h4" sx={{ fontWeight: 800, opacity: 0.92 }}>
-              Pricing Plans
-            </Typography>
-            <Typography sx={{ fontSize: 16, opacity: 0.65, maxWidth: 720 }}>
-              Choose the track that matches your interview goals. Start with a free 5-minute trial.
-            </Typography>
-          </Stack>
-
-          <Grid container spacing={2.5} sx={{ width: "100%", maxWidth: 1240 }}>
-            {pricingPlans.map((plan) => (
-              <Grid item xs={12} md={4} key={plan.key}>
-                <Card
-                  sx={{
-                    p: 3.5,
-                    borderRadius: 2,
-                    border: "1px solid",
-                    borderColor: "divider",
-                    boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
-                    height: "100%",
-                    textAlign: "left",
-                  }}
-                >
-                  <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
-                    {plan.tierLabel}
-                  </Typography>
-                  <Typography sx={{ mt: 0.6, fontSize: 16, opacity: 0.74 }}>
-                    {plan.tagline}
-                  </Typography>
-
-                  <Typography sx={{ mt: 3, fontSize: { xs: 34, md: 44 }, fontWeight: 800, lineHeight: 1 }}>
-                    {plan.priceLabel}
-                  </Typography>
-                  <Typography sx={{ mt: 0.6, fontSize: 16, opacity: 0.62 }}>
-                    {plan.priceSubLabel}
-                  </Typography>
-
-                  <Button
-                    variant="contained"
-                    fullWidth
-                    onClick={() => nav("/pricing")}
-                    sx={{
-                      mt: 2.4,
-                      py: 1.1,
-                      borderRadius: 2,
-                      textTransform: "none",
-                      fontWeight: 700,
-                      bgcolor: "#0b0f19",
-                      "&:hover": { bgcolor: "#111827" },
-                    }}
-                  >
-                    {plan.ctaLabel}
-                  </Button>
-
-                  <Divider sx={{ my: 2.2 }} />
-
-                  <Typography sx={{ fontSize: 17, fontWeight: 700, mb: 0.8 }}>
-                    {plan.introLine}
-                  </Typography>
-
-                  <Stack spacing={1.2}>
-                    {plan.features.slice(0, 5).map((feature) => (
-                      <Stack key={feature} direction="row" spacing={1} alignItems="flex-start">
-                        <CheckRounded sx={{ fontSize: 18, mt: "3px", opacity: 0.82 }} />
-                        <Typography sx={{ fontSize: 16, opacity: 0.88 }}>
-                          {feature}
-                        </Typography>
-                      </Stack>
-                    ))}
-                  </Stack>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-
-        </Stack>
-      </Container>
-
-
-      <Divider sx={{ my: 2 }} />
-
-      {/* CLOSING SECTION */}
-      <Box sx={{ py: 6 }}>
-        <Container maxWidth="sm">
-          <Stack spacing={5} textAlign="center" alignItems="center">
-            <Typography variant="h3" sx={{ fontWeight: 800, lineHeight: 1.3, fontSize: { xs: "1.9rem", md: "2.6rem" } }}>
-              Interviews are a skill.<br />Skills improve with practice and feedback.
-            </Typography>
-
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} justifyContent="center" sx={{ width: "100%" }}>
-              {[
-                "Real interview experience",
-                "Honest observation",
-                "Clear direction to improve"
-              ].map((text, i) => (
-                <Paper key={i} elevation={1} sx={{ px: 2.2, py: 1.2, borderRadius: 1.5 }}>
-                  <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
-                    {text}
-                  </Typography>
-                </Paper>
+            <div className="landing-signal-cards">
+              {signalCards.map(({ icon: Icon, title, body }) => (
+                <article className="landing-signal-card" key={title}>
+                  <Icon aria-hidden="true" />
+                  <h3>{title}</h3>
+                  <p>{body}</p>
+                </article>
               ))}
-            </Stack>
+            </div>
+          </div>
+        </section>
 
-            <Button variant="contained" size="large" onClick={() => nav("/interview-config")} sx={{ px: 5, fontSize: 17, borderRadius: 2 }}>
-              Start practicing now
+        <section className="landing-section landing-report-section" id="report" aria-labelledby="report-title">
+          <div className="landing-shell landing-report-grid">
+            <div className="landing-section-heading">
+              <p className="landing-kicker">Actionable Feedback Report</p>
+              <h2 id="report-title">A report that shows what broke, what worked, and what to practice next.</h2>
+              <p>
+                No generic confidence score by itself. The report ties observations back to transcript, pacing, and
+                interviewer-style expectations.
+              </p>
+            </div>
+
+            <div className="landing-report-card">
+              <div className="landing-report-header">
+                <div>
+                  <p>Session Breakdown</p>
+                  <h3>Backend Engineer · System Design</h3>
+                </div>
+                <InsightsRounded aria-hidden="true" />
+              </div>
+              <div className="landing-report-score">
+                <strong>74</strong>
+                <span>Coach-Grade Score</span>
+              </div>
+              <div className="landing-report-rows">
+                {reportRows.map((row) => (
+                  <div className="landing-report-row" key={row.label}>
+                    <span>{row.label}</span>
+                    <strong className={`is-${row.tone}`}>{row.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section" id="how-it-works" aria-labelledby="workflow-title">
+          <div className="landing-shell">
+            <div className="landing-section-heading is-centered">
+              <p className="landing-kicker">Release-Ready Candidate Flow</p>
+              <h2 id="workflow-title">One clear path from setup to report.</h2>
+            </div>
+
+            <div className="landing-workflow">
+              {workflowSteps.map((item) => (
+                <article className="landing-workflow-step" key={item.step}>
+                  <span>{item.step}</span>
+                  <h3>{item.title}</h3>
+                  <p>{item.body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section landing-pricing-strip" aria-labelledby="pricing-title">
+          <div className="landing-shell">
+            <div className="landing-section-heading is-centered">
+              <p className="landing-kicker">Plans</p>
+              <h2 id="pricing-title">Start free, upgrade when you need deeper preparation.</h2>
+            </div>
+
+            <div className="landing-plan-row">
+              {pricingPlans.map((plan) => (
+                <article className={`landing-plan-card ${plan.highlighted ? "is-highlighted" : ""}`} key={plan.key}>
+                  <p>{plan.tierLabel}</p>
+                  <h3>{plan.name}</h3>
+                  <strong>{plan.priceLabel}</strong>
+                  <span>{plan.bestFor}</span>
+                </article>
+              ))}
+            </div>
+
+            {!isSignedIn && (
+              <div className="landing-waitlist">
+                <WaitlistSignupForm
+                  sourcePage="landing"
+                  intent="free_trial"
+                  title="Want launch updates without creating an account?"
+                  helperText="Join the waitlist for release notes, trial windows, and new interview tracks."
+                />
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="landing-final-cta" aria-labelledby="final-title">
+          <div className="landing-shell landing-final-inner">
+            <ShieldOutlined aria-hidden="true" />
+            <h2 id="final-title">Make tomorrow’s test run feel like a real candidate session.</h2>
+            <p>Use the platform end to end: setup, live interview, saved evidence, and report review.</p>
+            <Button variant="contained" size="large" startIcon={<TrendingUpRounded aria-hidden="true" />} onClick={() => navigate(startPath)}>
+              Start Practicing
             </Button>
-
-            <Typography sx={{ fontSize: 16, opacity: 0.6 }}>
-              So when the real interview happens, it won’t feel new anymore.
-            </Typography>
-          </Stack>
-        </Container>
-      </Box>
-
-      {/* ONE-LINE YC SUMMARY */}
-      <Box sx={{ textAlign: "center", py: 3, opacity: 0.5, fontSize: 14 }}>
-        Evaluate Yourself helps candidates practice real interviews, understand how they perform under pressure, and improve before the real interview.
-      </Box>
-
-      <Box
-        component="div"
-        sx={{
-          width: "100%",
-          bgcolor: "primary.main",
-          m: 0,
-          mt: { xs: 4, md: 6 },
-          py: { xs: 4, md: 5 },
-          textAlign: "center"
-        }}
-      >
-        <Typography
-          sx={{
-            fontSize: { xs: 56, sm: 96, md: 164 },
-            fontWeight: 800,
-            letterSpacing: 1.2,
-            lineHeight: 0.9,
-            opacity: 0.95,
-            color: "white"
-          }}
-        >
-          EvaluateYourself
-        </Typography>
-        <div style={{ width: "100%", marginTop: 12, marginBottom: 8 }}>
-          <Divider sx={{ bgcolor: "white", opacity: 0.3, height: 2, width: "100%" }} />
-        </div>
-      </Box>
-
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
-
-// function Feature({ tone, title, body }) {
-//   return (
-//     <div className={`card ${tone}`}>
-//       <div className="card-title">{title}</div>
-//       <div className="card-body">{body}</div>
-//     </div>
-//   );
-// }

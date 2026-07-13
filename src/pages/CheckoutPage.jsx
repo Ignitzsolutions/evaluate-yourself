@@ -194,6 +194,9 @@ export default function CheckoutPage() {
                   <Typography variant="subtitle2">Contact information</Typography>
                   <TextField
                     type="email"
+                    name="email"
+                    autoComplete="email"
+                    spellCheck={false}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="email@example.com"

@@ -9,6 +9,7 @@ import SetPasswordPage from "../SetPasswordPage";
 
 const mockLogin = jest.fn();
 const mockRegister = jest.fn();
+const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
 
 jest.mock("../../context/AuthContext", () => ({
   useAuthActions: () => ({
@@ -27,7 +28,7 @@ describe("auth pages", () => {
 
   test("register page shows the account creation flow", () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <RegisterPage />
       </MemoryRouter>,
     );
@@ -39,7 +40,7 @@ describe("auth pages", () => {
 
   test("forgot password page shows the recovery flow", () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <ForgotPasswordPage />
       </MemoryRouter>,
     );
@@ -50,7 +51,7 @@ describe("auth pages", () => {
 
   test("set password page requires a secure setup token", () => {
     render(
-      <MemoryRouter initialEntries={["/set-password"]}>
+      <MemoryRouter initialEntries={["/set-password"]} future={routerFuture}>
         <SetPasswordPage />
       </MemoryRouter>,
     );
@@ -62,7 +63,7 @@ describe("auth pages", () => {
 
   test("login page shows the sign-in flow", () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <LoginPage />
       </MemoryRouter>,
     );

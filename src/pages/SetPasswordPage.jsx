@@ -100,7 +100,9 @@ export default function SetPasswordPage() {
       <form onSubmit={handleSubmit}>
         <TextField
           label="New password"
+          name="new-password"
           type="password"
+          autoComplete="new-password"
           fullWidth
           required
           disabled={!setupToken || loading}
@@ -112,7 +114,9 @@ export default function SetPasswordPage() {
         />
         <TextField
           label="Confirm new password"
+          name="confirm-password"
           type="password"
+          autoComplete="new-password"
           fullWidth
           required
           disabled={!setupToken || loading}

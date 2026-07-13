@@ -22,10 +22,30 @@ const DEFAULT_STATE = {
 
 const RuntimeModeContext = createContext({ ...DEFAULT_STATE, refresh: () => {} });
 
+function isBackendIndependentPath(pathname) {
+  return (
+    pathname === "/" ||
+    pathname === "/presentation" ||
+    pathname === "/pricing" ||
+    pathname.startsWith("/checkout") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/set-password") ||
+    pathname.startsWith("/admin/login")
+  );
+}
+
 export function RuntimeModeProvider({ children }) {
   const [state, setState] = useState(DEFAULT_STATE);
 
   const load = useCallback(async () => {
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+    if (isBackendIndependentPath(pathname)) {
+      setState((s) => ({ ...s, loading: false }));
+      return;
+    }
+
     try {
       const base = getApiBaseUrl();
       const res = await fetch(`${base}/api/system/runtime-mode`, {

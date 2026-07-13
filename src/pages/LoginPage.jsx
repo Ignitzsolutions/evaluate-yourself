@@ -48,8 +48,8 @@ export default function LoginPage() {
       </Typography>
       <form onSubmit={handleSubmit}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <TextField label="Email" type="email" fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
-        <TextField label="Password" type="password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Email" name="email" type="email" autoComplete="email" spellCheck={false} fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Password" name="password" type="password" autoComplete="current-password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
         <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ mb: 1.5, py: 1.2 }}>
           {loading ? <CircularProgress size={20} color="inherit" /> : "Sign In"}
         </Button>

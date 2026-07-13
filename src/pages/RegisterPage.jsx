@@ -49,10 +49,10 @@ export default function RegisterPage() {
       </Typography>
       <form onSubmit={handleSubmit}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <TextField label="Full Name" fullWidth required value={fullName} onChange={(e) => setFullName(e.target.value)} sx={{ mb: 2 }} size="small" />
-        <TextField label="Email" type="email" fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
-        <TextField label="Password" type="password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" helperText="8+ chars, uppercase, lowercase, digit" />
-        <TextField label="Confirm Password" type="password" fullWidth required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Full Name" name="name" autoComplete="name" fullWidth required value={fullName} onChange={(e) => setFullName(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Email" name="email" type="email" autoComplete="email" spellCheck={false} fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Password" name="new-password" type="password" autoComplete="new-password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" helperText="8+ chars, uppercase, lowercase, digit" />
+        <TextField label="Confirm Password" name="confirm-password" type="password" autoComplete="new-password" fullWidth required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
         <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ mb: 1.5, py: 1.2 }}>
           {loading ? <CircularProgress size={20} color="inherit" /> : "Create Account"}
         </Button>
