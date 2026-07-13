@@ -85,7 +85,9 @@ class TokenService:
         }
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
 
-    def create_password_setup_token(self, user_id: str, email: str, lifetime_minutes: int = 15) -> str:
+    def create_password_setup_token(
+        self, user_id: str, email: str, lifetime_minutes: int = 15
+    ) -> str:
         """Create a short-lived token scoped only to first-time password setup."""
         now = datetime.now(timezone.utc)
         jti = str(uuid.uuid4())

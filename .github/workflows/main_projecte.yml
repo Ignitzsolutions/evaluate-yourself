@@ -160,13 +160,13 @@ jobs:
             --exclude=backend/venv \
             --exclude=test-results \
             --exclude=.playwright-cli \
-            -czf release.tar.gz .
+            -czf "${RUNNER_TEMP}/release.tar.gz" .
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: release-bundle
-          path: release.tar.gz
+          path: ${{ runner.temp }}/release.tar.gz
 
   deploy-via-ssh:
     runs-on: ubuntu-22.04

@@ -4,6 +4,7 @@ import {
   Button,
   Chip,
   Container,
+  Divider,
   Grid,
   Paper,
   Stack,
@@ -26,7 +27,7 @@ const interviewTypes = [
     id: "technical",
     title: "Technical Interview",
     description: "Coding, system design, and technical depth checks.",
-    icon: <Code sx={{ fontSize: 48 }} />,
+    icon: Code,
     duration: "25-45 min",
     difficulty: "Medium-Hard",
   },
@@ -34,7 +35,7 @@ const interviewTypes = [
     id: "behavioral",
     title: "Behavioral Interview",
     description: "STAR stories, judgment, collaboration, and role-fit answers.",
-    icon: <Psychology sx={{ fontSize: 48 }} />,
+    icon: Psychology,
     duration: "15-30 min",
     difficulty: "Medium",
   },
@@ -42,7 +43,7 @@ const interviewTypes = [
     id: "mixed",
     title: "360 Interview",
     description: "A balanced technical and behavioral session.",
-    icon: <Shuffle sx={{ fontSize: 48 }} />,
+    icon: Shuffle,
     duration: "30-60 min",
     difficulty: "Varies",
   },
@@ -50,7 +51,7 @@ const interviewTypes = [
     id: "communication-practice",
     title: "Communication Practice",
     description: "Voice-first drills for grammar, pacing, and fluency.",
-    icon: <RecordVoiceOver sx={{ fontSize: 48 }} />,
+    icon: RecordVoiceOver,
     duration: "5-20 min",
     difficulty: "Adaptive",
   },
@@ -71,114 +72,138 @@ export default function InterviewsPage() {
 
   return (
     <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-      <Box sx={{ px: { xs: 2, md: 4 }, pt: { xs: 4, md: 7 }, pb: { xs: 4, md: 6 } }}>
+      <Box sx={{ px: { xs: 2, md: 4 }, py: { xs: 3, md: 6 } }}>
         <Container maxWidth="lg">
-          <Paper
-            elevation={0}
-            className="studio-panel"
-            sx={{
-              p: { xs: 3, md: 4 },
-              overflow: "hidden",
-              position: "relative",
-            }}
-          >
-            <Stack spacing={2.5}>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
-                <Box>
-                  <Chip
-                    label={freeAccessMode ? "Free demo enabled" : "Interview studio"}
-                    sx={{
-                      mb: 1.2,
-                      fontWeight: 800,
-                      letterSpacing: ".08em",
-                      textTransform: "uppercase",
-                    }}
-                  />
-                  <Stack direction="row" spacing={1.2} alignItems="center">
-                    <InterviewsIcon color="primary" />
-                    <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: "-0.04em" }}>
-                      Choose interview type
-                    </Typography>
-                  </Stack>
-                  <Typography color="text.secondary" sx={{ mt: 1.1, maxWidth: 720 }}>
-                    {freeAccessMode
-                      ? "Select one format. No trial code is required for the hosted beta flow."
-                      : "Select the format that matches the session you want to practice."}
-                  </Typography>
-                </Box>
-
-                <Stack direction="row" spacing={1.2} sx={{ flexWrap: "wrap" }}>
-                  <Button variant="outlined" onClick={() => navigate("/dashboard")} sx={{ borderRadius: 999, px: 2.5 }}>
-                    Back to dashboard
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={<ArrowForward />}
-                    onClick={handleContinue}
-                    sx={{ borderRadius: 999, px: 2.8 }}
-                  >
-                    Continue with {selectedInterview.title}
-                  </Button>
-                </Stack>
+          <Stack spacing={3}>
+            <Box component="header">
+              <Button variant="text" onClick={() => navigate("/dashboard")} sx={{ px: 0, mb: 1 }}>
+                Back to Dashboard
+              </Button>
+              <Stack direction="row" spacing={1.2} alignItems="center" sx={{ mb: 1 }}>
+                <InterviewsIcon color="primary" aria-hidden="true" />
+                <Typography variant="h3" component="h1" sx={{ textWrap: "balance" }}>
+                  Choose Your Interview Track
+                </Typography>
               </Stack>
+              <Typography color="text.secondary" sx={{ maxWidth: 680 }}>
+                {freeAccessMode
+                  ? "Pick the session Sonia should run. Free access is enabled, so you can start without a trial code."
+                  : "Pick the session Sonia should run, then tune the role, difficulty, and evidence settings."}
+              </Typography>
+            </Box>
 
-              <Grid container spacing={2.5}>
-                {interviewTypes.map((type) => {
-                  const selected = selectedType === type.id;
-                  return (
-                    <Grid item xs={12} md={6} key={type.id}>
-                      <Paper
-                        elevation={0}
-                        component="button"
-                        type="button"
-                        aria-pressed={selected}
-                        className="studio-section"
-                        onClick={() => setSelectedType(type.id)}
-                        sx={{
-                          width: "100%",
-                          textAlign: "left",
-                          height: "100%",
-                          cursor: "pointer",
-                          font: "inherit",
-                          color: "inherit",
-                          borderColor: selected ? "primary.main" : "divider",
-                          boxShadow: "none",
-                          bgcolor: selected ? "action.selected" : "background.paper",
-                          "&:focus-visible": {
-                            outline: "3px solid",
-                            outlineColor: "primary.light",
-                            outlineOffset: 2,
-                          },
-                        }}
-                      >
-                        <Stack spacing={2}>
-                          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
-                            <Box sx={{ color: selected ? "primary.main" : "text.secondary" }}>{type.icon}</Box>
-                            <Chip
-                              label={selected ? "Selected" : "Select"}
-                              size="small"
-                              color={selected ? "primary" : "default"}
-                              variant={selected ? "filled" : "outlined"}
-                            />
-                          </Box>
-                          <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: "-0.03em" }}>
-                            {type.title}
-                          </Typography>
-                          <Typography color="text.secondary" sx={{ maxWidth: 560 }}>
-                            {type.description}
-                          </Typography>
-                          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-                            <Chip label={type.duration} size="small" variant="outlined" />
-                            <Chip label={type.difficulty} size="small" variant="outlined" />
-                          </Stack>
-                        </Stack>
-                      </Paper>
-                    </Grid>
-                  );
-                })}
+            <Grid container spacing={2.5} alignItems="stretch">
+              <Grid item xs={12} md={4}>
+                <Paper elevation={0} sx={{ height: "100%", p: { xs: 2.5, md: 3 }, boxShadow: "none" }}>
+                  <Stack spacing={2.25} sx={{ height: "100%" }}>
+                    <Chip label="Selected Track" color="primary" sx={{ alignSelf: "flex-start" }} />
+                    <Box>
+                      <Typography variant="h4" component="h2">
+                        {selectedInterview.title}
+                      </Typography>
+                      <Typography color="text.secondary" sx={{ mt: 1 }}>
+                        {selectedInterview.description}
+                      </Typography>
+                    </Box>
+                    <Divider />
+                    <Stack spacing={1.25}>
+                      <Stack direction="row" justifyContent="space-between" gap={2}>
+                        <Typography color="text.secondary">Duration</Typography>
+                        <Typography fontWeight={800}>{selectedInterview.duration}</Typography>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between" gap={2}>
+                        <Typography color="text.secondary">Difficulty</Typography>
+                        <Typography fontWeight={800}>{selectedInterview.difficulty}</Typography>
+                      </Stack>
+                    </Stack>
+                    <Box sx={{ flex: 1 }} />
+                    <Button
+                      variant="contained"
+                      size="large"
+                      startIcon={<ArrowForward />}
+                      onClick={handleContinue}
+                      fullWidth
+                    >
+                      Configure {selectedInterview.title}
+                    </Button>
+                  </Stack>
+                </Paper>
               </Grid>
-            </Stack>
-          </Paper>
+
+              <Grid item xs={12} md={8}>
+                <Paper elevation={0} sx={{ p: { xs: 1, sm: 1.25 }, boxShadow: "none" }}>
+                  <Stack component="ul" spacing={1} sx={{ p: 0, m: 0, listStyle: "none" }}>
+                    {interviewTypes.map((type) => {
+                      const selected = selectedType === type.id;
+                      const TypeIcon = type.icon;
+                      return (
+                        <Box component="li" key={type.id}>
+                          <Paper
+                            elevation={0}
+                            component="button"
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => setSelectedType(type.id)}
+                            sx={{
+                              width: "100%",
+                              p: { xs: 2, sm: 2.25 },
+                              display: "grid",
+                              gridTemplateColumns: { xs: "auto 1fr", sm: "auto 1fr auto" },
+                              gap: 2,
+                              alignItems: "center",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              font: "inherit",
+                              color: "inherit",
+                              borderColor: selected ? "primary.main" : "divider",
+                              borderWidth: selected ? 2 : 1,
+                              boxShadow: "none",
+                              bgcolor: selected ? "action.selected" : "background.paper",
+                              touchAction: "manipulation",
+                              "&:hover": {
+                                borderColor: selected ? "primary.main" : "text.secondary",
+                              },
+                              "&:focus-visible": {
+                                outline: "3px solid",
+                                outlineColor: "primary.light",
+                                outlineOffset: 2,
+                              },
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                width: 48,
+                                height: 48,
+                                borderRadius: 2,
+                                display: "grid",
+                                placeItems: "center",
+                                bgcolor: selected ? "primary.main" : "background.default",
+                                color: selected ? "primary.contrastText" : "text.secondary",
+                              }}
+                            >
+                              <TypeIcon aria-hidden="true" />
+                            </Box>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="h6" component="h2">
+                                {type.title}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                                {type.description}
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1} sx={{ gridColumn: { xs: "1 / -1", sm: "auto" }, justifySelf: { sm: "end" }, flexWrap: "wrap" }}>
+                              <Chip label={type.duration} size="small" variant="outlined" />
+                              <Chip label={selected ? "Selected" : type.difficulty} size="small" color={selected ? "primary" : "default"} variant={selected ? "filled" : "outlined"} />
+                            </Stack>
+                          </Paper>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                </Paper>
+              </Grid>
+            </Grid>
+          </Stack>
         </Container>
       </Box>
     </Box>
