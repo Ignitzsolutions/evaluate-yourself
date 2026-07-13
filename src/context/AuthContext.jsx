@@ -144,7 +144,7 @@ export function AuthProvider({ children }) {
   // Used after MFA enrollment confirms — exchanges the mfa_token for a real
   // session by calling /api/auth/login/mfa with the verification code.
   const completeMfaLogin = useCallback(async (mfaToken, code) => {
-    const resp = await fetch(`${API_BASE}/api/auth/login/mfa`, {
+    const resp = await fetch(apiUrl("/api/auth/login/mfa"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mfa_token: mfaToken, code }),

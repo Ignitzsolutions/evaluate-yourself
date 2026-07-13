@@ -2,9 +2,9 @@ import { createTheme, responsiveFontSizes } from '@mui/material/styles';
 
 const colors = {
   primary: {
-    main: '#1d4ed8',
-    light: '#4f83ff',
-    dark: '#123b9a',
+    main: '#0f766e',
+    light: '#14b8a6',
+    dark: '#115e59',
     contrastText: '#ffffff',
   },
   secondary: {
@@ -29,9 +29,9 @@ const colors = {
     dark: '#b45309',
   },
   info: {
-    main: '#0284c7',
-    light: '#38bdf8',
-    dark: '#0369a1',
+    main: '#475569',
+    light: '#94a3b8',
+    dark: '#334155',
   },
   grey: {
     50: '#f8fafc',
@@ -46,9 +46,9 @@ const colors = {
     900: '#0f172a',
   },
   background: {
-    default: '#f7fafc',
+    default: '#f7f6f3',
     paper: '#ffffff',
-    dark: '#edf2f7',
+    dark: '#ebe7dc',
   },
   text: {
     primary: '#0f172a',
@@ -105,7 +105,7 @@ let theme = createTheme({
           WebkitFontSmoothing: 'antialiased',
         },
         '::selection': {
-          backgroundColor: 'rgba(29, 78, 216, 0.16)',
+          backgroundColor: 'rgba(15, 118, 110, 0.16)',
         },
       },
     },
@@ -123,9 +123,9 @@ let theme = createTheme({
           },
         },
         contained: {
-          boxShadow: '0 12px 28px rgba(29, 78, 216, 0.18)',
+          boxShadow: '0 12px 28px rgba(15, 118, 110, 0.18)',
           '&:hover': {
-            boxShadow: '0 16px 34px rgba(29, 78, 216, 0.2)',
+            boxShadow: '0 16px 34px rgba(15, 118, 110, 0.2)',
           },
         },
         outlined: {
@@ -163,7 +163,7 @@ let theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 24,
+          borderRadius: 16,
           boxShadow: '0 18px 52px rgba(15, 23, 42, 0.08)',
           border: '1px solid rgba(148, 163, 184, 0.14)',
           overflow: 'hidden',
@@ -188,7 +188,7 @@ let theme = createTheme({
             backgroundColor: '#ffffff',
             transition: 'box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease',
             '&:hover .MuiOutlinedInput-notchedOutline': {
-              borderColor: 'rgba(29, 78, 216, 0.35)',
+              borderColor: 'rgba(15, 118, 110, 0.35)',
             },
             '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
               borderColor: colors.primary.main,

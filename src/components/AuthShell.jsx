@@ -16,10 +16,16 @@ export default function AuthShell({
       <section className="clerk-panel">
         <div className="clerk-hero">
           <div className="clerk-brand-row">
-            <div className="clerk-brand-mark" />
+            <img
+              src="/assets/logo.png"
+              alt="Evaluate Yourself logo"
+              width="44"
+              height="44"
+              className="clerk-brand-mark"
+            />
             <div>
               <div className="clerk-brand-name">Evaluate Yourself</div>
-              <div className="clerk-brand-sub">{eyebrow}</div>
+              <div className="clerk-brand-sub">An Ignitz product</div>
             </div>
           </div>
 

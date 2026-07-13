@@ -39,13 +39,18 @@ export default function LandingPage() {
                   width: isScrolled ? 40 : 56,
                   height: isScrolled ? 40 : 56,
                   borderRadius: "12px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "width 0.3s ease-in-out, height 0.3s ease-in-out"
                 }}
               />
-              <strong style={{
-                fontSize: isScrolled ? "15px" : "18px",
-                transition: "all 0.3s ease-in-out"
-              }}>Evaluate Yourself</strong>
+              <span style={{ display: "grid", lineHeight: 1.1 }}>
+                <strong style={{
+                  fontSize: isScrolled ? "15px" : "18px",
+                  transition: "font-size 0.3s ease-in-out"
+                }}>Evaluate Yourself</strong>
+                <span style={{ fontSize: "11px", color: "#78716c", fontWeight: 700 }}>
+                  An Ignitz product
+                </span>
+              </span>
             </Link>
           </div>
 
@@ -62,19 +67,19 @@ export default function LandingPage() {
                   textDecoration: "none",
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
                 }}>Pricing</Link>
                 <Link to="/login" className="btn btn-primary" style={{
                   textDecoration: "none",
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
                 }}>Login</Link>
                 <Link to="/register" className="btn btn-primary" style={{
                   textDecoration: "none",
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
                 }}>Register</Link>
               </>
             ) : (
@@ -84,12 +89,12 @@ export default function LandingPage() {
                   color: "#fff",
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 12px" : "8px 14px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
                 }}>Go to App</button>
                 <button onClick={signOut} className="btn btn-ghost" style={{
                   fontSize: isScrolled ? "13px" : "14px",
                   padding: isScrolled ? "6px 10px" : "8px 12px",
-                  transition: "all 0.3s ease-in-out"
+                  transition: "font-size 0.3s ease-in-out, padding 0.3s ease-in-out"
                 }}>Logout</button>
               </>
             )}
@@ -105,6 +110,22 @@ export default function LandingPage() {
             {/* LEFT CONTENT */}
             <Grid item xs={12} md={6}>
               <Stack spacing={3} textAlign="left">
+                <Typography
+                  sx={{
+                    width: "fit-content",
+                    px: 1.5,
+                    py: 0.6,
+                    borderRadius: 1.5,
+                    bgcolor: "rgba(15,118,110,.09)",
+                    color: "#0f766e",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  An Ignitz product
+                </Typography>
                 <Typography
                   variant="h2"
                   sx={{ fontWeight: 800, lineHeight: 1.2, fontSize: { xs: "2.1rem", sm: "2.6rem", md: "3.2rem" } }}
@@ -153,16 +174,16 @@ export default function LandingPage() {
                 elevation={2}
                 sx={{
                   p: { xs: 3, md: 4 },
-                  borderRadius: 5,
+                  borderRadius: 2.5,
                   width: "100%",
                   maxWidth: 520,
-                  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                  background: "linear-gradient(180deg, #ffffff 0%, #faf8f3 100%)",
                   border: "1px solid rgba(148,163,184,.16)",
                   boxShadow: "0 18px 44px rgba(15,23,42,.08)",
                 }}
               >
                 <Stack spacing={2.25}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#2563eb" }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#0f766e" }}>
                     Interview Studio
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
@@ -182,9 +203,9 @@ export default function LandingPage() {
                         elevation={0}
                         sx={{
                           p: 1.6,
-                          borderRadius: 3,
-                          backgroundColor: "rgba(37,99,235,.05)",
-                          border: "1px solid rgba(37,99,235,.08)",
+                          borderRadius: 1.5,
+                          backgroundColor: "rgba(245,245,244,.78)",
+                          border: "1px solid rgba(120,113,108,.14)",
                         }}
                       >
                         <Typography sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.55, color: "#0f172a" }}>
@@ -215,7 +236,7 @@ export default function LandingPage() {
               { title: "Human-like interviewer", body: "Questions and follow-ups react to you." }
             ].map((item, i) => (
               <Grid item xs={12} md={4} key={i}>
-                <Card sx={{ p: 4, borderRadius: 4, boxShadow: 1, height: "100%" }}>
+                <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
                   <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>{item.title}</Typography>
                   <Typography sx={{ opacity: 0.7, fontSize: 16 }}>{item.body}</Typography>
                 </Card>
@@ -236,7 +257,7 @@ export default function LandingPage() {
 
             {/* CARD 1 */}
             <Grid item xs={12} md={5}>
-              <Card sx={{ p: 4, borderRadius: 4, boxShadow: 1, height: "100%" }}>
+              <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
                 <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
                   We observe how you answer,<br /> not just what you answer.
                 </Typography>
@@ -254,7 +275,7 @@ export default function LandingPage() {
                     "Understanding the real question"
                   ].map((text, i) => (
                     <Grid item xs={12} sm={6} key={i}>
-                      <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+                      <Paper elevation={1} sx={{ p: 1.7, borderRadius: 1.5 }}>
                         <Typography sx={{ fontSize: 14, fontWeight: 600, opacity: 0.8 }}>
                           {text}
                         </Typography>
@@ -267,7 +288,7 @@ export default function LandingPage() {
 
             {/* CARD 2 */}
             <Grid item xs={12} md={5}>
-              <Card sx={{ p: 4, borderRadius: 4, boxShadow: 1, height: "100%" }}>
+              <Card sx={{ p: 3.5, borderRadius: 2, boxShadow: 1, height: "100%" }}>
                 <Typography variant="h5" sx={{ fontWeight: 700, mb: 3 }}>
                   Adaptive Follow-Ups,<br /> Just Like Real Interviews
                 </Typography>
@@ -279,7 +300,7 @@ export default function LandingPage() {
                     { icon: <Assessment sx={{ fontSize: 26, opacity: 0.8 }} />, label: "Raises the bar when you're strong" }
                   ].slice(0, 2).map((item, i) => (  // taking only 2 cards as requested
                     <Grid item xs={12} key={i}>
-                      <Paper elevation={1} sx={{ p: 2.2, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.6 }}>
+                      <Paper elevation={1} sx={{ p: 1.8, borderRadius: 1.5, display: "flex", alignItems: "center", gap: 1.4 }}>
                         {item.icon}
                         <Typography sx={{ fontSize: 14, fontWeight: 600, opacity: 0.85 }}>
                           {item.label}
@@ -314,22 +335,22 @@ export default function LandingPage() {
 
             {/* CARD 1 */}
             <Grid item xs={12} md={5}>
-              <Card sx={{ p: 5, borderRadius: 4, boxShadow: 1.2, height: "100%" }}>
-                <Stack spacing={2.2} alignItems="center">
+              <Card sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, boxShadow: 1.2, height: "100%" }}>
+                <Stack spacing={1.5} alignItems="center">
                   <Assessment sx={{ fontSize: 34, opacity: 0.8 }} />
                   <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.9 }}>
                     Breakdown & Patterns
                   </Typography>
                 </Stack>
 
-                <Stack spacing={2.4} sx={{ mt: 4 }}>
+                <Stack spacing={1.4} sx={{ mt: 2.5 }}>
                   {[
                     "Where your answers broke down",
                     "Detected patterns across the interview",
                     "Common mistakes real interviewers notice",
                     "Why those mistakes matter in real rounds"
                   ].map((text, i) => (
-                    <Paper key={i} elevation={1} sx={{ p: 2.2, borderRadius: 2, width: "100%" }}>
+                    <Paper key={i} elevation={1} sx={{ p: 1.7, borderRadius: 1.5, width: "100%" }}>
                       <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
                         {text}
                       </Typography>
@@ -341,22 +362,22 @@ export default function LandingPage() {
 
             {/* CARD 2 */}
             <Grid item xs={12} md={5}>
-              <Card sx={{ p: 5, borderRadius: 4, boxShadow: 1.2, height: "100%" }}>
-                <Stack spacing={2.2} alignItems="center">
+              <Card sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, boxShadow: 1.2, height: "100%" }}>
+                <Stack spacing={1.5} alignItems="center">
                   <Settings sx={{ fontSize: 32, opacity: 0.8 }} />
                   <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.9 }}>
                     What to Improve Next
                   </Typography>
                 </Stack>
 
-                <Stack spacing={2.4} sx={{ mt: 4 }}>
+                <Stack spacing={1.4} sx={{ mt: 2.5 }}>
                   {[
                     "What to change in communication or logic",
                     "How to structure answers better",
                     "What to practice in the next session",
                     "Signals of confidence vs hesitation"
                   ].map((text, i) => (
-                    <Paper key={i} elevation={1} sx={{ p: 2.2, borderRadius: 2, width: "100%" }}>
+                    <Paper key={i} elevation={1} sx={{ p: 1.7, borderRadius: 1.5, width: "100%" }}>
                       <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
                         {text}
                       </Typography>
@@ -369,7 +390,7 @@ export default function LandingPage() {
           </Grid>
 
           {/* REPORT SUMMARY BOX */}
-          <Paper elevation={2} sx={{ p: 4.5, borderRadius: 3, maxWidth: 780, mt: 6 }}>
+          <Paper elevation={2} sx={{ p: { xs: 3, md: 3.5 }, borderRadius: 2, maxWidth: 780, mt: 3 }}>
             <Typography sx={{ fontSize: 17, fontWeight: 600, opacity: 0.65, lineHeight: 1.6 }}>
               No vague advice. No generic scores.<br />
               Just clear, repeatable, interviewer-grade improvement guidance.
@@ -391,7 +412,7 @@ export default function LandingPage() {
                 <Card
                   sx={{
                     p: 3.5,
-                    borderRadius: 2.5,
+                    borderRadius: 2,
                     border: "1px solid",
                     borderColor: "divider",
                     boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
@@ -471,7 +492,7 @@ export default function LandingPage() {
                 "Honest observation",
                 "Clear direction to improve"
               ].map((text, i) => (
-                <Paper key={i} elevation={1} sx={{ px: 2.5, py: 1.4, borderRadius: 2 }}>
+                <Paper key={i} elevation={1} sx={{ px: 2.2, py: 1.2, borderRadius: 1.5 }}>
                   <Typography sx={{ fontSize: 15, fontWeight: 600, opacity: 0.8 }}>
                     {text}
                   </Typography>
