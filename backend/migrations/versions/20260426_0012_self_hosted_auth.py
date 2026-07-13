@@ -18,8 +18,14 @@ depends_on = None
 def upgrade():
     # --- Add new columns ---
     op.add_column("users", sa.Column("password_hash", sa.String(255), nullable=True))
-    op.add_column("users", sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("0")))
-    op.add_column("users", sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column(
+        "users",
+        sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
+    op.add_column(
+        "users",
+        sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
 
     # --- Make clerk_user_id nullable ---
     with op.batch_alter_table("users") as batch_op:
