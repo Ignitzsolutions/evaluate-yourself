@@ -1,4 +1,4 @@
-
+z
 
 <p align="center">
 	<img src="public/assets/logo.png" alt="Evaluate Yourself Logo" width="220" />
@@ -47,22 +47,6 @@ uv run uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 Open http://localhost:3000 in your browser. If port 3000 is occupied, the dev server will prompt to use another port.
 
-### Demo mode (run with no API keys)
-
-You can boot the entire app — admin dashboard, communication-practice scoring, and a simulated voice mic — without any real OpenAI / realtime keys:
-
-```bash
-# 1. Copy the example env (placeholder key triggers demo mode automatically)
-cp backend/.env.example backend/.env
-# 2. (optional) Seed the admin dashboard with realistic data
-python backend/scripts/seed_admin_demo_data.py --wipe
-# 3. Start backend + frontend
-(cd backend && uvicorn app:app --host 127.0.0.1 --port 8088 --reload) &
-REACT_APP_API_URL=http://127.0.0.1:8088 npm start
-```
-
-When `OPENAI_API_KEY` is empty or a placeholder, a "Demo mode" banner appears, the LLM provider returns deterministic canned responses, and `/api/realtime/sessions` returns a friendly stub instead of erroring. Set a real key to switch back to live behavior — no other config change required.
-
 ### Python tooling
 
 The backend Python source of truth is now:
@@ -79,7 +63,7 @@ uv run mypy
 uv run pytest backend/tests
 ```
 
-`requirements.txt` remains in the repo only as a compatibility export for non-`uv` environments during the transition.
+`requirements.txt` remains in the repo only as an Azure/Oryx compatibility export during the transition.
 
 ### LLM Configuration (Required for Voice Interview)
 
@@ -89,23 +73,7 @@ The voice-only interview feature requires an LLM realtime configuration.
 2. Configure your provider credentials in `backend/.env`
 3. Start the backend and verify `/health` returns success
 
-See [docs/guides/SETUP.md](docs/guides/SETUP.md), [docs/provider-matrix.md](docs/provider-matrix.md), and [docs/realtime-provider-architecture.md](docs/realtime-provider-architecture.md) for the active provider configuration and runtime architecture.
-
-## Server deployment
-
-Production deploys now target a Linux server over SSH with Docker Compose.
-
-Required GitHub Actions secrets:
-
-- `DEPLOY_HOST`
-- `DEPLOY_PORT`
-- `DEPLOY_USER`
-- `DEPLOY_SSH_KEY`
-- `DEPLOY_PATH`
-- `DEPLOY_ENV_FILE`
-- `APP_BASE_URL`
-
-`DEPLOY_ENV_FILE` should contain the full backend `backend/.env` contents for production. The deploy workflow uploads the release bundle, writes `backend/.env`, runs `docker compose up -d --build`, applies Alembic migrations, runs schema smoke inside the backend container, and then checks `APP_BASE_URL` via `/health` and core routes.
+See [docs/guides/SETUP.md](docs/guides/SETUP.md) for detailed configuration instructions.
 
 ### Documentation
 
@@ -117,3 +85,8 @@ Root-level legacy setup notes were moved into [`docs/guides/`](docs/guides/READM
 ## License
 
 This project is released under the terms of the MIT License. See `LICENSE` for details.
+## Database Entity Relationship Diagram (ERD)
+
+The following diagram shows the database design of the AI Self-Evaluation Platform.
+
+![ER Diagram](docs/images/erd-diagram.png)
