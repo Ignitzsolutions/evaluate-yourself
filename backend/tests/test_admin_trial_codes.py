@@ -595,7 +595,7 @@ def test_evaluation_quality_summary_counts_invalid_contracts():
     report_ok = models.InterviewReport(
         id="r1",
         session_id="s1",
-        user_id="candidate_1",
+        user_id="u1",
         title="Report 1",
         type="Mixed",
         mode="Voice",
@@ -617,7 +617,7 @@ def test_evaluation_quality_summary_counts_invalid_contracts():
     report_bad = models.InterviewReport(
         id="r2",
         session_id="s2",
-        user_id="candidate_1",
+        user_id="u1",
         title="Report 2",
         type="Mixed",
         mode="Voice",
@@ -827,7 +827,7 @@ def test_admin_interviews_returns_capture_source_and_filters_skill():
     report = models.InterviewReport(
         id="rep_1",
         session_id="session_1",
-        user_id="candidate_1",
+        user_id="u1",
         title="r",
         type="technical",
         mode="voice",
@@ -875,7 +875,7 @@ def test_admin_reports_filters_by_source_and_capture_status():
     report_ok = models.InterviewReport(
         id="rep_ok",
         session_id="session_ok",
-        user_id="candidate_1",
+        user_id="u1",
         title="ok",
         type="technical",
         mode="voice",
@@ -892,7 +892,7 @@ def test_admin_reports_filters_by_source_and_capture_status():
     report_other = models.InterviewReport(
         id="rep_other",
         session_id="session_other",
-        user_id="candidate_1",
+        user_id="u1",
         title="other",
         type="behavioral",
         mode="voice",

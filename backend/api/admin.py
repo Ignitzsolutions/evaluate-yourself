@@ -542,10 +542,10 @@ def list_candidates(
         ).order_by(models.InterviewSession.started_at.desc()).first()
         latest_preinterview = _extract_preinterview_from_session(latest_session)
         report_count = db.query(func.count(models.InterviewReport.id)).filter(
-            models.InterviewReport.user_id == user.clerk_user_id
+            models.InterviewReport.user_id == user.id
         ).scalar() or 0
         latest_report = db.query(models.InterviewReport).filter(
-            models.InterviewReport.user_id == user.clerk_user_id
+            models.InterviewReport.user_id == user.id
         ).order_by(models.InterviewReport.date.desc()).first()
         entitlement = _get_active_entitlement(db, user.clerk_user_id)
         rows.append(
@@ -616,7 +616,7 @@ def candidate_detail(
         models.InterviewSession.clerk_user_id == clerk_user_id
     ).order_by(models.InterviewSession.started_at.desc()).limit(20).all()
     reports = db.query(models.InterviewReport).filter(
-        models.InterviewReport.user_id == clerk_user_id
+        models.InterviewReport.user_id == user.id
     ).order_by(models.InterviewReport.date.desc()).limit(20).all()
     entitlements = db.query(models.UserEntitlement).filter(
         models.UserEntitlement.clerk_user_id == clerk_user_id
@@ -1574,7 +1574,7 @@ def admin_reports(
     now = _utcnow()
     query = db.query(models.InterviewReport, models.User).outerjoin(
         models.User,
-        models.User.clerk_user_id == models.InterviewReport.user_id,
+        models.User.id == models.InterviewReport.user_id,
     )
     if interview_type and str(interview_type).strip().lower() != "all":
         query = query.filter(models.InterviewReport.type == str(interview_type).strip().lower())
@@ -1587,6 +1587,7 @@ def admin_reports(
                 models.InterviewReport.id.ilike(like),
                 models.InterviewReport.session_id.ilike(like),
                 models.InterviewReport.user_id.ilike(like),
+                models.User.clerk_user_id.ilike(like),
                 models.User.full_name.ilike(like),
                 models.User.email.ilike(like),
                 models.User.phone_e164.ilike(like),
@@ -1610,7 +1611,7 @@ def admin_reports(
             {
                 "report_id": report_row.id,
                 "session_id": report_row.session_id,
-                "clerk_user_id": report_row.user_id,
+                "clerk_user_id": user_row.clerk_user_id if user_row else None,
                 "name": user_row.full_name if user_row else None,
                 "email": user_row.email if user_row else None,
                 "phone_e164": user_row.phone_e164 if user_row else None,
@@ -1988,7 +1989,7 @@ def _candidate_export_rows(db: Session, filters: Dict[str, Any]) -> List[Dict[st
                 "primary_stream": getattr(p2, "primary_stream", None) or "",
                 "profile_completion_score": int(getattr(p2, "profile_completion_score", 0) or 0),
                 "session_count": int(session_counts.get(u.clerk_user_id, 0)),
-                "report_count": int(report_counts.get(u.clerk_user_id, 0)),
+                "report_count": int(report_counts.get(u.id, 0)),
             }
         )
     return rows

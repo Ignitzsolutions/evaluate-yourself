@@ -53,4 +53,4 @@ def test_self_hosted_auth_migration_reaches_single_head(tmp_path):
             .scalars()
             .all()
         )
-        assert heads == ["20260430_0014"]
+        assert heads == ["20260501_0015"]

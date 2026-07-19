@@ -8,7 +8,7 @@ const API_BASE_URL = getApiBaseUrl();
 
 export default function RealtimeTestPage() {
   const { getToken } = useAuth();
-  // WebRTC refs
+  // Realtime transport refs
   const pcRef = useRef(null);
   const dcRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -39,7 +39,7 @@ export default function RealtimeTestPage() {
     }]);
   }, []);
 
-  // Connect to Realtime API
+  // Connect to the realtime provider through the backend bootstrap endpoint
   const handleConnect = useCallback(async () => {
     if (status === 'connecting' || status === 'connected' || status === 'ready') {
       return;
@@ -252,9 +252,6 @@ export default function RealtimeTestPage() {
 
       // Step 7: Send to backend
       addTranscript('system', `Sending SDP offer to backend...`);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f0ac307e-28cd-42c1-a0e2-49a4854100b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RealtimeTestPage.jsx:246',message:'Sending SDP offer to backend',data:{api_base_url:API_BASE_URL,sdp_length:offer.sdp.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const token = await getToken();
       const resp = await authFetch(`${API_BASE_URL}/api/realtime/webrtc`, token, {
         method: 'POST',
@@ -280,11 +277,7 @@ export default function RealtimeTestPage() {
           errorMessage = text || errorMessage;
         }
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f0ac307e-28cd-42c1-a0e2-49a4854100b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RealtimeTestPage.jsx:257',message:'Backend request failed',data:{status:resp.status,error_message:errorMessage.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
-        
-        // Distinguish between route not found vs provider API error
+        // Distinguish between route not found vs provider bootstrap error
         if (resp.status === 404 && !text.includes('Realtime API')) {
           errorMessage = `Backend route not found (404). Check if server is running and route exists.`;
         }
@@ -294,9 +287,6 @@ export default function RealtimeTestPage() {
       }
 
       const data = await resp.json();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f0ac307e-28cd-42c1-a0e2-49a4854100b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RealtimeTestPage.jsx:279',message:'Backend response received',data:{has_sdp_answer:!!data.sdpAnswer,response_keys:Object.keys(data)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       if (!data.sdpAnswer) {
         throw new Error('No SDP answer in response');
       }
@@ -322,7 +312,7 @@ export default function RealtimeTestPage() {
       await pc.setRemoteDescription({ type: 'answer', sdp: data.sdpAnswer });
       addTranscript('system', 'Remote description set, connection establishing...');
       
-      // Connection will be established via WebRTC ICE candidates
+      // Connection will be established via the negotiated peer connection
       // Status will update via onconnectionstatechange handler
 
     } catch (err) {
@@ -394,10 +384,10 @@ export default function RealtimeTestPage() {
     <Box sx={{ minHeight: '100vh', p: 4, backgroundColor: '#f5f5f5' }}>
       <Paper sx={{ maxWidth: 1200, mx: 'auto', p: 3 }}>
         <Typography variant="h4" gutterBottom>
-          GPT Realtime API Test
+          Realtime Session Test
         </Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
-          Simple test page to debug WebRTC connection to Azure OpenAI Realtime API
+          Simple test page to debug backend-managed realtime session bootstrap and transport
         </Typography>
 
         <Divider sx={{ my: 3 }} />
@@ -471,8 +461,8 @@ export default function RealtimeTestPage() {
           <Typography variant="subtitle2" gutterBottom>Connection Information</Typography>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, fontSize: '0.875rem' }}>
             <div><strong>Backend:</strong> {connectionInfo.backendEndpoint}</div>
-            <div><strong>Region:</strong> {connectionInfo.region || 'Not set'}</div>
-            <div><strong>Deployment:</strong> {connectionInfo.deployment || 'Not set'}</div>
+            <div><strong>Provider Region:</strong> {connectionInfo.region || 'Not set'}</div>
+            <div><strong>Provider Model/Deployment:</strong> {connectionInfo.deployment || 'Not set'}</div>
             <div><strong>ICE State:</strong> {connectionInfo.iceState || 'N/A'}</div>
             <div><strong>Signaling State:</strong> {connectionInfo.signalingState || 'N/A'}</div>
             {lastEvent && (

@@ -21,23 +21,31 @@ import re
 
 import math
 from pathlib import Path
+
 try:
     from dotenv import load_dotenv
     import pathlib
+
     # Load .env from project root first (user's main config)
     backend_dir = pathlib.Path(__file__).parent.resolve()
-    root_env = backend_dir.parent / '.env'
+    root_env = backend_dir.parent / ".env"
     if root_env.exists():
         load_dotenv(dotenv_path=root_env, override=True)
     # Also try loading from backend directory as fallback
-    env_path = backend_dir / '.env'
+    env_path = backend_dir / ".env"
     if env_path.exists():
         load_dotenv(dotenv_path=env_path, override=False)  # Don't override root .env values
 except ImportError:
     pass
 
 from models.personality import CreateAssessmentRequest, UpdateReflectionsRequest, PersonalityReport
-from models.interview import InterviewReport, InterviewReportSummary, CreateInterviewReportRequest, TranscriptMessage, ScoreBreakdown
+from models.interview import (
+    InterviewReport,
+    InterviewReportSummary,
+    CreateInterviewReportRequest,
+    TranscriptMessage,
+    ScoreBreakdown,
+)
 from services.personality_scoring import generate_report
 from services.interview_state import InterviewState, NextAction
 from services.interview_state_store import InterviewStateStore
@@ -61,6 +69,7 @@ from services.interview.persistence import (
     persist_interview_round,
     persist_session_memory_snapshot,
 )
+
 try:
     from backend.agents.judge_router import (
         build_evaluation_channel_plan,
@@ -115,14 +124,13 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Rect, String
 
-#database imports
+# database imports
 from db.database import DATABASE_URL, SessionLocal, engine
 from db import models
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import OperationalError
 from db.models import User
 from fastapi import Depends
+
 # from sqlalchemy.orm import Session
 from db.database import get_db
 from db.users import (
@@ -134,15 +142,14 @@ from db.users import (
 
 import logging
 
-if os.getenv("ENV", "development").strip().lower() not in {"production", "prod"}:
-    models.Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
 # Static asset setup
 BACKEND_STATIC_DIR = Path(__file__).resolve().parent / "static"
 if BACKEND_STATIC_DIR.exists():
-    app.mount("/backend-static", StaticFiles(directory=str(BACKEND_STATIC_DIR)), name="backend-static")
+    app.mount(
+        "/backend-static", StaticFiles(directory=str(BACKEND_STATIC_DIR)), name="backend-static"
+    )
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "build"
 FRONTEND_INDEX = FRONTEND_DIR / "index.html"
@@ -162,30 +169,45 @@ if FRONTEND_AVAILABLE:
 
 # Load environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
-OPENAI_API_BASE = (os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1") or "https://api.openai.com/v1").rstrip("/")
+OPENAI_API_BASE = (
+    os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1") or "https://api.openai.com/v1"
+).rstrip("/")
 OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-17")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "")
-
-# Backward-compatible aliases while internal route wiring is migrated.
-AZURE_OPENAI_API_KEY = OPENAI_API_KEY
-AZURE_OPENAI_ENDPOINT = OPENAI_API_BASE
-AZURE_OPENAI_DEPLOYMENT = OPENAI_REALTIME_MODEL
-AZURE_OPENAI_API_VERSION = OPENAI_API_VERSION
-AZURE_OPENAI_WHISPER_DEPLOYMENT = OPENAI_TRANSCRIBE_MODEL
+AI_PROVIDER = (os.getenv("AI_PROVIDER", "openai_native") or "openai_native").strip().lower()
+if AI_PROVIDER not in {"openai_native", "sarvam_hybrid"}:
+    AI_PROVIDER = "openai_native"
+SARVAM_API_KEY = (os.getenv("SARVAM_API_KEY", "") or "").strip()
+SARVAM_STT_WS_URL = (os.getenv("SARVAM_STT_WS_URL", "") or "").strip()
+SARVAM_TTS_WS_URL = (os.getenv("SARVAM_TTS_WS_URL", "") or "").strip()
 
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy").strip() or "alloy"
 INTERVIEW_ACCESS_MODE = os.getenv("INTERVIEW_ACCESS_MODE", "free").strip().lower()
 if INTERVIEW_ACCESS_MODE not in {"free", "trial"}:
     INTERVIEW_ACCESS_MODE = "free"
 FREE_ACCESS_MODE = INTERVIEW_ACCESS_MODE == "free"
-TRIAL_MODE_ENABLED = False if FREE_ACCESS_MODE else os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+TRIAL_MODE_ENABLED = (
+    False
+    if FREE_ACCESS_MODE
+    else os.getenv("TRIAL_MODE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+)
 FREE_TRIAL_MINUTES = max(1, int(os.getenv("FREE_TRIAL_MINUTES", "5")))
-TRIAL_CODE_ENFORCEMENT = False if FREE_ACCESS_MODE else os.getenv("TRIAL_CODE_ENFORCEMENT", "true").strip().lower() in ("1", "true", "yes", "on")
-INTERVIEW_SERVER_CONTROL_ENABLED = os.getenv("INTERVIEW_SERVER_CONTROL_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
-INTERVIEW_SKILL_TRACKS_ENABLED = os.getenv("INTERVIEW_SKILL_TRACKS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
-INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED = os.getenv("INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+TRIAL_CODE_ENFORCEMENT = (
+    False
+    if FREE_ACCESS_MODE
+    else os.getenv("TRIAL_CODE_ENFORCEMENT", "true").strip().lower() in ("1", "true", "yes", "on")
+)
+INTERVIEW_SERVER_CONTROL_ENABLED = os.getenv(
+    "INTERVIEW_SERVER_CONTROL_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+INTERVIEW_SKILL_TRACKS_ENABLED = os.getenv(
+    "INTERVIEW_SKILL_TRACKS_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED = os.getenv(
+    "INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
 
 
 EVAL_HARD_GUARDS_ENABLED = EVAL_FLAGS.hard_guards
@@ -213,8 +235,15 @@ def _parse_admin_allowlist(raw: Optional[str]) -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def _resolve_env_value() -> str:
+    return os.getenv(
+        "ENV",
+        os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))),
+    ).strip().lower()
+
+
 # Resolve environment mode once and reuse.
-_env_value = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))).strip().lower()
+_env_value = _resolve_env_value()
 is_production = _env_value == "production"
 
 ADMIN_CLERK_USER_IDS = _parse_admin_allowlist(os.getenv("ADMIN_CLERK_USER_IDS", ""))
@@ -230,76 +259,49 @@ OPENAI_REALTIME_ENDPOINT = os.getenv("OPENAI_REALTIME_ENDPOINT", "wss://api.open
 
 import json as json_module
 
-def extract_azure_endpoint_info(endpoint: str) -> tuple:
-    """Extract resource name, domain, and region from Azure OpenAI endpoint.
-    
-    For Realtime API:
-    - If endpoint is already *.openai.azure.com, use it as-is (no conversion)
-    - If endpoint is *.cognitiveservices.azure.com, convert to openai.azure.com format
-    """
-    if not endpoint:
-        raise ValueError("AZURE_OPENAI_ENDPOINT is not set")
-    
-    # Remove protocol and any path/query parameters
-    from urllib.parse import urlparse
-    parsed = urlparse(endpoint if endpoint.startswith(('http://', 'https://')) else f"https://{endpoint}")
-    hostname = parsed.netloc or parsed.path.split('/')[0] if not parsed.netloc else parsed.netloc
-    # Remove any remaining path/query if still present
-    hostname = hostname.split('/')[0].split('?')[0]
-    
-    # Case 1: Already in openai.azure.com format - use as-is
-    match = re.match(r"^([^.]+)\.openai\.azure\.com$", hostname)
-    if match:
-        resource_name = match.group(1)
-        return resource_name, "openai.azure.com", None
-    
-    # Case 2: cognitiveservices.azure.com format - convert to openai.azure.com
-    match = re.match(r"^(.+)\.cognitiveservices\.azure\.com$", hostname)
-    if match:
-        full_name = match.group(1)
-        # Extract region for reference, but preserve full name for hostname
-        parts = full_name.rsplit("-", 1)
-        if len(parts) == 2:
-            resource_name = full_name  # Keep full "ignit-mk7zvb02-swedencentral"
-            region = parts[1]           # Extract region for reference/logging
-            return resource_name, "openai.azure.com", region
-        else:
-            # No region suffix, use full name as-is
-            return full_name, "openai.azure.com", None
-    
-    # Case 3: Unknown format
-    raise ValueError(f"Unknown endpoint format: {hostname}. Must be *.openai.azure.com or *.cognitiveservices.azure.com")
 
 # Environment variable validation on startup
 def validate_environment(*, strict: bool = False):
     """Validate required environment variables and print warnings."""
     warnings = []
     errors = []
-    
-    # Check OpenAI Realtime configuration
-    if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
-        errors.append("❌ OPENAI_API_KEY is not configured. Voice interview will not work.")
-    else:
-        print("✅ OpenAI Realtime API configured")
-        print(f"   Base endpoint: {OPENAI_API_BASE}")
-        print(f"   Realtime model: {OPENAI_REALTIME_MODEL}")
-        print(f"   Chat model: {OPENAI_CHAT_MODEL}")
-        print(f"   Transcription model: {OPENAI_TRANSCRIBE_MODEL}")
-        print(f"   Realtime voice: {REALTIME_VOICE}")
-    
+
+    if AI_PROVIDER == "openai_native":
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
+            errors.append("❌ OPENAI_API_KEY is not configured. Voice interview will not work.")
+        else:
+            print("✅ OpenAI-native realtime configured")
+            print(f"   Provider mode: {AI_PROVIDER}")
+            print(f"   Base endpoint: {OPENAI_API_BASE}")
+            print(f"   Realtime model: {OPENAI_REALTIME_MODEL}")
+            print(f"   Chat model: {OPENAI_CHAT_MODEL}")
+            print(f"   Transcription model: {OPENAI_TRANSCRIBE_MODEL}")
+            print(f"   Realtime voice: {REALTIME_VOICE}")
+    elif AI_PROVIDER == "sarvam_hybrid":
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
+            errors.append(
+                "❌ OPENAI_API_KEY is not configured. Sarvam hybrid mode still requires OpenAI reasoning."
+            )
+        if not SARVAM_API_KEY:
+            errors.append("❌ SARVAM_API_KEY is not configured.")
+        if not SARVAM_STT_WS_URL:
+            warnings.append("⚠️ SARVAM_STT_WS_URL is not configured yet.")
+        if not SARVAM_TTS_WS_URL:
+            warnings.append("⚠️ SARVAM_TTS_WS_URL is not configured yet.")
+
     # Print warnings and errors
     if warnings:
         print("\n".join(warnings))
     if errors:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("ENVIRONMENT CONFIGURATION ERRORS:")
-        print("="*60)
+        print("=" * 60)
         print("\n".join(errors))
         print("\nTo fix:")
         print("1. Copy backend/.env.example to backend/.env")
         print("2. Add your OPENAI_API_KEY")
         print("3. Restart the server")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
         if strict:
             raise RuntimeError("; ".join(errors))
 
@@ -329,12 +331,16 @@ def collect_startup_diagnostics(
 ) -> Dict[str, Any]:
     env_map = env or os.environ
     environment = (
-        env_map.get("ENV")
-        or env_map.get("APP_ENV")
-        or env_map.get("ENVIRONMENT")
-        or env_map.get("PYTHON_ENV")
-        or "development"
-    ).strip().lower()
+        (
+            env_map.get("ENV")
+            or env_map.get("APP_ENV")
+            or env_map.get("ENVIRONMENT")
+            or env_map.get("PYTHON_ENV")
+            or "development"
+        )
+        .strip()
+        .lower()
+    )
     is_prod_env = environment == "production"
     database_url = str(env_map.get("DATABASE_URL", "") or "").strip()
     redis_url = str(env_map.get("REDIS_URL", "") or "").strip()
@@ -361,7 +367,11 @@ def collect_startup_diagnostics(
         "environment": environment,
         "is_production": is_prod_env,
         "database_url_present": bool(database_url),
-        "database_backend": "postgresql" if database_url.startswith("postgresql") else ("sqlite" if database_url.startswith("sqlite") else "unknown"),
+        "database_backend": (
+            "postgresql"
+            if database_url.startswith("postgresql")
+            else ("sqlite" if database_url.startswith("sqlite") else "unknown")
+        ),
         "redis_url_present": bool(redis_url),
         "allowed_origins_present": bool(allowed_origins),
         "allowed_origins_wildcard": allowed_origins == "*",
@@ -401,58 +411,15 @@ def validate_production_requirements(
     missing_requirements = diagnostics["missing_requirements"]
     if missing_requirements:
         raise RuntimeError(
-            "Production boot requirements failed: "
-            + ", ".join(missing_requirements)
+            "Production boot requirements failed: " + ", ".join(missing_requirements)
         )
-
-
-def run_startup_migrations_if_enabled() -> None:
-    """Apply Alembic migrations during App Service boot when explicitly enabled."""
-    enabled = os.getenv("RUN_DB_MIGRATIONS_ON_STARTUP", "true").strip().lower() in {"1", "true", "yes", "on"}
-    if not enabled or not is_production:
-        return
-    if not os.getenv("DATABASE_URL"):
-        logging.warning("Skipping startup migrations because DATABASE_URL is not set")
-        return
-
-    try:
-        with engine.begin() as connection:
-            inspector = inspect(connection)
-            if inspector.has_table("users"):
-                user_columns = {column["name"] for column in inspector.get_columns("users")}
-                if "password_hash" not in user_columns:
-                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)"))
-                if "is_admin" not in user_columns:
-                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
-                if "email_verified" not in user_columns:
-                    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE"))
-                if "clerk_user_id" in user_columns:
-                    connection.execute(text("ALTER TABLE users ALTER COLUMN clerk_user_id DROP NOT NULL"))
-                connection.execute(text("UPDATE users SET email_verified = TRUE WHERE email IS NOT NULL"))
-
-            if not inspector.has_table("alembic_version"):
-                logging.warning("Skipping full Alembic upgrade because alembic_version is absent on an existing database")
-                return
-
-        from alembic import command
-        from alembic.config import Config
-
-        backend_dir = Path(__file__).resolve().parent
-        config = Config(str(backend_dir / "alembic.ini"))
-        logging.info("Applying database migrations at startup")
-        command.upgrade(config, "head")
-        logging.info("Database migrations are at Alembic head")
-    except Exception:
-        logging.exception("Database migration failed during startup")
-        raise
 
 
 # Run validation on startup
 @app.on_event("startup")
 async def startup_event():
     validate_production_requirements()
-    run_startup_migrations_if_enabled()
-    validate_environment(strict=True)
+    validate_environment(strict=False)
     logging.info("🔐 Auth: self-hosted JWT (HS256) + bcrypt")
 
 
@@ -461,10 +428,12 @@ async def shutdown_event():
     """Graceful shutdown: close Redis connection pool."""
     try:
         from db.redis_client import close_redis_client
+
         close_redis_client()
         logging.info("Redis client closed on shutdown")
     except Exception as e:
         logging.warning("Error closing Redis on shutdown: %s", e)
+
 
 # Configure CORS origins from ALLOWED_ORIGINS (comma-separated) environment variable.
 # If ALLOWED_ORIGINS is not set, fall back to a safe local development default.
@@ -483,10 +452,14 @@ local_dev_origins = [
 if allowed_origins_env:
     if allowed_origins_env == "*":
         if is_production:
-            print("⚠️ WARNING: ALLOWED_ORIGINS='*' is not allowed in production. Set explicit origins before startup.")
+            print(
+                "⚠️ WARNING: ALLOWED_ORIGINS='*' is not allowed in production. Set explicit origins before startup."
+            )
             allow_origins = local_dev_origins
         else:
-            print("⚠️ WARNING: ALLOWED_ORIGINS='*' - this allows all origins. Use only for short-term debugging.")
+            print(
+                "⚠️ WARNING: ALLOWED_ORIGINS='*' - this allows all origins. Use only for short-term debugging."
+            )
             allow_origins = ["*"]
     else:
         allow_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
@@ -497,9 +470,13 @@ if allowed_origins_env:
 else:
     # Default local dev origins (safe for local development only)
     if is_production:
-        print("⚠️ ALLOWED_ORIGINS is not set for production. Startup validation will fail until explicit origins are configured.")
+        print(
+            "⚠️ ALLOWED_ORIGINS is not set for production. Startup validation will fail until explicit origins are configured."
+        )
     allow_origins = local_dev_origins
-    print("ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins.")
+    print(
+        "ℹ️ ALLOWED_ORIGINS not set — using default local dev origins. Set ALLOWED_ORIGINS in production to a comma-separated list of allowed origins."
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -511,6 +488,7 @@ app.add_middleware(
 
 try:
     from middleware.security import SecurityHeadersMiddleware
+
     app.add_middleware(SecurityHeadersMiddleware)
     logging.info("✅ Security headers middleware registered")
 except Exception as _e:
@@ -523,6 +501,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # ============================================================================
 try:
     from api.realtime import router as realtime_router
+
     app.include_router(realtime_router, prefix="/ws", tags=["websocket"])
     logging.info("✅ WebSocket realtime router registered at /ws/interview/{session_id}")
 except Exception as e:
@@ -530,6 +509,7 @@ except Exception as e:
 
 try:
     from routes.health import router as health_router
+
     app.include_router(health_router, tags=["health"])
     logging.info("✅ Health router registered at /health")
 except Exception as e:
@@ -552,7 +532,9 @@ try:
     from api.admin import router as admin_router, configure_admin_dependencies
 
     configure_admin_dependencies(
-        get_current_user_func=lambda authorization, db: get_current_user(authorization=authorization, db=db),
+        get_current_user_func=lambda authorization, db: get_current_user(
+            authorization=authorization, db=db
+        ),
         is_admin_func=lambda user_or_id: _is_admin_user(user_or_id),
     )
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
@@ -560,8 +542,11 @@ try:
 except Exception as e:
     logging.warning(f"⚠️ Could not register admin router: {e}")
 
+
 def _error_json(code: str, message: str, status_code: int) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+    return JSONResponse(
+        status_code=status_code, content={"error": {"code": code, "message": message}}
+    )
 
 
 @app.exception_handler(HTTPException)
@@ -590,6 +575,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         "An unexpected error occurred. Please try again.",
         500,
     )
+
 
 @app.get("/", include_in_schema=False)
 def read_root():
@@ -766,6 +752,7 @@ def read_favicon():
         raise HTTPException(status_code=404, detail="Favicon not found")
     return FileResponse(favicon_path)
 
+
 # GET /api/key was removed — it exposed server-side API keys without authentication.
 # Use the authenticated /api/realtime/webrtc endpoint for interview sessions.
 
@@ -781,7 +768,9 @@ def _get_interview_state_store() -> Optional[InterviewStateStore]:
             _interview_state_store = InterviewStateStore(get_redis_client())
         except Exception as e:
             if is_production:
-                raise RuntimeError(f"Redis unavailable for interview state in production: {e}") from e
+                raise RuntimeError(
+                    f"Redis unavailable for interview state in production: {e}"
+                ) from e
             print(f"⚠️ Redis unavailable for interview state (dev fallback to memory): {e}")
             _interview_state_store = None
     return _interview_state_store
@@ -926,7 +915,9 @@ def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
         ]
         missing = [name for name, value in required_student if not value]
         if missing:
-            raise HTTPException(status_code=400, detail=f"Missing required student fields: {', '.join(missing)}")
+            raise HTTPException(
+                status_code=400, detail=f"Missing required student fields: {', '.join(missing)}"
+            )
     elif payload.userCategory == "professional":
         required_prof = [
             ("currentRole", payload.currentRole),
@@ -940,9 +931,14 @@ def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
         ]
         missing = [name for name, value in required_prof if not value]
         if missing:
-            raise HTTPException(status_code=400, detail=f"Missing required professional fields: {', '.join(missing)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required professional fields: {', '.join(missing)}",
+            )
         if not payload.domainExpertise:
-            raise HTTPException(status_code=400, detail="domainExpertise is required for professional profile.")
+            raise HTTPException(
+                status_code=400, detail="domainExpertise is required for professional profile."
+            )
 
 
 def _is_admin_user(user_or_id) -> bool:
@@ -958,11 +954,18 @@ def _is_admin_user(user_or_id) -> bool:
     return user_or_id in ADMIN_CLERK_USER_IDS
 
 
-def _get_active_user_entitlement(db: Session, clerk_user_id: str) -> Optional[models.UserEntitlement]:
-    entitlements = db.query(models.UserEntitlement).filter(
-        models.UserEntitlement.clerk_user_id == clerk_user_id,
-        models.UserEntitlement.is_active == True,  # noqa: E712
-    ).order_by(models.UserEntitlement.created_at.desc()).all()
+def _get_active_user_entitlement(
+    db: Session, clerk_user_id: str
+) -> Optional[models.UserEntitlement]:
+    entitlements = (
+        db.query(models.UserEntitlement)
+        .filter(
+            models.UserEntitlement.clerk_user_id == clerk_user_id,
+            models.UserEntitlement.is_active == True,  # noqa: E712
+        )
+        .order_by(models.UserEntitlement.created_at.desc())
+        .all()
+    )
     now = datetime.utcnow()
     for entitlement in entitlements:
         if entitlement.revoked_at is not None:
@@ -977,7 +980,9 @@ def _get_active_user_entitlement(db: Session, clerk_user_id: str) -> Optional[mo
     return None
 
 
-def _resolve_plan_tier_for_user(db: Session, clerk_user_id: str) -> tuple[str, Optional[models.UserEntitlement]]:
+def _resolve_plan_tier_for_user(
+    db: Session, clerk_user_id: str
+) -> tuple[str, Optional[models.UserEntitlement]]:
     if FREE_ACCESS_MODE:
         return "free", None
     if DEV_AUTH_BYPASS:
@@ -992,7 +997,9 @@ def _resolve_plan_tier_for_user(db: Session, clerk_user_id: str) -> tuple[str, O
     return "basic", None
 
 
-def _effective_duration_minutes(requested: Optional[int], plan_tier: str, entitlement: Optional[models.UserEntitlement] = None) -> int:
+def _effective_duration_minutes(
+    requested: Optional[int], plan_tier: str, entitlement: Optional[models.UserEntitlement] = None
+) -> int:
     requested_value = requested if requested and requested > 0 else 30
     if plan_tier == "free":
         return max(1, int(requested_value))
@@ -1060,10 +1067,14 @@ def _save_runtime_session(
     ttl_seconds = max(300, effective_minutes * 60 + 600)
     try:
         redis_client = get_redis_client()
-        redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_payload))
+        redis_client.setex(
+            _runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_payload)
+        )
     except Exception as redis_err:
         if is_production:
-            raise HTTPException(status_code=500, detail=f"Failed to persist runtime session: {redis_err}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to persist runtime session: {redis_err}"
+            )
         print(f"⚠️ Runtime session not saved in Redis (dev): {redis_err}")
     return runtime_payload
 
@@ -1141,13 +1152,20 @@ def _agent_handoff_summary_from_runtime(
     round_index: int = 0,
 ) -> Dict[str, Any]:
     runtime_data = runtime_data or {}
-    conversation_plan = runtime_data.get("conversation_plan") if isinstance(runtime_data.get("conversation_plan"), dict) else {}
+    conversation_plan = (
+        runtime_data.get("conversation_plan")
+        if isinstance(runtime_data.get("conversation_plan"), dict)
+        else {}
+    )
     return {
-        "agent_owner": runtime_data.get("agent_owner") or conversation_plan.get("agent_owner") or "orchestrator",
+        "agent_owner": runtime_data.get("agent_owner")
+        or conversation_plan.get("agent_owner")
+        or "orchestrator",
         "round_index": int(runtime_data.get("round_index") or round_index or 0),
         "resume_token": runtime_data.get("resume_token"),
         "filler_pack_version": runtime_data.get("filler_pack_version") or "sonia-fillers-v1",
-        "orchestrator_session_version": runtime_data.get("orchestrator_session_version") or "orchestrator-sprint1-v1",
+        "orchestrator_session_version": runtime_data.get("orchestrator_session_version")
+        or "orchestrator-sprint1-v1",
         "speaker_strategy": conversation_plan.get("speaker_strategy"),
     }
 
@@ -1205,7 +1223,11 @@ def _persist_gaze_tracking_results(
                     started_at=_utc_dt_from_ms(started_ms),
                     ended_at=_utc_dt_from_ms(ended_ms),
                     duration_ms=int(event.get("duration_ms") or (ended_ms - started_ms)),
-                    confidence=int(event.get("confidence")) if event.get("confidence") is not None else None,
+                    confidence=(
+                        int(event.get("confidence"))
+                        if event.get("confidence") is not None
+                        else None
+                    ),
                     source=str(event.get("source") or "opencv_haar_v1"),
                     extra_json=json.dumps(event.get("extra", {})),
                 )
@@ -1224,7 +1246,9 @@ def _persist_gaze_tracking_results(
         db.commit()
     except Exception as e:
         db.rollback()
-        logging.exception("Failed to persist gaze tracking results for session %s: %s", session_id, e)
+        logging.exception(
+            "Failed to persist gaze tracking results for session %s: %s", session_id, e
+        )
     finally:
         db.close()
 
@@ -1236,9 +1260,11 @@ def _plan_next_turn_response(
     current_user: User,
     db: Session,
 ) -> Dict[str, Any]:
-    row = db.query(models.InterviewSession).filter(
-        models.InterviewSession.session_id == session_id
-    ).first()
+    row = (
+        db.query(models.InterviewSession)
+        .filter(models.InterviewSession.session_id == session_id)
+        .first()
+    )
     if row and row.clerk_user_id != current_user.clerk_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -1246,11 +1272,17 @@ def _plan_next_turn_response(
     asked_ids_runtime = runtime_data.get("asked_question_ids", [])
     asked_ids_payload = payload.askedQuestionIds or []
     asked_ids = list(dict.fromkeys([*(asked_ids_runtime or []), *asked_ids_payload]))
-    runtime_selected_skills = runtime_data.get("selected_skills", []) if isinstance(runtime_data.get("selected_skills", []), list) else []
+    runtime_selected_skills = (
+        runtime_data.get("selected_skills", [])
+        if isinstance(runtime_data.get("selected_skills", []), list)
+        else []
+    )
 
     transcript_window = payload.transcript_window or []
     interview_type_value = payload.interviewType or (row.interview_type if row else "mixed")
-    selected_skills = payload.selectedSkills if payload.selectedSkills is not None else runtime_selected_skills
+    selected_skills = (
+        payload.selectedSkills if payload.selectedSkills is not None else runtime_selected_skills
+    )
     validated_selected_skills: List[str] = []
     if INTERVIEW_SKILL_TRACKS_ENABLED:
         validated_selected_skills = _validate_selected_skills_or_422(
@@ -1306,7 +1338,11 @@ def _plan_next_turn_response(
         decision["degraded_planner"] = True
 
     question_id = decision.get("question_id")
-    if question_id and not str(question_id).startswith("followup_") and question_id != "fallback_generic":
+    if (
+        question_id
+        and not str(question_id).startswith("followup_")
+        and question_id != "fallback_generic"
+    ):
         asked_ids.append(str(question_id))
 
     turn_eval_history = runtime_data.get("turn_eval_history", [])
@@ -1329,10 +1365,16 @@ def _plan_next_turn_response(
     runtime_data["adaptive_last"] = decision
     runtime_data["degraded_planner"] = bool(decision.get("degraded_planner"))
     runtime_data["selected_skills"] = validated_selected_skills
-    runtime_data["conversation_plan"] = decision.get("conversation_plan") or runtime_data.get("conversation_plan") or {}
+    runtime_data["conversation_plan"] = (
+        decision.get("conversation_plan") or runtime_data.get("conversation_plan") or {}
+    )
     runtime_data["round_index"] = len(asked_ids)
-    runtime_data["orchestrator_session_version"] = runtime_data.get("orchestrator_session_version") or "orchestrator-sprint1-v1"
-    runtime_data["filler_pack_version"] = runtime_data.get("filler_pack_version") or "sonia-fillers-v1"
+    runtime_data["orchestrator_session_version"] = (
+        runtime_data.get("orchestrator_session_version") or "orchestrator-sprint1-v1"
+    )
+    runtime_data["filler_pack_version"] = (
+        runtime_data.get("filler_pack_version") or "sonia-fillers-v1"
+    )
 
     ttl_seconds = max(300, int((payload.durationMinutes or FREE_TRIAL_MINUTES) * 60) + 600)
     try:
@@ -1340,7 +1382,9 @@ def _plan_next_turn_response(
         redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_data))
     except Exception as redis_err:
         if is_production:
-            raise HTTPException(status_code=500, detail=f"Failed to persist adaptive runtime state: {redis_err}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to persist adaptive runtime state: {redis_err}"
+            )
         print(f"⚠️ Adaptive runtime state not saved in Redis (dev): {redis_err}")
 
     if row:
@@ -1365,7 +1409,9 @@ def _plan_next_turn_response(
             phase="active",
             question_id=str(question_id or "") or None,
             question_text=str(decision.get("next_question") or "") or None,
-            handoff_reason=str(decision.get("speaker_strategy") or decision.get("followup_type") or "next_turn"),
+            handoff_reason=str(
+                decision.get("speaker_strategy") or decision.get("followup_type") or "next_turn"
+            ),
             summary=_round_summary_from_plan(decision),
         )
         persist_session_memory_snapshot(
@@ -1391,7 +1437,9 @@ def _plan_next_turn_response(
         "followup_type": decision.get("followup_type"),
         "policy_action": decision.get("policy_action", "NONE"),
         "refusal_message": decision.get("refusal_message"),
-        "selected_skills_applied": decision.get("selected_skills_applied", validated_selected_skills),
+        "selected_skills_applied": decision.get(
+            "selected_skills_applied", validated_selected_skills
+        ),
         "adaptive_path": decision.get("adaptive_path", {}),
         "agent_owner": decision.get("agent_owner"),
         "speaker_strategy": decision.get("speaker_strategy"),
@@ -1416,7 +1464,11 @@ def _upsert_interview_session_row(
     effective_minutes: int,
     runtime_payload: Dict[str, Any],
 ) -> models.InterviewSession:
-    row = db.query(models.InterviewSession).filter(models.InterviewSession.session_id == session_id).first()
+    row = (
+        db.query(models.InterviewSession)
+        .filter(models.InterviewSession.session_id == session_id)
+        .first()
+    )
     if not row:
         row = models.InterviewSession(
             session_id=session_id,
@@ -1441,6 +1493,7 @@ def _upsert_interview_session_row(
     db.commit()
     db.refresh(row)
     return row
+
 
 # Pydantic models for WebRTC endpoint
 class WebRTCRequest(BaseModel):
@@ -1506,9 +1559,11 @@ class CommunicationPracticeTurnRequest(BaseModel):
 
 
 def _profile_skill_defaults(db: Session, clerk_user_id: str, interview_type: str) -> List[str]:
-    profile = db.query(models.UserProfile).filter(
-        models.UserProfile.clerk_user_id == clerk_user_id
-    ).first()
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.clerk_user_id == clerk_user_id)
+        .first()
+    )
     if not profile:
         return []
     target_roles = _json_loads_safe_list(profile.target_roles)
@@ -1547,16 +1602,10 @@ async def interview_skill_catalog(
         "suggested_defaults": validated_defaults,
     }
 
-def build_azure_realtime_url(resource_name: str, domain: str, path: str, region: Optional[str] = None) -> str:
-    """Build Azure Realtime API URL."""
-    base_url = f"https://{resource_name}.{domain}"
-    if region and domain == "cognitiveservices.azure.com":
-        # For cognitiveservices format, include region in base URL
-        base_url = f"https://{resource_name}-{region}.{domain}"
-    return f"{base_url}{path}?api-version={AZURE_OPENAI_API_VERSION}"
 
-
-def _realtime_session_log_config(session_payload: Mapping[str, Any], *, include_inline_instructions: bool) -> Dict[str, Any]:
+def _realtime_session_log_config(
+    session_payload: Mapping[str, Any], *, include_inline_instructions: bool
+) -> Dict[str, Any]:
     """Return safe realtime startup log fields without assuming a nested schema variant."""
     session = session_payload.get("session")
     if not isinstance(session, Mapping):
@@ -1573,6 +1622,18 @@ def _realtime_session_log_config(session_payload: Mapping[str, Any], *, include_
         "include_inline_instructions": include_inline_instructions,
     }
 
+
+def _require_openai_native_realtime() -> None:
+    if AI_PROVIDER != "openai_native":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Configured AI_PROVIDER does not support this OpenAI-native realtime route yet. "
+                "Set AI_PROVIDER=openai_native or implement the provider gateway for this mode."
+            ),
+        )
+
+
 @app.post("/api/realtime/webrtc")
 async def webrtc_proxy(
     request: WebRTCRequest,
@@ -1581,6 +1642,7 @@ async def webrtc_proxy(
 ):
     """WebRTC proxy endpoint for ephemeral token creation and SDP negotiation."""
     try:
+        _require_openai_native_realtime()
         current_user = get_current_user(authorization=authorization, db=db)
         if not current_user:
             raise HTTPException(status_code=401, detail="Invalid user session.")
@@ -1590,9 +1652,9 @@ async def webrtc_proxy(
         if not OPENAI_API_KEY or OPENAI_API_KEY == "your-openai-api-key-here":
             raise HTTPException(
                 status_code=500,
-                detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env"
+                detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env",
             )
-        
+
         plan_tier, entitlement = _resolve_plan_tier_for_user(db, clerk_user_id)
         if TRIAL_CODE_ENFORCEMENT and plan_tier != "trial":
             raise HTTPException(
@@ -1614,7 +1676,11 @@ async def webrtc_proxy(
                 interview_type=interview_type_value,
                 selected_skills=request.selectedSkills,
             )
-        requested_minutes = request.durationMinutes if request.durationMinutes and request.durationMinutes > 0 else FREE_TRIAL_MINUTES
+        requested_minutes = (
+            request.durationMinutes
+            if request.durationMinutes and request.durationMinutes > 0
+            else FREE_TRIAL_MINUTES
+        )
         effective_minutes = _effective_duration_minutes(requested_minutes, plan_tier, entitlement)
         session_id = request.sessionId or f"session_{uuid.uuid4().hex[:16]}"
 
@@ -1754,11 +1820,11 @@ async def webrtc_proxy(
         client_secrets_request = {
             "expires_after": {
                 "anchor": "created_at",
-                "seconds": max(300, effective_minutes * 60 + 180)
+                "seconds": max(300, effective_minutes * 60 + 180),
             },
             "session": {
                 "type": "realtime",
-                "model": AZURE_OPENAI_DEPLOYMENT,
+                "model": OPENAI_REALTIME_MODEL,
                 "voice": REALTIME_VOICE,
                 "input_audio_format": "pcm16",
                 "output_modalities": ["audio"],
@@ -1768,15 +1834,12 @@ async def webrtc_proxy(
                     "prefix_padding_ms": 300,
                     "silence_duration_ms": 500,
                     "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
-                    "interrupt_response": True
+                    "interrupt_response": True,
                 },
-                "input_audio_transcription": {
-                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
-                    "language": "en"
-                },
-            }
+                "input_audio_transcription": {"model": OPENAI_TRANSCRIBE_MODEL, "language": "en"},
+            },
         }
-        
+
         # Add instructions if provided (can be disabled to reduce token creation latency)
         include_inline_instructions = os.getenv("REALTIME_INLINE_INSTRUCTIONS", "1").strip() != "0"
         if system_prompt and include_inline_instructions:
@@ -1790,11 +1853,12 @@ async def webrtc_proxy(
                 )
             ),
         )
-        
+
         # Step 1: Create ephemeral token
         token_url = f"{OPENAI_API_BASE}/realtime/client_secrets"
 
         try:
+
             def _extract_activity_id(resp: Optional[requests.Response]) -> Optional[str]:
                 if not resp:
                     return None
@@ -1820,7 +1884,7 @@ async def webrtc_proxy(
                     "expires_after": client_secrets_request["expires_after"],
                     "session": {
                         "type": "realtime",
-                        "model": AZURE_OPENAI_DEPLOYMENT,
+                        "model": OPENAI_REALTIME_MODEL,
                         "voice": REALTIME_VOICE,
                         "input_audio_format": "pcm16",
                         "output_modalities": ["audio"],
@@ -1835,7 +1899,7 @@ async def webrtc_proxy(
                     },
                 }
                 payload["session"]["input_audio_transcription"] = {
-                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
+                    "model": OPENAI_TRANSCRIBE_MODEL,
                     "language": "en",
                 }
                 if include_instructions and system_prompt:
@@ -1843,9 +1907,21 @@ async def webrtc_proxy(
                 return payload
 
             payload_attempts: List[Dict[str, Any]] = [
-                {"name": "full_payload", "profile": "full_vad_transcription_instructions", "payload": client_secrets_request},
-                {"name": "minimal_payload", "profile": "minimal_vad_with_instructions", "payload": _minimal_payload(include_inline_instructions)},
-                {"name": "minimal_no_instructions", "profile": "minimal_vad_no_instructions", "payload": _minimal_payload(False)},
+                {
+                    "name": "full_payload",
+                    "profile": "full_vad_transcription_instructions",
+                    "payload": client_secrets_request,
+                },
+                {
+                    "name": "minimal_payload",
+                    "profile": "minimal_vad_with_instructions",
+                    "payload": _minimal_payload(include_inline_instructions),
+                },
+                {
+                    "name": "minimal_no_instructions",
+                    "profile": "minimal_vad_no_instructions",
+                    "payload": _minimal_payload(False),
+                },
             ]
 
             token_resp = None
@@ -1859,7 +1935,10 @@ async def webrtc_proxy(
                 payload = attempt_cfg["payload"]
 
                 # Avoid duplicate attempt bodies when instructions are already disabled.
-                if attempt_name == "minimal_no_instructions" and payload_attempts[1]["payload"] == payload:
+                if (
+                    attempt_name == "minimal_no_instructions"
+                    and payload_attempts[1]["payload"] == payload
+                ):
                     continue
 
                 for transport_attempt in range(2):
@@ -1868,10 +1947,10 @@ async def webrtc_proxy(
                             token_url,
                             headers={
                                 "Authorization": f"Bearer {OPENAI_API_KEY}",
-                                "content-type": "application/json"
+                                "content-type": "application/json",
                             },
                             json=payload,
-                            timeout=20.0
+                            timeout=20.0,
                         )
                         break
                     except requests.Timeout as timeout_err:
@@ -1882,26 +1961,34 @@ async def webrtc_proxy(
                             time.sleep(0.5)
 
                 if token_resp is None:
-                    print(json.dumps({
-                        "event": "realtime_token_attempt",
-                        "attempt_name": attempt_name,
-                        "payload_profile": payload_profile,
-                        "status_code": "timeout",
-                        "activityId": None,
-                    }))
+                    print(
+                        json.dumps(
+                            {
+                                "event": "realtime_token_attempt",
+                                "attempt_name": attempt_name,
+                                "payload_profile": payload_profile,
+                                "status_code": "timeout",
+                                "activityId": None,
+                            }
+                        )
+                    )
                     continue
 
                 response_body = token_resp.text[:500] if token_resp.text else ""
                 activity_id = _extract_activity_id(token_resp)
                 if activity_id:
                     last_activity_id = activity_id
-                print(json.dumps({
-                    "event": "realtime_token_attempt",
-                    "attempt_name": attempt_name,
-                    "payload_profile": payload_profile,
-                    "status_code": token_resp.status_code,
-                    "activityId": activity_id,
-                }))
+                print(
+                    json.dumps(
+                        {
+                            "event": "realtime_token_attempt",
+                            "attempt_name": attempt_name,
+                            "payload_profile": payload_profile,
+                            "status_code": token_resp.status_code,
+                            "activityId": activity_id,
+                        }
+                    )
+                )
                 print(f"   Status: {token_resp.status_code} Body: {response_body[:200]}")
 
                 if token_resp.status_code == 200:
@@ -1912,9 +1999,15 @@ async def webrtc_proxy(
                 # Non-transient errors should fail fast.
                 if token_resp.status_code in (401, 403, 404):
                     if token_resp.status_code == 401:
-                        raise HTTPException(status_code=401, detail="Authentication failed. Check OPENAI_API_KEY and account access.")
+                        raise HTTPException(
+                            status_code=401,
+                            detail="Authentication failed. Check OPENAI_API_KEY and account access.",
+                        )
                     if token_resp.status_code == 403:
-                        raise HTTPException(status_code=403, detail="Forbidden by OpenAI API. Verify model access and API key scope.")
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Forbidden by OpenAI API. Verify model access and API key scope.",
+                        )
                     raise HTTPException(
                         status_code=404,
                         detail=(
@@ -1957,25 +2050,27 @@ async def webrtc_proxy(
             raise HTTPException(status_code=504, detail="Connection timeout. Please try again.")
         except requests.HTTPError as e:
             error_body = e.response.text[:500] if e.response.text else ""
-            raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}")
+            raise HTTPException(
+                status_code=e.response.status_code, detail=f"HTTP error: {error_body[:200]}"
+            )
         except Exception as ex:
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(ex)[:200]}")
-        
+
         token_json = token_resp.json()
 
-        # Azure Realtime API client_secrets endpoint returns "value" field
+        # Realtime API client_secrets endpoint returns "value" field
         # Response format: { "value": "ek_...", "expires_at": ..., "session": {...} }
         ephemeral_token = token_json.get("value")
-        
+
         if not ephemeral_token:
             raise HTTPException(
                 status_code=500,
-                detail=f"Ephemeral token missing in response. Response keys: {list(token_json.keys())}"
+                detail=f"Ephemeral token missing in response. Response keys: {list(token_json.keys())}",
             )
-        
+
         # Step 2: SDP negotiation
         calls_url = f"{OPENAI_API_BASE}/realtime/calls?model={OPENAI_REALTIME_MODEL}"
-        
+
         try:
             sdp_resp = None
             for attempt in range(3):
@@ -1984,10 +2079,10 @@ async def webrtc_proxy(
                         calls_url,
                         headers={
                             "Authorization": f"Bearer {ephemeral_token}",
-                            "Content-Type": "application/sdp"
+                            "Content-Type": "application/sdp",
                         },
                         data=request.sdpOffer,
-                        timeout=20.0
+                        timeout=20.0,
                     )
                     break
                 except requests.Timeout:
@@ -1996,7 +2091,9 @@ async def webrtc_proxy(
                     time.sleep(0.5 * (attempt + 1))
             sdp_resp.raise_for_status()
         except requests.Timeout:
-            raise HTTPException(status_code=504, detail="SDP negotiation timeout. Please try again.")
+            raise HTTPException(
+                status_code=504, detail="SDP negotiation timeout. Please try again."
+            )
         except requests.HTTPError as e:
             error_detail = f"SDP negotiation failed: {e.response.status_code}"
             if e.response.status_code == 401:
@@ -2005,9 +2102,9 @@ async def webrtc_proxy(
                 error_detail = "Rate limit exceeded. Please wait."
             # Log response code and first 200 chars of error body
             raise HTTPException(status_code=e.response.status_code, detail=error_detail)
-        
+
         sdp_answer = sdp_resp.text
-        
+
         token_session = token_json.get("session") if isinstance(token_json, dict) else {}
         transcription_available = bool(
             (token_session or {}).get("input_audio_transcription")
@@ -2031,12 +2128,13 @@ async def webrtc_proxy(
             "orchestrator_session_version": bootstrap_plan.get("orchestrator_session_version"),
             "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
         }
-        
+
     except HTTPException as http_ex:
         raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error. Please try again.")
+
 
 @app.post("/api/realtime/sessions")
 async def create_realtime_session(
@@ -2051,15 +2149,17 @@ async def create_realtime_session(
     current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
+    _require_openai_native_realtime()
 
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
         raise HTTPException(
             status_code=503,
-            detail="OpenAI Realtime API is not configured on this server. Configure OPENAI_API_KEY."
+            detail="OpenAI Realtime API is not configured on this server. Configure OPENAI_API_KEY.",
         )
 
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/realtime/sessions",
@@ -2089,14 +2189,17 @@ async def create_realtime_session(
         }
     except httpx.HTTPStatusError as exc:
         logging.error("OpenAI session creation failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to create realtime session with OpenAI.") from exc
+        raise HTTPException(
+            status_code=502, detail="Failed to create realtime session with OpenAI."
+        ) from exc
     except Exception as exc:
         logging.error("Unexpected error creating OpenAI session: %s", exc)
         raise HTTPException(status_code=500, detail="Unable to create realtime session.") from exc
 
 
 # Legacy GET /api/token removed — it returned the raw API key without authentication.
-# Use POST /api/realtime/sessions for OpenAI or POST /api/realtime/webrtc for Azure.
+# Use POST /api/realtime/sessions or POST /api/realtime/webrtc for realtime startup.
+
 
 @app.websocket("/api/realtime/ws")
 async def realtime_websocket_proxy(
@@ -2105,6 +2208,11 @@ async def realtime_websocket_proxy(
 ):
     """WebSocket proxy to OpenAI Realtime API (requires Clerk auth token)."""
     await websocket.accept()
+    try:
+        _require_openai_native_realtime()
+    except HTTPException as exc:
+        await websocket.close(code=1011, reason=str(exc.detail))
+        return
 
     # Authenticate via query-param token (WebSocket upgrade can't carry Authorization header easily)
     auth_token = token
@@ -2125,21 +2233,19 @@ async def realtime_websocket_proxy(
 
     # Check if OpenAI API key is configured (for direct OpenAI API)
     if not OPENAI_REALTIME_API_KEY or OPENAI_REALTIME_API_KEY == "your-openai-api-key-here":
-        await websocket.close(
-            code=1008,
-            reason="OpenAI API key not configured on the server."
-        )
+        await websocket.close(code=1008, reason="OpenAI API key not configured on the server.")
         return
-    
+
     model = OPENAI_REALTIME_MODEL
     ws_url = f"wss://api.openai.com/v1/realtime?model={model}"
-    
+
     try:
         async with websockets.connect(
             ws_url,
             subprotocols=["realtime"],
-            additional_headers={"Authorization": f"Bearer {OPENAI_REALTIME_API_KEY}"}
+            additional_headers={"Authorization": f"Bearer {OPENAI_REALTIME_API_KEY}"},
         ) as openai_ws:
+
             async def forward_to_openai():
                 try:
                     while True:
@@ -2160,7 +2266,7 @@ async def realtime_websocket_proxy(
                     pass
                 except Exception as e:
                     print(f"Error forwarding to OpenAI: {e}")
-            
+
             async def forward_to_client():
                 try:
                     while True:
@@ -2175,17 +2281,19 @@ async def realtime_websocket_proxy(
                             await websocket.close(code=1006, reason=reason)
                             break
                         except Exception as e:
-                            reason = f"Error receiving from OpenAI: {str(e)}" if str(e) else "Error receiving from OpenAI"
+                            reason = (
+                                f"Error receiving from OpenAI: {str(e)}"
+                                if str(e)
+                                else "Error receiving from OpenAI"
+                            )
                             await websocket.close(code=1011, reason=reason)
                             break
                 except Exception as e:
                     print(f"Error forwarding to client: {e}")
-            
+
             try:
                 await asyncio.gather(
-                    forward_to_openai(),
-                    forward_to_client(),
-                    return_exceptions=True
+                    forward_to_openai(), forward_to_client(), return_exceptions=True
                 )
             except Exception as e:
                 await websocket.close(code=1011, reason=f"Connection error: {str(e)}")
@@ -2193,23 +2301,34 @@ async def realtime_websocket_proxy(
         reason = f"Invalid OpenAI endpoint: {str(e)}" if str(e) else "Invalid OpenAI endpoint"
         await websocket.close(code=1008, reason=reason)
     except websockets.exceptions.InvalidHandshake as e:
-        reason = f"OpenAI authentication failed: {str(e)}" if str(e) else "OpenAI authentication failed"
+        reason = (
+            f"OpenAI authentication failed: {str(e)}" if str(e) else "OpenAI authentication failed"
+        )
         await websocket.close(code=1008, reason=reason)
     except Exception as e:
-        error_msg = str(e) if str(e) else "Connection failed. Please check your OpenAI API key and try again."
+        error_msg = (
+            str(e)
+            if str(e)
+            else "Connection failed. Please check your OpenAI API key and try again."
+        )
         await websocket.close(code=1011, reason=error_msg)
 
+
 @app.websocket("/api/interview/realtime/{session_id}")
-async def interview_realtime_websocket(websocket: WebSocket, session_id: str, authorization: Optional[str] = None):
+async def interview_realtime_websocket(
+    websocket: WebSocket, session_id: str, authorization: Optional[str] = None
+):
     """WebSocket endpoint for voice-only interview using OpenAI Realtime."""
     print(f"🔌 WebSocket connection attempt: session_id={session_id}, client={websocket.client}")
-    
+
     # Require authenticated session owner before accepting websocket.
     auth_token = None
     if authorization:
         auth_token = authorization.replace("Bearer ", "").strip()
     if not auth_token:
-        query_token = websocket.query_params.get("token") or websocket.query_params.get("authorization")
+        query_token = websocket.query_params.get("token") or websocket.query_params.get(
+            "authorization"
+        )
         if query_token:
             auth_token = str(query_token).replace("Bearer ", "").strip()
     if not auth_token:
@@ -2247,22 +2366,27 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         auth_db.close()
 
     try:
+        _require_openai_native_realtime()
         await websocket.accept()
         print(f"✅ WebSocket connection accepted: session_id={session_id}")
-        
+
         # Immediately send connection acknowledgment
-        await websocket.send_text(json.dumps({
-            "type": "connection.ack",
-            "status": "connected",
-            "message": "WebSocket connection established. Connecting to Azure Realtime..."
-        }))
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "connection.ack",
+                    "status": "connected",
+                    "message": "WebSocket connection established. Connecting to realtime provider...",
+                }
+            )
+        )
     except Exception as e:
         print(f"❌ WebSocket accept failed: {e}")
         return
-    
+
     # Get user_id from auth if available
     user_id = caller_user_id
-    
+
     # Get or create interview session state
     session_state = load_interview_state(session_id)
     if not session_state:
@@ -2270,76 +2394,83 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
         interview_type = "mixed"
         difficulty = "mid"
         max_questions = 6
-        
+
         # Try to get from query params
         query_params = dict(websocket.query_params)
         interview_type = query_params.get("type", interview_type)
         difficulty = query_params.get("difficulty", difficulty)
         max_questions = int(query_params.get("max_questions", max_questions))
-        
+
         session_state = InterviewState(
             session_id=session_id,
             interview_type=interview_type,
             difficulty=difficulty,
-            max_questions=max_questions
+            max_questions=max_questions,
         )
         save_interview_state(session_state)
-    
+
     # Build OpenAI Realtime WebSocket URL
     if OPENAI_API_KEY and OPENAI_API_KEY != "your-openai-api-key-here":
         ws_url = f"wss://api.openai.com/v1/realtime?model={OPENAI_REALTIME_MODEL}"
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
     else:
         error_msg = (
-            "OpenAI API key not configured. "
-            "Please set OPENAI_API_KEY in backend/.env file."
+            "OpenAI API key not configured. " "Please set OPENAI_API_KEY in backend/.env file."
         )
         await websocket.close(code=1008, reason=error_msg)
         return
-    
+
     try:
         logging.info("Connecting to OpenAI Realtime: %s", ws_url[:100])
-        
+
         # Send status update: starting OpenAI connection
-        await websocket.send_text(json.dumps({
-            "type": "openai.connecting",
-            "status": "connecting",
-            "message": "Connecting to OpenAI Realtime..."
-        }))
-        
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "openai.connecting",
+                    "status": "connecting",
+                    "message": "Connecting to OpenAI Realtime...",
+                }
+            )
+        )
+
         # Add timeout for provider connection
         try:
             openai_ws = await asyncio.wait_for(
-                websockets.connect(
-                    ws_url,
-                    subprotocols=["realtime"],
-                    additional_headers=headers
-                ),
-                timeout=10.0
+                websockets.connect(ws_url, subprotocols=["realtime"], additional_headers=headers),
+                timeout=10.0,
             )
-            azure_ws = openai_ws  # Temporary alias while legacy helper names are migrated.
+            provider_ws = openai_ws
             print(f"✅ OpenAI Realtime WebSocket connected: session_id={session_id}")
-            
+
             # Send status update: OpenAI connected
-            await websocket.send_text(json.dumps({
-                "type": "openai.connected",
-                "status": "connected",
-                "message": "OpenAI Realtime connected. Initializing session..."
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "openai.connected",
+                        "status": "connected",
+                        "message": "OpenAI Realtime connected. Initializing session...",
+                    }
+                )
+            )
         except asyncio.TimeoutError:
             error_msg = "OpenAI connection timeout after 10 seconds"
             print(f"❌ {error_msg}")
             print(f"❌ WebSocket URL: {ws_url}")
             print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "error": {
-                    "message": error_msg,
-                    "code": "timeout",
-                    "ws_url": ws_url,
-                    "suggestion": "Check your OPENAI_API_KEY and model configuration"
-                }
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "error": {
+                            "message": error_msg,
+                            "code": "timeout",
+                            "ws_url": ws_url,
+                            "suggestion": "Check your OPENAI_API_KEY and model configuration",
+                        },
+                    }
+                )
+            )
             # Keep connection open briefly to allow error message to be received
             await asyncio.sleep(1)
             return
@@ -2349,15 +2480,19 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
             print(f"❌ WebSocket URL: {ws_url}")
             print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
             print("❌ This usually means: wrong API key, unsupported model, or rate limiting")
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "error": {
-                    "message": error_msg,
-                    "code": "invalid_handshake",
-                    "ws_url": ws_url,
-                    "suggestion": "Verify OPENAI_API_KEY and OPENAI_REALTIME_MODEL"
-                }
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "error": {
+                            "message": error_msg,
+                            "code": "invalid_handshake",
+                            "ws_url": ws_url,
+                            "suggestion": "Verify OPENAI_API_KEY and OPENAI_REALTIME_MODEL",
+                        },
+                    }
+                )
+            )
             await asyncio.sleep(1)
             return
         except Exception as e:
@@ -2368,56 +2503,69 @@ async def interview_realtime_websocket(websocket: WebSocket, session_id: str, au
             print(f"❌ Headers: {list(headers.keys()) if headers else 'None'}")
 
             print(f"❌ Traceback: {traceback.format_exc()}")
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "error": {
-                    "message": error_msg,
-                    "code": type(e).__name__,
-                    "ws_url": ws_url,
-                    "full_error": str(e)
-                }
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "error": {
+                            "message": error_msg,
+                            "code": type(e).__name__,
+                            "ws_url": ws_url,
+                            "full_error": str(e),
+                        },
+                    }
+                )
+            )
             # Keep connection open briefly to allow error message to be received
             await asyncio.sleep(1)
             return
-        
+
         try:
-            async with azure_ws:
-        # Session initialization
+            async with provider_ws:
+                # Session initialization
                 system_prompt = _build_interviewer_system_prompt(
                     session_state.interview_type,
                     session_state.difficulty,
                 )
-                
-                # Step 1: Wait for session.created (Azure sends this automatically on connection)
+
+                # Step 1: Wait for session.created (Provider sends this automatically on connection)
                 # Add timeout for first event
                 try:
-                    first_event_data = await asyncio.wait_for(azure_ws.recv(), timeout=5.0)
+                    first_event_data = await asyncio.wait_for(provider_ws.recv(), timeout=5.0)
                     first_event = json.loads(first_event_data)
                 except asyncio.TimeoutError:
-                    print(f"❌ Timeout waiting for session.created from Azure")
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "error": "Azure OpenAI did not respond with session.created. Please check your Azure configuration."
-                    }))
+                    print(f"❌ Timeout waiting for session.created from realtime provider")
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "error": "Realtime provider did not respond with session.created. Please check your provider configuration.",
+                            }
+                        )
+                    )
                     return
-                
+
                 if first_event.get("type") != "session.created":
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "error": f"Unexpected first event: {first_event.get('type')}"
-                    }))
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "error": f"Unexpected first event: {first_event.get('type')}",
+                            }
+                        )
+                    )
                     return
-                
+
                 # Forward session.created to client
                 await websocket.send_text(json.dumps(first_event))
-                print(f"✅ Azure session created")
-                
+                print(f"✅ Realtime session created")
+
                 # Step 2: Send session.update with system prompt and audio configuration
                 # CRITICAL: Use ONLY audio modality to prevent duplicate audio streams
                 # IMPORTANT: Use audio.speed (not rate) - this is the correct field for OpenAI Realtime
                 # CRITICAL: Strong English-only enforcement - MUST be first and most prominent
-                english_only_instructions = """You are Sonia, conducting an English-only professional interview.
+                english_only_instructions = (
+                    """You are Sonia, conducting an English-only professional interview.
 
 Language policy:
 - Respond in English only.
@@ -2430,14 +2578,15 @@ Interview behavior:
 - Maintain a calm, professional interview tone.
 - Keep responses concise and avoid repeating yourself.
 """ + system_prompt
-                
+                )
+
                 session_update_payload = {
                     "type": "session.update",
                     "session": {
-                        "type": "realtime",  # ✅ REQUIRED: Azure requires session.type
+                        "type": "realtime",  # Required for the realtime session schema
                         "input_audio_transcription": {
-                            "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
-                            "language": "en"
+                            "model": OPENAI_TRANSCRIBE_MODEL,
+                            "language": "en",
                         },
                         "audio": {
                             "input": {
@@ -2447,56 +2596,60 @@ Interview behavior:
                                     "threshold": 0.55,
                                     "prefix_padding_ms": 300,
                                     "silence_duration_ms": 500,
-                                    "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED
+                                    "create_response": not INTERVIEW_SERVER_CONTROL_ENABLED,
                                 },
                                 "transcription": {
-                                    "model": AZURE_OPENAI_WHISPER_DEPLOYMENT,
-                                    "language": "en"
+                                    "model": OPENAI_TRANSCRIBE_MODEL,
+                                    "language": "en",
                                 },
                             },
-                            "output": {
-                                "voice": REALTIME_VOICE
-                            }
+                            "output": {"voice": REALTIME_VOICE},
                         },
-                        "instructions": english_only_instructions
-                    }
+                        "instructions": english_only_instructions,
+                    },
                 }
-                
+
                 # Log first 500 chars of instructions to verify English-only enforcement
                 print(
                     f"📝 Sending session.update with voice={REALTIME_VOICE}, "
                     f"instructions(first 500): {english_only_instructions[:500]}"
                 )
-                
-                await openai_ws.send(json.dumps(session_update_payload))
-                
+
+                await provider_ws.send(json.dumps(session_update_payload))
+
                 # Step 3: Wait for session.updated confirmation
                 try:
-                    update_event = json.loads(await asyncio.wait_for(openai_ws.recv(), timeout=5.0))
+                    update_event = json.loads(
+                        await asyncio.wait_for(provider_ws.recv(), timeout=5.0)
+                    )
                     if update_event.get("type") == "session.updated":
                         await websocket.send_text(json.dumps(update_event))
                         print("✅ OpenAI session updated")
                 except asyncio.TimeoutError:
                     print(f"⚠️ Timeout waiting for session.updated, continuing anyway")
-                
+
                 # Step 4: Send initial greeting to start the interview
-                await _send_initial_question(openai_ws, session_state)
+                await _send_initial_question(provider_ws, session_state)
                 print(f"✅ Sent initial greeting")
-                
+
                 # Send ready status message
-                await websocket.send_text(json.dumps({
-                    "type": "ready",
-                    "status": "ready",
-                    "message": "Interview ready. You can start speaking."
-                }))
-                
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "ready",
+                            "status": "ready",
+                            "message": "Interview ready. You can start speaking.",
+                        }
+                    )
+                )
+
                 # Track current question/answer
                 current_ai_text = []
                 current_user_text = []
                 waiting_for_response = False
-                
-                async def forward_to_azure():
-                    """Forward client messages to Azure OpenAI."""
+
+                async def forward_to_provider():
+                    """Forward client messages to the realtime provider."""
                     try:
                         while True:
                             try:
@@ -2506,61 +2659,71 @@ Interview behavior:
 
                                 # Handle control messages
                                 if msg_type == "input_audio_buffer.append":
-                                    # Forward audio to Azure - log chunk size for debugging
+                                    # Forward audio to provider - log chunk size for debugging
                                     audio_data = msg.get("audio", "")
                                     if audio_data:
                                         audio_bytes = len(base64.b64decode(audio_data))
-                                        print(f"[AUDIO DEBUG] Received audio chunk from frontend: {audio_bytes} bytes")
+                                        print(
+                                            f"[AUDIO DEBUG] Received audio chunk from frontend: {audio_bytes} bytes"
+                                        )
                                         if audio_bytes % 2 != 0:
-                                            print(f"⚠️ Warning: Odd PCM chunk size: {audio_bytes} bytes")
+                                            print(
+                                                f"⚠️ Warning: Odd PCM chunk size: {audio_bytes} bytes"
+                                            )
                                     else:
-                                        print("[AUDIO DEBUG] Received input_audio_buffer.append with NO audio data!")
-                                    await azure_ws.send(data)
+                                        print(
+                                            "[AUDIO DEBUG] Received input_audio_buffer.append with NO audio data!"
+                                        )
+                                    await provider_ws.send(data)
                                 elif msg_type == "conversation.item.create":
                                     # User wants to start speaking - forward as-is
-                                    await azure_ws.send(data)
+                                    await provider_ws.send(data)
                                 elif msg_type == "response.create":
                                     # User wants AI to respond
-                                    await azure_ws.send(data)
+                                    await provider_ws.send(data)
                                 elif msg_type == "session.update":
                                     # Update session config
-                                    await azure_ws.send(data)
+                                    await provider_ws.send(data)
                                 elif msg_type == "end_interview":
                                     # User wants to end interview
-                                    await _end_interview(azure_ws, session_state, websocket, user_id)
+                                    await _end_interview(
+                                        provider_ws, session_state, websocket, user_id
+                                    )
                                     break
                                 elif msg_type == "gaze_metrics":
                                     # Store gaze metrics for current answer
-                                    if session_state.current_answer and session_state.question_index is not None:
+                                    if (
+                                        session_state.current_answer
+                                        and session_state.question_index is not None
+                                    ):
                                         session_state.add_gaze_metrics(
-                                            session_state.question_index,
-                                            msg.get("metrics", {})
+                                            session_state.question_index, msg.get("metrics", {})
                                         )
                                         save_interview_state(session_state)
                                 else:
                                     # Forward other messages
-                                    await azure_ws.send(data)
+                                    await provider_ws.send(data)
                             except WebSocketDisconnect:
                                 break
                             except Exception as e:
-                                print(f"❌ Error forwarding to Azure: {e}")
+                                print(f"❌ Error forwarding to provider: {e}")
 
                                 traceback.print_exc()
                                 break
                     except WebSocketDisconnect:
                         pass
                     except Exception as e:
-                        print(f"❌ Error in forward_to_azure: {e}")
+                        print(f"❌ Error in forward_to_provider: {e}")
 
                         traceback.print_exc()
-                
-                async def forward_from_azure():
-                    """Forward Azure messages to client and handle interview logic."""
+
+                async def forward_from_provider():
+                    """Forward provider messages to client and handle interview logic."""
                     nonlocal current_ai_text, current_user_text, waiting_for_response
                     try:
                         while True:
                             try:
-                                data = await azure_ws.recv()
+                                data = await provider_ws.recv()
                                 if isinstance(data, bytes):
                                     # Audio data - forward as-is
                                     await websocket.send_bytes(data)
@@ -2572,18 +2735,29 @@ Interview behavior:
                                     # Patch: Attach transcript to outgoing user events (extract from content array if present)
                                     patched_event = dict(event)
                                     # For user message events, extract transcript from item.content[0].transcript if present
-                                    if event_type in ["conversation.item.added", "conversation.item.done"]:
+                                    if event_type in [
+                                        "conversation.item.added",
+                                        "conversation.item.done",
+                                    ]:
                                         item = event.get("item", {})
                                         if item.get("role") == "user":
                                             content = item.get("content", [])
                                             if content and isinstance(content, list):
                                                 first = content[0]
-                                                transcript = first.get("transcript") if isinstance(first, dict) else None
+                                                transcript = (
+                                                    first.get("transcript")
+                                                    if isinstance(first, dict)
+                                                    else None
+                                                )
                                                 if transcript:
                                                     patched_event["user_transcript"] = transcript
 
                                     # Also keep previous patch for other event types if needed
-                                    if event_type in ["conversation.item.input_audio_transcription.completed", "conversation.item.completed", "input_audio_buffer.committed"]:
+                                    if event_type in [
+                                        "conversation.item.input_audio_transcription.completed",
+                                        "conversation.item.completed",
+                                        "input_audio_buffer.committed",
+                                    ]:
                                         transcript = event.get("transcript", None)
                                         if transcript:
                                             patched_event["user_transcript"] = transcript
@@ -2592,8 +2766,11 @@ Interview behavior:
                                     await websocket.send_text(json.dumps(patched_event))
 
                                     # Log transcript-related messages
-                                    if event_type in ["response.text.delta", "response.text.done", 
-                                                      "conversation.item.input_audio_transcription.completed"]:
+                                    if event_type in [
+                                        "response.text.delta",
+                                        "response.text.done",
+                                        "conversation.item.input_audio_transcription.completed",
+                                    ]:
                                         print(f"📝 Transcript event: {event_type}")
                                         if "transcript" in event:
                                             transcript_text = str(event.get("transcript", ""))[:100]
@@ -2624,7 +2801,10 @@ Interview behavior:
                                         if transcript and waiting_for_response:
                                             current_user_text.append(transcript)
 
-                                    elif event_type == "conversation.item.input_audio_transcription.completed":
+                                    elif (
+                                        event_type
+                                        == "conversation.item.input_audio_transcription.completed"
+                                    ):
                                         # User transcript is complete - accumulate
                                         transcript = event.get("transcript", "")
                                         if transcript and waiting_for_response:
@@ -2632,50 +2812,72 @@ Interview behavior:
 
                                     elif event_type == "conversation.item.completed":
                                         # User finished speaking - evaluate the complete answer
-                                        if current_user_text and waiting_for_response and session_state.current_question:
+                                        if (
+                                            current_user_text
+                                            and waiting_for_response
+                                            and session_state.current_question
+                                        ):
                                             full_answer = " ".join(current_user_text).strip()
-                                            if full_answer and len(full_answer) > 10:  # Minimum answer length
+                                            if (
+                                                full_answer and len(full_answer) > 10
+                                            ):  # Minimum answer length
                                                 session_state.add_answer(full_answer)
 
                                                 # Evaluate response
                                                 evaluation = evaluate_response(
                                                     full_answer,
                                                     session_state.interview_type,
-                                                    {"question": session_state.current_question}
+                                                    {"question": session_state.current_question},
                                                 )
                                                 session_state.add_evaluation(evaluation)
                                                 save_interview_state(session_state)
 
                                                 # Determine next action
-                                                next_action = session_state.get_next_action(evaluation)
+                                                next_action = session_state.get_next_action(
+                                                    evaluation
+                                                )
 
                                                 # Generate next question or end
                                                 if session_state.should_end():
-                                                    await _end_interview(azure_ws, session_state, websocket, user_id)
+                                                    await _end_interview(
+                                                        provider_ws,
+                                                        session_state,
+                                                        websocket,
+                                                        user_id,
+                                                    )
                                                 else:
-                                                    await _handle_next_action(azure_ws, session_state, next_action, evaluation)
+                                                    await _handle_next_action(
+                                                        provider_ws,
+                                                        session_state,
+                                                        next_action,
+                                                        evaluation,
+                                                    )
 
                                             current_user_text = []
                                             waiting_for_response = False
 
                                     elif event_type == "error":
-                                        await websocket.send_text(json.dumps({
-                                            "type": "error",
-                                            "error": event.get("error", {}).get("message", "Unknown error")
-                                        }))
+                                        await websocket.send_text(
+                                            json.dumps(
+                                                {
+                                                    "type": "error",
+                                                    "error": event.get("error", {}).get(
+                                                        "message", "Unknown error"
+                                                    ),
+                                                }
+                                            )
+                                        )
                             except websockets.exceptions.ConnectionClosed:
                                 break
                             except Exception as e:
-                                print(f"Error receiving from Azure: {e}")
+                                print(f"Error receiving from provider: {e}")
                                 break
                     except Exception as e:
-                        print(f"Error in forward_from_azure: {e}")
-                
+                        print(f"Error in forward_from_provider: {e}")
+
                 try:
                     await asyncio.gather(
-                        forward_to_azure(),
-                        forward_from_azure(),
-                        return_exceptions=True
+                        forward_to_provider(), forward_from_provider(), return_exceptions=True
                     )
                 except Exception as e:
                     await websocket.close(code=1011, reason=f"Connection error: {str(e)}")
@@ -2737,39 +2939,39 @@ Opening line:
         )
     else:
         base_prompt += "\nInterview scope is server-locked by backend question planning."
-    
+
     # Add role and company context if provided
     if role:
         base_prompt += f"\nYou are interviewing for a {role} position."
     if company:
         base_prompt += f" This interview is for {company}."
-    
+
     # Add job level context
     if job_level:
         level_context = {
             "intern": "This is an intern-level position. Focus on learning ability, enthusiasm, and potential.",
             "junior": "This is a junior-level position. Focus on foundational skills, willingness to learn, and basic experience.",
             "mid": "This is a mid-level position. Focus on solid experience, problem-solving skills, and ability to work independently.",
-            "senior": "This is a senior-level position. Focus on deep expertise, leadership, architecture decisions, and mentoring ability."
+            "senior": "This is a senior-level position. Focus on deep expertise, leadership, architecture decisions, and mentoring ability.",
         }
         base_prompt += f"\n{level_context.get(job_level, '')}"
-    
+
     # Add interview style
     if interview_style:
         style_context = {
             "friendly": "Maintain a warm, encouraging, and supportive tone. Make the candidate feel comfortable while still being professional.",
             "neutral": "Maintain a professional, balanced tone. Be fair and objective in your assessment.",
-            "strict": "Maintain a formal, rigorous tone. Challenge the candidate appropriately and expect detailed, well-structured answers."
+            "strict": "Maintain a formal, rigorous tone. Challenge the candidate appropriately and expect detailed, well-structured answers.",
         }
         base_prompt += f"\n{style_context.get(interview_style, '')}"
-    
+
     # Add question mix focus
     if question_mix:
         mix_context = {
             "technical": "Focus primarily on technical questions. Ask about programming concepts, system design, algorithms, and technical problem-solving.",
             "behavioral": "Focus primarily on behavioral questions. Ask about past experiences, teamwork, challenges, and how they handle situations.",
             "balanced": "Balance technical and behavioral questions. Mix both types naturally throughout the interview.",
-            "custom": "Adapt your question mix based on the candidate's responses and the role requirements."
+            "custom": "Adapt your question mix based on the candidate's responses and the role requirements.",
         }
         base_prompt += f"\n{mix_context.get(question_mix, '')}"
 
@@ -2789,9 +2991,9 @@ Opening line:
                 f"\nInterview duration target: {duration_minutes} minutes. You have room for deeper "
                 "probing per topic while still covering technical and behavioral dimensions."
             )
-    
+
     base_prompt += "\n"
-    
+
     if interview_type == "behavioral":
         base_prompt += """## Focus: Behavioral Interview
 Ask about real experiences using the STAR framework (but don't mention STAR to them).
@@ -2832,11 +3034,11 @@ Start with background, then alternate:
 
 Make it feel like a natural conversation, not a checklist.
 """
-    
+
     return base_prompt
 
 
-async def _send_initial_question(azure_ws, session_state: InterviewState):
+async def _send_initial_question(provider_ws, session_state: InterviewState):
     """Send the initial greeting/question to start the interview."""
     # Professional interview greeting
     if session_state.interview_type == "behavioral":
@@ -2845,17 +3047,23 @@ async def _send_initial_question(azure_ws, session_state: InterviewState):
         greeting = "Hello, welcome to the technical interview. I'll be asking you about your technical background and problem-solving approach. To start, could you please tell me about yourself, your technical experience, and describe a challenging technical problem you've solved recently?"
     else:
         greeting = "Hello, thank you for joining me today. This will be a mixed interview covering both behavioral and technical aspects. To begin, could you please introduce yourself and tell me about your background, current role, and what you consider your strongest technical skill?"
-    
-    await azure_ws.send(json.dumps({
-        "type": "response.create",
-        "response": {
-            # Keep the model in interviewer mode: ask only, never answer.
-            "instructions": _wrap_interviewer_question_instruction(greeting)
-        }
-    }))
+
+    await provider_ws.send(
+        json.dumps(
+            {
+                "type": "response.create",
+                "response": {
+                    # Keep the model in interviewer mode: ask only, never answer.
+                    "instructions": _wrap_interviewer_question_instruction(greeting)
+                },
+            }
+        )
+    )
 
 
-def _wrap_interviewer_question_instruction(question: str, refusal_message: Optional[str] = None) -> str:
+def _wrap_interviewer_question_instruction(
+    question: str, refusal_message: Optional[str] = None
+) -> str:
     """Wrap question text so realtime model asks verbatim and never answers."""
     safe_question = str(question or "").strip()
     if not safe_question:
@@ -2874,53 +3082,67 @@ def _wrap_interviewer_question_instruction(question: str, refusal_message: Optio
     return "\n".join(parts)
 
 
-async def _handle_next_action(azure_ws, session_state: InterviewState, action: NextAction, evaluation: Dict):
+async def _handle_next_action(
+    provider_ws, session_state: InterviewState, action: NextAction, evaluation: Dict
+):
     """Handle the next action based on evaluation."""
     if action == NextAction.MOVE_ON:
         session_state.move_to_next_question()
         save_interview_state(session_state)
         # Generate next question
         question = _generate_next_question(session_state)
-        await azure_ws.send(json.dumps({
-            "type": "response.create",
-            "response": {
-                "instructions": _wrap_interviewer_question_instruction(question)
-            }
-        }))
+        await provider_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": _wrap_interviewer_question_instruction(question)},
+                }
+            )
+        )
     elif action == NextAction.PROBE_DEEPER:
-        follow_up = "Can you provide more specific details about that? What was the impact or outcome?"
-        await azure_ws.send(json.dumps({
-            "type": "response.create",
-            "response": {
-                "instructions": _wrap_interviewer_question_instruction(follow_up)
-            }
-        }))
+        follow_up = (
+            "Can you provide more specific details about that? What was the impact or outcome?"
+        )
+        await provider_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": _wrap_interviewer_question_instruction(follow_up)},
+                }
+            )
+        )
     elif action == NextAction.CLARIFY:
         follow_up = "I want to make sure I understand. Could you clarify that point?"
-        await azure_ws.send(json.dumps({
-            "type": "response.create",
-            "response": {
-                "instructions": _wrap_interviewer_question_instruction(follow_up)
-            }
-        }))
+        await provider_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": _wrap_interviewer_question_instruction(follow_up)},
+                }
+            )
+        )
     elif action == NextAction.REDIRECT:
         follow_up = "Let me refocus the question. " + _generate_next_question(session_state)
-        await azure_ws.send(json.dumps({
-            "type": "response.create",
-            "response": {
-                "instructions": _wrap_interviewer_question_instruction(follow_up)
-            }
-        }))
+        await provider_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": _wrap_interviewer_question_instruction(follow_up)},
+                }
+            )
+        )
     elif action == NextAction.RAISE_BAR:
         session_state.move_to_next_question()
         save_interview_state(session_state)
         question = _generate_next_question(session_state, harder=True)
-        await azure_ws.send(json.dumps({
-            "type": "response.create",
-            "response": {
-                "instructions": _wrap_interviewer_question_instruction(question)
-            }
-        }))
+        await provider_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": _wrap_interviewer_question_instruction(question)},
+                }
+            )
+        )
 
 
 def _generate_next_question(session_state: InterviewState, harder: bool = False) -> str:
@@ -2946,58 +3168,62 @@ def _generate_next_question(session_state: InterviewState, harder: bool = False)
             "Tell me about a time you optimized code performance.",
             "How do you stay updated with new technologies?",
             "Describe your testing methodology.",
-        ]
+        ],
     }
-    
+
     q_list = questions.get(session_state.interview_type, questions["mixed"])
     idx = session_state.question_index % len(q_list)
     return q_list[idx]
 
 
-async def _end_interview(azure_ws, session_state: InterviewState, client_ws: WebSocket, user_id: str):
+async def _end_interview(
+    provider_ws, session_state: InterviewState, client_ws: WebSocket, user_id: str
+):
     """End the interview and generate report."""
     session_state.end_interview()
     save_interview_state(session_state)
-    
+
     # Send closing message
-    await azure_ws.send(json.dumps({
-        "type": "response.create",
-        "response": {
-            # ✅ REMOVED: modalities belong in session.update, not response.create
-            "instructions": "Thank you for your time. The interview is now complete. We'll prepare your feedback report."
-        }
-    }))
-    
+    await provider_ws.send(
+        json.dumps(
+            {
+                "type": "response.create",
+                "response": {
+                    # ✅ REMOVED: modalities belong in session.update, not response.create
+                    "instructions": "Thank you for your time. The interview is now complete. We'll prepare your feedback report."
+                },
+            }
+        )
+    )
+
     # Calculate duration
     duration = (datetime.now() - session_state.start_time).total_seconds() / 60
-    
+
     # Generate report
     try:
         report = generate_interview_report(
-            session_state,
-            session_state.interview_type,
-            int(duration)
+            session_state, session_state.interview_type, int(duration)
         )
-        
+
         # Set user_id from session
         report.user_id = user_id
-        
+
         # Store report
         interview_reports[report.id] = report
-        
+
         # Send report ID to client
-        await client_ws.send_text(json.dumps({
-            "type": "interview.completed",
-            "report_id": report.id
-        }))
+        await client_ws.send_text(
+            json.dumps({"type": "interview.completed", "report_id": report.id})
+        )
     except Exception as e:
         print(f"Error generating report: {e}")
-        await client_ws.send_text(json.dumps({
-            "type": "error",
-            "error": "Failed to generate report. Please try again."
-        }))
+        await client_ws.send_text(
+            json.dumps({"type": "error", "error": "Failed to generate report. Please try again."})
+        )
+
 
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
+
 
 def _get_clerk_jwks_for_verify():
     """Use correct JWKS URL (derive from CLERK_PUBLISHABLE_KEY or CLERK_JWKS_URL)."""
@@ -3010,21 +3236,22 @@ def _get_clerk_jwks_for_verify():
         logging.warning("Clerk JWKS fetch failed: url=%s err=%s", _clerk_jwks_url(), e)
         return None
 
+
 def verify_clerk_token(token: str) -> Optional[Dict]:
     if not CLERK_SECRET_KEY:
         logging.warning("CLERK_SECRET_KEY not set")
         return None
-    
+
     try:
         try:
             decoded = jwt.decode(token, CLERK_SECRET_KEY, algorithms=["HS256"])
             return decoded
         except jwt.InvalidTokenError:
             pass
-        
+
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
-        
+
         if kid:
             jwks = _get_clerk_jwks_for_verify()
             if jwks:
@@ -3032,19 +3259,20 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
                     if key.get("kid") == kid:
                         try:
                             from jwt.algorithms import RSAAlgorithm
+
                             public_key = RSAAlgorithm.from_jwk(json.dumps(key))
                             decoded = jwt.decode(token, public_key, algorithms=["RS256"])
                             return decoded
                         except Exception as e:
                             logging.warning("RS256 decode failed for kid=%s: %s", kid, e)
                             pass
-        
+
         try:
             decoded = jwt.decode(token, CLERK_SECRET_KEY, algorithms=["RS256"])
             return decoded
         except jwt.InvalidTokenError:
             return None
-            
+
     except jwt.ExpiredSignatureError:
         logging.warning("Clerk token expired")
         return None
@@ -3087,12 +3315,9 @@ def verify_clerk_token(token: str) -> Optional[Dict]:
 #             detail="Failed to create or fetch user"
 #         )
 
+
 # Refactored version of get_or_create_user
-def get_or_create_user_db(
-    db: Session,
-    clerk_user_id: str,
-    email: str | None = None
-):
+def get_or_create_user_db(db: Session, clerk_user_id: str, email: str | None = None):
     try:
         user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
 
@@ -3115,17 +3340,22 @@ def get_or_create_user_db(
         print("❌ Error in get_or_create_user_db:", e)
         raise HTTPException(status_code=500, detail="User database error")
 
+
 def get_current_user(
     authorization: Optional[str] = Header(None, alias="Authorization"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Validate self-hosted JWT and return the User ORM object."""
     from api.auth import _token_service as auth_ts
 
     if not authorization or not authorization.strip():
         if DEV_AUTH_BYPASS:
-            dev_user_id = (os.getenv("DEV_USER_ID", "dev-local-admin") or "").strip() or "dev-local-admin"
-            dev_user_email = (os.getenv("DEV_USER_EMAIL", "dev-local-admin@localhost.local") or "").strip() or None
+            dev_user_id = (
+                os.getenv("DEV_USER_ID", "dev-local-admin") or ""
+            ).strip() or "dev-local-admin"
+            dev_user_email = (
+                os.getenv("DEV_USER_EMAIL", "dev-local-admin@localhost.local") or ""
+            ).strip() or None
             dev_user_name = (os.getenv("DEV_USER_NAME", "Local Dev Admin") or "").strip() or None
             user = get_or_create_user(
                 db=db,
@@ -3195,6 +3425,7 @@ def get_user_id_from_auth(authorization: Optional[str] = None) -> Optional[str]:
 personality_reports: Dict[str, PersonalityReport] = {}
 interview_reports: Dict[str, InterviewReport] = {}
 
+
 def init_sample_reports():
     sample_reports = [
         InterviewReport(
@@ -3207,22 +3438,18 @@ def init_sample_reports():
             duration="32 minutes",
             overall_score=85,
             scores=ScoreBreakdown(
-                communication=88,
-                clarity=82,
-                structure=90,
-                technical_depth=83,
-                relevance=85
+                communication=88, clarity=82, structure=90, technical_depth=83, relevance=85
             ),
             transcript=[
                 TranscriptMessage(
                     speaker="Interviewer",
                     text="Tell me about a time when you had to work with a difficult team member.",
-                    timestamp=datetime(2025, 11, 10, 10, 0, 0)
+                    timestamp=datetime(2025, 11, 10, 10, 0, 0),
                 ),
                 TranscriptMessage(
                     speaker="You",
                     text="In my previous role, I worked with a colleague who was resistant to change. I scheduled one-on-one meetings to understand their concerns and found common ground. We eventually became strong collaborators on the project.",
-                    timestamp=datetime(2025, 11, 10, 10, 1, 0)
+                    timestamp=datetime(2025, 11, 10, 10, 1, 0),
                 ),
             ],
             recommendations=[
@@ -3231,7 +3458,7 @@ def init_sample_reports():
                 "Good job maintaining eye contact throughout the interview",
             ],
             questions=6,
-            is_sample=True
+            is_sample=True,
         ),
         InterviewReport(
             id="sample-2",
@@ -3242,22 +3469,17 @@ def init_sample_reports():
             mode="Full Interview",
             duration="28 minutes",
             overall_score=92,
-            scores=ScoreBreakdown(
-                communication=95,
-                clarity=90,
-                structure=93,
-                relevance=90
-            ),
+            scores=ScoreBreakdown(communication=95, clarity=90, structure=93, relevance=90),
             transcript=[
                 TranscriptMessage(
                     speaker="Interviewer",
                     text="Describe a challenging project you led.",
-                    timestamp=datetime(2025, 11, 7, 14, 0, 0)
+                    timestamp=datetime(2025, 11, 7, 14, 0, 0),
                 ),
                 TranscriptMessage(
                     speaker="You",
                     text="I led a project to migrate our legacy system to a modern cloud architecture. The main challenge was ensuring zero downtime during the migration. I coordinated with multiple teams and created a detailed migration plan with rollback procedures.",
-                    timestamp=datetime(2025, 11, 7, 14, 1, 0)
+                    timestamp=datetime(2025, 11, 7, 14, 1, 0),
                 ),
             ],
             recommendations=[
@@ -3266,7 +3488,7 @@ def init_sample_reports():
                 "Great communication and clarity",
             ],
             questions=5,
-            is_sample=True
+            is_sample=True,
         ),
         InterviewReport(
             id="sample-3",
@@ -3277,22 +3499,17 @@ def init_sample_reports():
             mode="Drill",
             duration="8 minutes",
             overall_score=78,
-            scores=ScoreBreakdown(
-                communication=80,
-                clarity=75,
-                structure=82,
-                relevance=75
-            ),
+            scores=ScoreBreakdown(communication=80, clarity=75, structure=82, relevance=75),
             transcript=[
                 TranscriptMessage(
                     speaker="Interviewer",
                     text="Tell me about a time you had to resolve a conflict.",
-                    timestamp=datetime(2025, 11, 5, 11, 0, 0)
+                    timestamp=datetime(2025, 11, 5, 11, 0, 0),
                 ),
                 TranscriptMessage(
                     speaker="You",
                     text="I once had a disagreement with a teammate about the approach to a feature. We sat down, discussed both perspectives, and found a middle ground that incorporated the best of both ideas.",
-                    timestamp=datetime(2025, 11, 5, 11, 1, 0)
+                    timestamp=datetime(2025, 11, 5, 11, 1, 0),
                 ),
             ],
             recommendations=[
@@ -3301,7 +3518,7 @@ def init_sample_reports():
                 "Practice structuring answers more clearly",
             ],
             questions=1,
-            is_sample=True
+            is_sample=True,
         ),
         InterviewReport(
             id="sample-4",
@@ -3313,22 +3530,18 @@ def init_sample_reports():
             duration="45 minutes",
             overall_score=88,
             scores=ScoreBreakdown(
-                communication=85,
-                clarity=90,
-                structure=92,
-                technical_depth=90,
-                relevance=85
+                communication=85, clarity=90, structure=92, technical_depth=90, relevance=85
             ),
             transcript=[
                 TranscriptMessage(
                     speaker="Interviewer",
                     text="Design a scalable chat application.",
-                    timestamp=datetime(2025, 11, 3, 15, 0, 0)
+                    timestamp=datetime(2025, 11, 3, 15, 0, 0),
                 ),
                 TranscriptMessage(
                     speaker="You",
                     text="I would start by identifying the core requirements: real-time messaging, user authentication, message persistence, and scalability. I'd use WebSockets for real-time communication, a message queue for handling high load, and a distributed database for storage.",
-                    timestamp=datetime(2025, 11, 3, 15, 2, 0)
+                    timestamp=datetime(2025, 11, 3, 15, 2, 0),
                 ),
             ],
             recommendations=[
@@ -3337,7 +3550,7 @@ def init_sample_reports():
                 "Great use of system design principles",
             ],
             questions=4,
-            is_sample=True
+            is_sample=True,
         ),
         InterviewReport(
             id="sample-5",
@@ -3348,22 +3561,17 @@ def init_sample_reports():
             mode="Drill",
             duration="12 minutes",
             overall_score=81,
-            scores=ScoreBreakdown(
-                communication=85,
-                clarity=80,
-                structure=82,
-                relevance=77
-            ),
+            scores=ScoreBreakdown(communication=85, clarity=80, structure=82, relevance=77),
             transcript=[
                 TranscriptMessage(
                     speaker="Interviewer",
                     text="Explain a complex technical concept to a non-technical audience.",
-                    timestamp=datetime(2025, 10, 30, 9, 0, 0)
+                    timestamp=datetime(2025, 10, 30, 9, 0, 0),
                 ),
                 TranscriptMessage(
                     speaker="You",
                     text="I would use analogies and avoid jargon. For example, explaining APIs as a waiter in a restaurant who takes your order and brings it to the kitchen, then returns with your food.",
-                    timestamp=datetime(2025, 10, 30, 9, 1, 0)
+                    timestamp=datetime(2025, 10, 30, 9, 1, 0),
                 ),
             ],
             recommendations=[
@@ -3372,14 +3580,16 @@ def init_sample_reports():
                 "Maintain eye contact when explaining",
             ],
             questions=1,
-            is_sample=True
+            is_sample=True,
         ),
     ]
-    
+
     for report in sample_reports:
         interview_reports[report.id] = report
 
+
 init_sample_reports()
+
 
 def get_user_id(authorization: Optional[str] = Header(None)) -> str:
     if not CLERK_SECRET_KEY:
@@ -3391,18 +3601,18 @@ def get_user_id(authorization: Optional[str] = Header(None)) -> str:
                 if user_id:
                     return user_id
         return "user_default"
-    
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization header required")
-    
+
     token = authorization.replace("Bearer ", "")
     decoded = verify_clerk_token(token)
-    
+
     if decoded:
         user_id = decoded.get("sub") or decoded.get("user_id")
         if user_id:
             return user_id
-    
+
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
@@ -3420,6 +3630,7 @@ def _completeness_snapshot_for_user(current_user: User) -> Dict[str, Any]:
         }
     finally:
         db.close()
+
 
 # Endpoint to get current authenticated user info
 @app.get("/api/me")
@@ -3442,10 +3653,13 @@ def get_me(current_user: User = Depends(get_current_user)):
         "phone_verified": completeness.get("phone_verified", False),
         "profile_completed": completeness.get("profile_completed", False),
         "profile_completion_score": completeness.get("profile_completion_score", 0),
-        "interview_eligibility": completeness.get("interview_eligibility", {"eligible": False, "reasons": []}),
+        "interview_eligibility": completeness.get(
+            "interview_eligibility", {"eligible": False, "reasons": []}
+        ),
         "created_at": current_user.created_at,
         "last_login_at": current_user.last_login_at,
     }
+
 
 # Alias for /api/me — same auth, syncs Clerk → DB and returns user
 @app.get("/api/users/me")
@@ -3465,7 +3679,9 @@ def get_me_users(current_user: User = Depends(get_current_user)):
         "phone_verified": completeness.get("phone_verified", False),
         "profile_completed": completeness.get("profile_completed", False),
         "profile_completion_score": completeness.get("profile_completion_score", 0),
-        "interview_eligibility": completeness.get("interview_eligibility", {"eligible": False, "reasons": []}),
+        "interview_eligibility": completeness.get(
+            "interview_eligibility", {"eligible": False, "reasons": []}
+        ),
     }
 
 
@@ -3478,14 +3694,18 @@ def auth_sync(current_user: User = Depends(get_current_user), db: Session = Depe
         "ok": True,
         "user_id": current_user.id,
         "clerk_user_id": current_user.clerk_user_id,
-        "auth_provider_user_id": getattr(current_user, "auth_provider_user_id", current_user.clerk_user_id),
+        "auth_provider_user_id": getattr(
+            current_user, "auth_provider_user_id", current_user.clerk_user_id
+        ),
         "email": current_user.email,
         "phone_e164": current_user.phone_e164,
         "email_verified": completeness.get("email_verified", False),
         "phone_verified": completeness.get("phone_verified", False),
         "profile_completed": completeness.get("profile_completed", False),
         "profile_completion_score": completeness.get("profile_completion_score", 0),
-        "interview_eligibility": completeness.get("interview_eligibility", {"eligible": False, "reasons": []}),
+        "interview_eligibility": completeness.get(
+            "interview_eligibility", {"eligible": False, "reasons": []}
+        ),
     }
 
 
@@ -3588,7 +3808,9 @@ def _candidate_profile_v2_from_legacy_profile(
     target_roles = _json_loads_safe_list(legacy.target_roles)
     domain_expertise = _json_loads_safe_list(legacy.domain_expertise)
     candidate_type = "student" if legacy.user_category == "student" else "professional"
-    primary_stream = _slugify_stream_label((domain_expertise[0] if domain_expertise else legacy.major_domain))
+    primary_stream = _slugify_stream_label(
+        (domain_expertise[0] if domain_expertise else legacy.major_domain)
+    )
     experience_level = "student" if candidate_type == "student" else (legacy.experience_band or "")
     return {
         "id": None,
@@ -3605,12 +3827,15 @@ def _candidate_profile_v2_from_legacy_profile(
         "degreeName": None,
         "branchSpecialization": legacy.major_domain,
         "graduationYear": None,
-        "currentYearOfStudy": legacy.graduation_timeline if legacy.user_category == "student" else None,
+        "currentYearOfStudy": (
+            legacy.graduation_timeline if legacy.user_category == "student" else None
+        ),
         "experienceLevel": experience_level,
         "primaryStream": primary_stream,
         "targetRoles": target_roles,
         "targetCompanies": [legacy.target_company_type] if legacy.target_company_type else [],
-        "skillsSelfReported": domain_expertise or ([legacy.major_domain] if legacy.major_domain else []),
+        "skillsSelfReported": domain_expertise
+        or ([legacy.major_domain] if legacy.major_domain else []),
         "resumeUrl": None,
         "linkedinUrl": None,
         "githubUrl": None,
@@ -3643,20 +3868,28 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
 ) -> Optional[models.CandidateProfileV2]:
     """Dual-write helper for onboarding migration. Fail-open if v2 table is unavailable."""
     try:
-        row = db.query(models.CandidateProfileV2).filter(
-            models.CandidateProfileV2.user_id == current_user.id
-        ).first()
+        row = (
+            db.query(models.CandidateProfileV2)
+            .filter(models.CandidateProfileV2.user_id == current_user.id)
+            .first()
+        )
     except Exception:
         return None
 
     candidate_type = "student" if payload.userCategory == "student" else "professional"
     target_roles = [str(v) for v in (payload.targetRoles or []) if str(v or "").strip()]
-    domain_expertise = [str(v) for v in ((payload.domainExpertise or []) if payload.userCategory == "professional" else []) if str(v or "").strip()]
+    domain_expertise = [
+        str(v)
+        for v in ((payload.domainExpertise or []) if payload.userCategory == "professional" else [])
+        if str(v or "").strip()
+    ]
     derived_skills = domain_expertise or ([payload.majorDomain] if payload.majorDomain else [])
     primary_stream = payload.primaryStream or _slugify_stream_label(
         (derived_skills[0] if derived_skills else payload.currentRole or payload.majorDomain)
     )
-    experience_level = "student" if payload.userCategory == "student" else (payload.experienceBand or "")
+    experience_level = (
+        "student" if payload.userCategory == "student" else (payload.experienceBand or "")
+    )
     v2_payload = {
         "candidateType": candidate_type,
         "stateCode": (payload.stateCode or "").strip() or None,
@@ -3667,7 +3900,9 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
         "degreeName": (payload.degreeName or "").strip() or None,
         "branchSpecialization": payload.majorDomain if payload.userCategory == "student" else None,
         "graduationYear": payload.graduationYear,
-        "currentYearOfStudy": payload.graduationTimeline if payload.userCategory == "student" else None,
+        "currentYearOfStudy": (
+            payload.graduationTimeline if payload.userCategory == "student" else None
+        ),
         "experienceLevel": experience_level,
         "primaryStream": primary_stream,
         "targetRoles": target_roles,
@@ -3722,9 +3957,11 @@ def _upsert_candidate_profile_v2(
     current_user: User,
     payload: CandidateProfileUpsertRequest,
 ) -> models.CandidateProfileV2:
-    row = db.query(models.CandidateProfileV2).filter(
-        models.CandidateProfileV2.user_id == current_user.id
-    ).first()
+    row = (
+        db.query(models.CandidateProfileV2)
+        .filter(models.CandidateProfileV2.user_id == current_user.id)
+        .first()
+    )
     if not row:
         row = models.CandidateProfileV2(user_id=current_user.id)
         db.add(row)
@@ -3764,19 +4001,25 @@ def get_profile_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = db.query(models.UserProfile).filter(
-        models.UserProfile.clerk_user_id == current_user.clerk_user_id
-    ).first()
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.clerk_user_id == current_user.clerk_user_id)
+        .first()
+    )
     try:
-        candidate_profile = db.query(models.CandidateProfileV2).filter(
-            models.CandidateProfileV2.user_id == current_user.id
-        ).first()
+        candidate_profile = (
+            db.query(models.CandidateProfileV2)
+            .filter(models.CandidateProfileV2.user_id == current_user.id)
+            .first()
+        )
     except Exception:
         candidate_profile = None
     return {
         "completed": bool(profile),
         "user_category": profile.user_category if profile else None,
-        "candidate_profile_v2_completed": bool(candidate_profile and (candidate_profile.profile_completion_score or 0) >= 100),
+        "candidate_profile_v2_completed": bool(
+            candidate_profile and (candidate_profile.profile_completion_score or 0) >= 100
+        ),
         "candidate_profile_v2_present": bool(candidate_profile),
     }
 
@@ -3786,15 +4029,19 @@ def get_profile_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = db.query(models.UserProfile).filter(
-        models.UserProfile.clerk_user_id == current_user.clerk_user_id
-    ).first()
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.clerk_user_id == current_user.clerk_user_id)
+        .first()
+    )
     if not profile:
         # Return canonical v2 if onboarding is already migrated.
         try:
-            candidate_profile = db.query(models.CandidateProfileV2).filter(
-                models.CandidateProfileV2.user_id == current_user.id
-            ).first()
+            candidate_profile = (
+                db.query(models.CandidateProfileV2)
+                .filter(models.CandidateProfileV2.user_id == current_user.id)
+                .first()
+            )
         except Exception:
             candidate_profile = None
         if candidate_profile:
@@ -3802,7 +4049,11 @@ def get_profile_me(
                 "legacyProfilePresent": False,
                 "candidateProfileV2": _candidate_profile_v2_to_api(candidate_profile),
                 **{
-                    "userCategory": "student" if candidate_profile.candidate_type in {"student", "early_career"} else "professional",
+                    "userCategory": (
+                        "student"
+                        if candidate_profile.candidate_type in {"student", "early_career"}
+                        else "professional"
+                    ),
                     "consentDataUse": bool(candidate_profile.consent_data_use),
                     "consentContact": bool(candidate_profile.consent_contact),
                     "stateCode": candidate_profile.state_code,
@@ -3818,9 +4069,11 @@ def get_profile_me(
         raise HTTPException(status_code=404, detail="Profile not found")
     response = _profile_to_api(profile)
     try:
-        candidate_profile = db.query(models.CandidateProfileV2).filter(
-            models.CandidateProfileV2.user_id == current_user.id
-        ).first()
+        candidate_profile = (
+            db.query(models.CandidateProfileV2)
+            .filter(models.CandidateProfileV2.user_id == current_user.id)
+            .first()
+        )
     except Exception:
         candidate_profile = None
     if candidate_profile:
@@ -3839,7 +4092,9 @@ def get_profile_me(
             }
         )
     else:
-        response["candidateProfileV2"] = _candidate_profile_v2_from_legacy_profile(profile, current_user)
+        response["candidateProfileV2"] = _candidate_profile_v2_from_legacy_profile(
+            profile, current_user
+        )
         response["legacyProfilePresent"] = True
     return response
 
@@ -3851,9 +4106,11 @@ def upsert_profile_me(
     db: Session = Depends(get_db),
 ):
     _validate_profile_payload(payload)
-    profile = db.query(models.UserProfile).filter(
-        models.UserProfile.clerk_user_id == current_user.clerk_user_id
-    ).first()
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.clerk_user_id == current_user.clerk_user_id)
+        .first()
+    )
 
     if not profile:
         profile = models.UserProfile(
@@ -3926,7 +4183,11 @@ def upsert_profile_me(
             pass
         logging.warning("candidate_profiles dual-write skipped: %s", v2_err)
 
-    return {"ok": True, "profile": _profile_to_api(profile), "candidateProfileV2": candidate_profile_api}
+    return {
+        "ok": True,
+        "profile": _profile_to_api(profile),
+        "candidateProfileV2": candidate_profile_api,
+    }
 
 
 @app.get("/api/profile")
@@ -3935,18 +4196,25 @@ def get_profile_canonical(
     db: Session = Depends(get_db),
 ):
     try:
-        candidate_profile = db.query(models.CandidateProfileV2).filter(
-            models.CandidateProfileV2.user_id == current_user.id
-        ).first()
+        candidate_profile = (
+            db.query(models.CandidateProfileV2)
+            .filter(models.CandidateProfileV2.user_id == current_user.id)
+            .first()
+        )
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"candidate_profiles not available: {e}")
     if candidate_profile:
-        return {"profile": _candidate_profile_v2_to_api(candidate_profile), "source": "candidate_profiles"}
+        return {
+            "profile": _candidate_profile_v2_to_api(candidate_profile),
+            "source": "candidate_profiles",
+        }
 
     # Fallback to legacy profile mapping so frontend migration can proceed incrementally.
-    legacy = db.query(models.UserProfile).filter(
-        models.UserProfile.clerk_user_id == current_user.clerk_user_id
-    ).first()
+    legacy = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.clerk_user_id == current_user.clerk_user_id)
+        .first()
+    )
     mapped = _candidate_profile_v2_from_legacy_profile(legacy, current_user)
     if not mapped:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -3979,7 +4247,9 @@ def redeem_trial_code(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    def trial_code_error(status_code: int, code: str, message: str, retryable: bool = False) -> HTTPException:
+    def trial_code_error(
+        status_code: int, code: str, message: str, retryable: bool = False
+    ) -> HTTPException:
         return HTTPException(
             status_code=status_code,
             detail={
@@ -3998,7 +4268,11 @@ def redeem_trial_code(
     if not trial_code:
         raise trial_code_error(404, "TRIAL_CODE_NOT_FOUND", "Trial code not found")
 
-    if trial_code.expires_at and trial_code.expires_at < now and trial_code.status not in {"REVOKED", "DELETED"}:
+    if (
+        trial_code.expires_at
+        and trial_code.expires_at < now
+        and trial_code.status not in {"REVOKED", "DELETED"}
+    ):
         trial_code.status = "EXPIRED"
         db.commit()
         raise trial_code_error(400, "TRIAL_CODE_EXPIRED", "Trial code expired")
@@ -4011,15 +4285,26 @@ def redeem_trial_code(
         }.get(trial_code.status, "TRIAL_CODE_BACKEND_ERROR")
         raise trial_code_error(400, status_code, f"Trial code is {trial_code.status.lower()}")
 
-    if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id != current_user.clerk_user_id:
+    if (
+        trial_code.status == "REDEEMED"
+        and trial_code.redeemed_by_clerk_user_id != current_user.clerk_user_id
+    ):
         raise trial_code_error(400, "TRIAL_CODE_ALREADY_REDEEMED", "Trial code already redeemed")
 
-    if trial_code.status == "REDEEMED" and trial_code.redeemed_by_clerk_user_id == current_user.clerk_user_id:
-        existing = db.query(models.UserEntitlement).filter(
-            models.UserEntitlement.source_type == "TRIAL_CODE",
-            models.UserEntitlement.source_id == trial_code.id,
-            models.UserEntitlement.clerk_user_id == current_user.clerk_user_id,
-        ).order_by(models.UserEntitlement.created_at.desc()).first()
+    if (
+        trial_code.status == "REDEEMED"
+        and trial_code.redeemed_by_clerk_user_id == current_user.clerk_user_id
+    ):
+        existing = (
+            db.query(models.UserEntitlement)
+            .filter(
+                models.UserEntitlement.source_type == "TRIAL_CODE",
+                models.UserEntitlement.source_id == trial_code.id,
+                models.UserEntitlement.clerk_user_id == current_user.clerk_user_id,
+            )
+            .order_by(models.UserEntitlement.created_at.desc())
+            .first()
+        )
         if existing:
             return {
                 "plan_tier": existing.plan_tier,
@@ -4030,10 +4315,14 @@ def redeem_trial_code(
             }
 
     # One active entitlement policy: revoke previous active ones.
-    active_entitlements = db.query(models.UserEntitlement).filter(
-        models.UserEntitlement.clerk_user_id == current_user.clerk_user_id,
-        models.UserEntitlement.is_active == True,  # noqa: E712
-    ).all()
+    active_entitlements = (
+        db.query(models.UserEntitlement)
+        .filter(
+            models.UserEntitlement.clerk_user_id == current_user.clerk_user_id,
+            models.UserEntitlement.is_active == True,  # noqa: E712
+        )
+        .all()
+    )
     for entitlement in active_entitlements:
         entitlement.is_active = False
         entitlement.revoked_at = now
@@ -4066,203 +4355,214 @@ def redeem_trial_code(
         "code": trial_code.code,
     }
 
+
 @app.post("/api/self-insight/assessments")
-async def create_assessment(request: CreateAssessmentRequest, authorization: Optional[str] = Header(None)):
+async def create_assessment(
+    request: CreateAssessmentRequest, authorization: Optional[str] = Header(None)
+):
     user_id = get_user_id(authorization)
-    
+
     if len(request.answers) < 40:
         raise HTTPException(status_code=400, detail="At least 40 questions must be answered")
-    
+
     answers_dict = [{"questionId": a.questionId, "value": a.value} for a in request.answers]
     report = generate_report(user_id, answers_dict)
-    
+
     personality_reports[report.id] = report
-    
+
     return {"reportId": report.id}
+
 
 # @app.get("/api/self-insight/reports")
 # async def list_reports(authorization: Optional[str] = Header(None)):
 #     user_id = get_user_id(authorization)
 @app.get("/api/self-insight/reports")
-async def list_reports(
-    current_user: User = Depends(get_current_user)
-):
+async def list_reports(current_user: User = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     # Reports store clerk_user_id (from get_user_id), so filter by clerk_user_id
     user_id = current_user.clerk_user_id
-    
+
     user_reports = [r for r in personality_reports.values() if r.user_id == user_id]
     user_reports.sort(key=lambda x: x.created_at, reverse=True)
-    
+
     summaries = []
     for report in user_reports:
         top_traits = sorted(report.trait_scores, key=lambda x: x.score, reverse=True)[:3]
-        tags = [f"{'High' if ts.level == 'HIGH' else 'Low'} {ts.trait.replace('_', ' ')}" for ts in top_traits]
-        
-        summaries.append({
-            "id": report.id,
-            "createdAt": report.created_at.isoformat(),
-            "title": report.title,
-            "tags": tags
-        })
-    
+        tags = [
+            f"{'High' if ts.level == 'HIGH' else 'Low'} {ts.trait.replace('_', ' ')}"
+            for ts in top_traits
+        ]
+
+        summaries.append(
+            {
+                "id": report.id,
+                "createdAt": report.created_at.isoformat(),
+                "title": report.title,
+                "tags": tags,
+            }
+        )
+
     return summaries
+
 
 @app.get("/api/self-insight/reports/{report_id}")
 async def get_report(report_id: str, authorization: Optional[str] = Header(None)):
     user_id = get_user_id(authorization)
-    
+
     if report_id not in personality_reports:
         raise HTTPException(status_code=404, detail="Report not found")
-    
+
     report = personality_reports[report_id]
-    
+
     if report.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     return report
 
+
 @app.patch("/api/self-insight/reports/{report_id}/reflections")
-async def update_reflections(report_id: str, request: UpdateReflectionsRequest, authorization: Optional[str] = Header(None)):
+async def update_reflections(
+    report_id: str, request: UpdateReflectionsRequest, authorization: Optional[str] = Header(None)
+):
     user_id = get_user_id(authorization)
-    
+
     if report_id not in personality_reports:
         raise HTTPException(status_code=404, detail="Report not found")
-    
+
     report = personality_reports[report_id]
-    
+
     if report.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     report.reflections.strengths = request.strengths
     report.reflections.development = request.development
-    
+
     return {"success": True}
+
 
 @app.get("/api/self-insight/reports/{report_id}/pdf")
 async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(None)):
     user_id = get_user_id(authorization)
-    
+
     if report_id not in personality_reports:
         raise HTTPException(status_code=404, detail="Report not found")
-    
+
     report = personality_reports[report_id]
-    
+
     if report.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
     styles = getSampleStyleSheet()
     story = []
-    
+
     title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
+        "CustomTitle",
+        parent=styles["Heading1"],
         fontSize=24,
-        textColor='#FF6B35',
+        textColor="#FF6B35",
         spaceAfter=30,
-        alignment=TA_CENTER
+        alignment=TA_CENTER,
     )
     story.append(Paragraph(report.title, title_style))
-    story.append(Spacer(1, 0.3*inch))
-    
+    story.append(Spacer(1, 0.3 * inch))
+
     date_style = ParagraphStyle(
-        'DateStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor='#666666',
-        alignment=TA_CENTER
+        "DateStyle", parent=styles["Normal"], fontSize=10, textColor="#666666", alignment=TA_CENTER
     )
     story.append(Paragraph(f"Generated on {report.created_at.strftime('%B %d, %Y')}", date_style))
-    story.append(Spacer(1, 0.4*inch))
-    
-    story.append(Paragraph("<b>Understanding this report</b>", styles['Heading2']))
-    story.append(Spacer(1, 0.1*inch))
+    story.append(Spacer(1, 0.4 * inch))
+
+    story.append(Paragraph("<b>Understanding this report</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.1 * inch))
     intro_text = (
         "This report provides insights into your working style based on your responses to the personality assessment. "
         "It is not a pass/fail test, but rather a tool for self-reflection and understanding. "
         "Use these insights to better understand your strengths, development areas, and how you might adapt your work style."
     )
-    story.append(Paragraph(intro_text, styles['Normal']))
-    story.append(Spacer(1, 0.3*inch))
-    
-    story.append(Paragraph("<b>Your Personality</b>", styles['Heading2']))
-    story.append(Spacer(1, 0.2*inch))
-    
+    story.append(Paragraph(intro_text, styles["Normal"]))
+    story.append(Spacer(1, 0.3 * inch))
+
+    story.append(Paragraph("<b>Your Personality</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2 * inch))
+
     domains = {}
     for ts in report.trait_scores:
         if ts.domain not in domains:
             domains[ts.domain] = []
         domains[ts.domain].append(ts)
-    
+
     for domain, traits in domains.items():
         domain_name = domain.replace("_", " ").title()
-        story.append(Paragraph(f"<b>{domain_name}</b>", styles['Heading3']))
+        story.append(Paragraph(f"<b>{domain_name}</b>", styles["Heading3"]))
         for ts in traits:
             level_text = f"<b>{ts.level}</b>"
             trait_text = f"{ts.trait.replace('_', ' ')}: {level_text} (Score: {ts.score:.2f}/5.0)"
-            story.append(Paragraph(trait_text, styles['Normal']))
-        story.append(Spacer(1, 0.1*inch))
-    
+            story.append(Paragraph(trait_text, styles["Normal"]))
+        story.append(Spacer(1, 0.1 * inch))
+
     story.append(PageBreak())
-    
-    story.append(Paragraph("<b>Your Development</b>", styles['Heading2']))
-    story.append(Spacer(1, 0.2*inch))
+
+    story.append(Paragraph("<b>Your Development</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2 * inch))
     for area in report.development_areas:
-        story.append(Paragraph(f"<b>{area.trait.replace('_', ' ')}</b>", styles['Heading3']))
-        story.append(Paragraph(area.description, styles['Normal']))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph(f"<b>{area.trait.replace('_', ' ')}</b>", styles["Heading3"]))
+        story.append(Paragraph(area.description, styles["Normal"]))
+        story.append(Spacer(1, 0.1 * inch))
         for suggestion in area.suggestions:
-            story.append(Paragraph(f"• {suggestion}", styles['Normal']))
-        story.append(Spacer(1, 0.15*inch))
-    
+            story.append(Paragraph(f"• {suggestion}", styles["Normal"]))
+        story.append(Spacer(1, 0.15 * inch))
+
     story.append(PageBreak())
-    
-    story.append(Paragraph("<b>Your Career Choices</b>", styles['Heading2']))
-    story.append(Spacer(1, 0.2*inch))
-    
-    story.append(Paragraph("<b>You may thrive in roles where:</b>", styles['Heading3']))
+
+    story.append(Paragraph("<b>Your Career Choices</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2 * inch))
+
+    story.append(Paragraph("<b>You may thrive in roles where:</b>", styles["Heading3"]))
     for item in report.career_fit_thrives:
-        story.append(Paragraph(f"• {item.description}", styles['Normal']))
-    
-    story.append(Spacer(1, 0.2*inch))
-    story.append(Paragraph("<b>You may need to work harder when:</b>", styles['Heading3']))
+        story.append(Paragraph(f"• {item.description}", styles["Normal"]))
+
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph("<b>You may need to work harder when:</b>", styles["Heading3"]))
     for item in report.career_fit_challenges:
-        story.append(Paragraph(f"• {item.description}", styles['Normal']))
-    
+        story.append(Paragraph(f"• {item.description}", styles["Normal"]))
+
     story.append(PageBreak())
-    
-    story.append(Paragraph("<b>Adapting Your Work Style</b>", styles['Heading2']))
-    story.append(Spacer(1, 0.2*inch))
+
+    story.append(Paragraph("<b>Adapting Your Work Style</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2 * inch))
     for tip in report.work_style_tips:
-        story.append(Paragraph(f"<b>{tip.title}</b>", styles['Heading3']))
-        story.append(Paragraph(tip.description, styles['Normal']))
-        story.append(Spacer(1, 0.15*inch))
-    
+        story.append(Paragraph(f"<b>{tip.title}</b>", styles["Heading3"]))
+        story.append(Paragraph(tip.description, styles["Normal"]))
+        story.append(Spacer(1, 0.15 * inch))
+
     if report.reflections.strengths or report.reflections.development:
         story.append(PageBreak())
-        story.append(Paragraph("<b>Your Reflections</b>", styles['Heading2']))
-        story.append(Spacer(1, 0.2*inch))
-        
+        story.append(Paragraph("<b>Your Reflections</b>", styles["Heading2"]))
+        story.append(Spacer(1, 0.2 * inch))
+
         if report.reflections.strengths:
-            story.append(Paragraph("<b>My key strengths:</b>", styles['Heading3']))
-            story.append(Paragraph(report.reflections.strengths, styles['Normal']))
-            story.append(Spacer(1, 0.15*inch))
-        
+            story.append(Paragraph("<b>My key strengths:</b>", styles["Heading3"]))
+            story.append(Paragraph(report.reflections.strengths, styles["Normal"]))
+            story.append(Spacer(1, 0.15 * inch))
+
         if report.reflections.development:
-            story.append(Paragraph("<b>My development priorities:</b>", styles['Heading3']))
-            story.append(Paragraph(report.reflections.development, styles['Normal']))
-    
+            story.append(Paragraph("<b>My development priorities:</b>", styles["Heading3"]))
+            story.append(Paragraph(report.reflections.development, styles["Normal"]))
+
     doc.build(story)
     buffer.seek(0)
-    
+
     return StreamingResponse(
         BytesIO(buffer.read()),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="personality-report-{report_id}.pdf"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="personality-report-{report_id}.pdf"'
+        },
     )
+
 
 # @app.get("/api/interview/reports")
 # async def list_interview_reports(authorization: Optional[str] = Header(None)):
@@ -4278,16 +4578,16 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
 #         # Catch any other exceptions
 #         print(f"Error getting user_id: {str(e)}")
 #         user_id = None
-    
+
 #     # Always include sample reports, plus user's own reports if authenticated
 #     if user_id:
 #         user_reports = [r for r in interview_reports.values() if r.user_id == user_id or r.is_sample]
 #     else:
 #         # If not authenticated, only return sample reports
 #         user_reports = [r for r in interview_reports.values() if r.is_sample]
-    
+
 #     user_reports.sort(key=lambda x: x.date, reverse=True)
-    
+
 #     summaries = []
 #     for report in user_reports:
 #         summaries.append(InterviewReportSummary(
@@ -4300,7 +4600,7 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
 #             questions=report.questions,
 #             is_sample=report.is_sample
 #         ))
-    
+
 #     return summaries
 
 # Revised list_interview_reports to use database
@@ -4329,38 +4629,45 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
 #         logging.exception("Failed to list interview reports")
 #         raise HTTPException(status_code=500, detail="Failed to fetch reports")
 
+
 # Revised list_interview_reports to use current_user dependency
 @app.get("/api/interview/reports")
 async def list_interview_reports(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
 ):
     """List interview reports for the authenticated user only."""
     try:
         current_user = get_current_user(authorization=authorization, db=db)
-        user_id = current_user.clerk_user_id
+        user_id = current_user.id
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    user_reports = db.query(models.InterviewReport).filter(
-        models.InterviewReport.user_id == user_id,
-        models.InterviewReport.is_sample == False,  # noqa: E712
-    ).order_by(models.InterviewReport.date.desc()).all()
+    user_reports = (
+        db.query(models.InterviewReport)
+        .filter(
+            models.InterviewReport.user_id == user_id,
+            models.InterviewReport.is_sample == False,  # noqa: E712
+        )
+        .order_by(models.InterviewReport.date.desc())
+        .all()
+    )
 
     summaries = []
     for report in user_reports:
-        summaries.append(InterviewReportSummary(
-            id=report.id,
-            title=report.title,
-            date=report.date,
-            type=report.type,
-            mode=report.mode,
-            score=report.overall_score,
-            questions=report.questions,
-            is_sample=report.is_sample
-        ))
+        summaries.append(
+            InterviewReportSummary(
+                id=report.id,
+                title=report.title,
+                date=report.date,
+                type=report.type,
+                mode=report.mode,
+                score=report.overall_score,
+                questions=report.questions,
+                is_sample=report.is_sample,
+            )
+        )
 
     return summaries
 
@@ -4371,10 +4678,26 @@ _COMMUNICATION_PRACTICE_PACKS: List[Dict[str, Any]] = [
         "title": "Clarity Foundation",
         "description": "Practice clear, concise explanations with controlled pacing.",
         "prompts": [
-            {"id": "c1", "sentence": "I led a project that reduced onboarding time by forty percent.", "focus": ["clarity", "pace"]},
-            {"id": "c2", "sentence": "The key challenge was aligning stakeholders with different priorities.", "focus": ["clarity", "structure"]},
-            {"id": "c3", "sentence": "I broke the problem into phases and validated each milestone early.", "focus": ["structure", "confidence"]},
-            {"id": "c4", "sentence": "The outcome improved customer retention and reduced support tickets.", "focus": ["impact", "concise"]},
+            {
+                "id": "c1",
+                "sentence": "I led a project that reduced onboarding time by forty percent.",
+                "focus": ["clarity", "pace"],
+            },
+            {
+                "id": "c2",
+                "sentence": "The key challenge was aligning stakeholders with different priorities.",
+                "focus": ["clarity", "structure"],
+            },
+            {
+                "id": "c3",
+                "sentence": "I broke the problem into phases and validated each milestone early.",
+                "focus": ["structure", "confidence"],
+            },
+            {
+                "id": "c4",
+                "sentence": "The outcome improved customer retention and reduced support tickets.",
+                "focus": ["impact", "concise"],
+            },
         ],
     },
     {
@@ -4382,10 +4705,26 @@ _COMMUNICATION_PRACTICE_PACKS: List[Dict[str, Any]] = [
         "title": "STAR Storytelling",
         "description": "Rehearse crisp STAR-style responses with better flow.",
         "prompts": [
-            {"id": "s1", "sentence": "In my previous role, a release failed hours before launch.", "focus": ["story", "pace"]},
-            {"id": "s2", "sentence": "My task was to recover the release plan without delaying customers.", "focus": ["clarity", "confidence"]},
-            {"id": "s3", "sentence": "I coordinated engineering and QA to isolate the root cause quickly.", "focus": ["story", "concise"]},
-            {"id": "s4", "sentence": "We restored service in two hours and added safeguards for future releases.", "focus": ["impact", "confidence"]},
+            {
+                "id": "s1",
+                "sentence": "In my previous role, a release failed hours before launch.",
+                "focus": ["story", "pace"],
+            },
+            {
+                "id": "s2",
+                "sentence": "My task was to recover the release plan without delaying customers.",
+                "focus": ["clarity", "confidence"],
+            },
+            {
+                "id": "s3",
+                "sentence": "I coordinated engineering and QA to isolate the root cause quickly.",
+                "focus": ["story", "concise"],
+            },
+            {
+                "id": "s4",
+                "sentence": "We restored service in two hours and added safeguards for future releases.",
+                "focus": ["impact", "confidence"],
+            },
         ],
     },
     {
@@ -4393,10 +4732,26 @@ _COMMUNICATION_PRACTICE_PACKS: List[Dict[str, Any]] = [
         "title": "Persuasive Communication",
         "description": "Practice concise persuasion for meetings and interviews.",
         "prompts": [
-            {"id": "p1", "sentence": "I recommend prioritizing reliability because downtime directly affects trust.", "focus": ["persuasion", "clarity"]},
-            {"id": "p2", "sentence": "This approach lowers delivery risk while keeping our roadmap realistic.", "focus": ["concise", "confidence"]},
-            {"id": "p3", "sentence": "The data supports this decision with a measurable performance gain.", "focus": ["impact", "structure"]},
-            {"id": "p4", "sentence": "I can lead a pilot this week and report outcomes by Friday.", "focus": ["confidence", "pace"]},
+            {
+                "id": "p1",
+                "sentence": "I recommend prioritizing reliability because downtime directly affects trust.",
+                "focus": ["persuasion", "clarity"],
+            },
+            {
+                "id": "p2",
+                "sentence": "This approach lowers delivery risk while keeping our roadmap realistic.",
+                "focus": ["concise", "confidence"],
+            },
+            {
+                "id": "p3",
+                "sentence": "The data supports this decision with a measurable performance gain.",
+                "focus": ["impact", "structure"],
+            },
+            {
+                "id": "p4",
+                "sentence": "I can lead a pilot this week and report outcomes by Friday.",
+                "focus": ["confidence", "pace"],
+            },
         ],
     },
 ]
@@ -4419,7 +4774,9 @@ def _choose_next_practice_prompt(
     quality_flags: List[str],
     completed_prompt_ids: List[str],
 ) -> Optional[Dict[str, Any]]:
-    prompts = [p for p in pack.get("prompts", []) if p.get("id") not in set(completed_prompt_ids or [])]
+    prompts = [
+        p for p in pack.get("prompts", []) if p.get("id") not in set(completed_prompt_ids or [])
+    ]
     if not prompts:
         return None
 
@@ -4472,7 +4829,9 @@ async def get_next_communication_practice_prompt(
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
-    pack = next((item for item in _COMMUNICATION_PRACTICE_PACKS if item["id"] == payload.pack_id), None)
+    pack = next(
+        (item for item in _COMMUNICATION_PRACTICE_PACKS if item["id"] == payload.pack_id), None
+    )
     if not pack:
         raise HTTPException(status_code=404, detail="Practice pack not found.")
 
@@ -4480,7 +4839,9 @@ async def get_next_communication_practice_prompt(
     if not prompt:
         return {"completed": True, "pack_id": pack["id"], "next_prompt": None}
 
-    remaining_count = max(0, len(pack.get("prompts", [])) - len(set(payload.completed_prompt_ids or [])) - 1)
+    remaining_count = max(
+        0, len(pack.get("prompts", [])) - len(set(payload.completed_prompt_ids or [])) - 1
+    )
     return {
         "completed": False,
         "pack_id": pack["id"],
@@ -4533,7 +4894,9 @@ async def evaluate_communication_practice_turn(
         score += 8
     elif filler_density <= 8:
         score += 4
-    if not any(flag in {"STARTS_WITH_LOWERCASE", "MISSING_TERMINAL_PUNCTUATION"} for flag in quality_flags):
+    if not any(
+        flag in {"STARTS_WITH_LOWERCASE", "MISSING_TERMINAL_PUNCTUATION"} for flag in quality_flags
+    ):
         score += 7
     else:
         score -= 6
@@ -4582,9 +4945,11 @@ def join_waitlist(
 
     source_page = str(payload.source_page or "").strip().lower()
     intent = str(payload.intent or "").strip().lower()
-    existing = db.query(models.LaunchWaitlistSignup).filter(
-        models.LaunchWaitlistSignup.normalized_email == normalized_email
-    ).first()
+    existing = (
+        db.query(models.LaunchWaitlistSignup)
+        .filter(models.LaunchWaitlistSignup.normalized_email == normalized_email)
+        .first()
+    )
 
     already_joined = existing is not None
     row = existing or models.LaunchWaitlistSignup(
@@ -4600,7 +4965,11 @@ def join_waitlist(
     db.commit()
 
     return {
-        "message": "You are already on the waitlist." if already_joined else "You have been added to the waitlist.",
+        "message": (
+            "You are already on the waitlist."
+            if already_joined
+            else "You have been added to the waitlist."
+        ),
         "already_joined": already_joined,
         "email": normalized_email,
     }
@@ -4615,15 +4984,15 @@ async def upsert_report_feedback(
 ):
     """Persist post-interview user feedback into report metrics."""
     current_user = get_current_user(authorization=authorization, db=db)
-    user_id = current_user.clerk_user_id
+    user_id = current_user.id
 
-    report = db.query(models.InterviewReport).filter(
-        models.InterviewReport.id == report_id
-    ).first()
+    report = db.query(models.InterviewReport).filter(models.InterviewReport.id == report_id).first()
     if not report:
-        report = db.query(models.InterviewReport).filter(
-            models.InterviewReport.session_id == report_id
-        ).first()
+        report = (
+            db.query(models.InterviewReport)
+            .filter(models.InterviewReport.session_id == report_id)
+            .first()
+        )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
@@ -4661,9 +5030,9 @@ async def upsert_report_feedback(
     metrics["session_feedback"] = session_feedback
     report.metrics = json.dumps(metrics)
 
-    feedback_row = db.query(models.TrialFeedback).filter(
-        models.TrialFeedback.report_id == report.id
-    ).first()
+    feedback_row = (
+        db.query(models.TrialFeedback).filter(models.TrialFeedback.report_id == report.id).first()
+    )
     if not feedback_row:
         feedback_row = models.TrialFeedback(
             report_id=report.id,
@@ -4685,6 +5054,7 @@ async def upsert_report_feedback(
         "session_feedback": session_feedback,
     }
 
+
 def _parse_duration_minutes(duration_str: Optional[str], metrics: Optional[dict]) -> int:
     if metrics and isinstance(metrics, dict) and metrics.get("total_duration") is not None:
         try:
@@ -4700,6 +5070,7 @@ def _parse_duration_minutes(duration_str: Optional[str], metrics: Optional[dict]
     except Exception:
         return 0
 
+
 def _safe_json(value, default):
     try:
         if value is None:
@@ -4710,20 +5081,23 @@ def _safe_json(value, default):
     except Exception:
         return default
 
+
 @app.get("/api/analytics/summary")
 async def analytics_summary(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
 ):
     """Return summary analytics for the current user."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
-    reports = db.query(models.InterviewReport).filter(
-        models.InterviewReport.user_id == user_id,
-        models.InterviewReport.is_sample == False
-    ).order_by(models.InterviewReport.date.asc()).all()
+    reports = (
+        db.query(models.InterviewReport)
+        .filter(
+            models.InterviewReport.user_id == user_id, models.InterviewReport.is_sample == False
+        )
+        .order_by(models.InterviewReport.date.asc())
+        .all()
+    )
 
     total_sessions = len(reports)
     avg_score = 0
@@ -4745,61 +5119,65 @@ async def analytics_summary(
         "total_sessions": total_sessions,
         "avg_score": avg_score,
         "improvement_pct": improvement_pct,
-        "practice_hours": round(total_minutes / 60, 1)
+        "practice_hours": round(total_minutes / 60, 1),
     }
+
 
 @app.get("/api/analytics/trends")
 async def analytics_trends(
-    authorization: Optional[str] = Header(None),
-    range: str = "30d",
-    db: Session = Depends(get_db)
+    authorization: Optional[str] = Header(None), range: str = "30d", db: Session = Depends(get_db)
 ):
     """Return trend data for charts."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
     # Simple: return last 20 sessions ordered by date
-    reports = db.query(models.InterviewReport).filter(
-        models.InterviewReport.user_id == user_id,
-        models.InterviewReport.is_sample == False
-    ).order_by(models.InterviewReport.date.asc()).limit(20).all()
+    reports = (
+        db.query(models.InterviewReport)
+        .filter(
+            models.InterviewReport.user_id == user_id, models.InterviewReport.is_sample == False
+        )
+        .order_by(models.InterviewReport.date.asc())
+        .limit(20)
+        .all()
+    )
 
     data = []
     for r in reports:
         metrics = _safe_json(r.metrics, {})
         scores = _safe_json(r.scores, {})
-        data.append({
-            "date": r.date.strftime("%Y-%m-%d") if r.date else None,
-            "score": r.overall_score or 0,
-            "eyeContact": metrics.get("eye_contact_pct") or 0,
-            "confidence": scores.get("communication") or scores.get("clarity") or r.overall_score or 0
-        })
+        data.append(
+            {
+                "date": r.date.strftime("%Y-%m-%d") if r.date else None,
+                "score": r.overall_score or 0,
+                "eyeContact": metrics.get("eye_contact_pct") or 0,
+                "confidence": scores.get("communication")
+                or scores.get("clarity")
+                or r.overall_score
+                or 0,
+            }
+        )
     return data
+
 
 @app.get("/api/analytics/skills")
 async def analytics_skills(
-    authorization: Optional[str] = Header(None),
-    range: str = "30d",
-    db: Session = Depends(get_db)
+    authorization: Optional[str] = Header(None), range: str = "30d", db: Session = Depends(get_db)
 ):
     """Return skill breakdown averages."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
-    reports = db.query(models.InterviewReport).filter(
-        models.InterviewReport.user_id == user_id,
-        models.InterviewReport.is_sample == False
-    ).all()
+    reports = (
+        db.query(models.InterviewReport)
+        .filter(
+            models.InterviewReport.user_id == user_id, models.InterviewReport.is_sample == False
+        )
+        .all()
+    )
 
     if not reports:
-        return {
-            "communication": 0,
-            "technical": 0,
-            "problem_solving": 0,
-            "confidence": 0
-        }
+        return {"communication": 0, "technical": 0, "problem_solving": 0, "confidence": 0}
 
     comm = tech = struct = conf = 0
     count = 0
@@ -4815,8 +5193,9 @@ async def analytics_skills(
         "communication": int(comm / count),
         "technical": int(tech / count),
         "problem_solving": int(struct / count),
-        "confidence": int(conf / count)
+        "confidence": int(conf / count),
     }
+
 
 # @app.get("/api/interview/reports/{report_id}")
 # async def get_interview_report(report_id: str, authorization: Optional[str] = Header(None)):
@@ -4831,41 +5210,44 @@ async def analytics_skills(
 #     except Exception as e:
 #         print(f"Error getting user_id: {str(e)}")
 #         user_id = None
-    
+
 #     if report_id not in interview_reports:
 #         raise HTTPException(status_code=404, detail="Report not found")
-    
+
 #     report = interview_reports[report_id]
-    
+
 #     # Allow access if:
 #     # 1. It's a sample report (anyone can view)
 #     # 2. User is authenticated and owns the report
 #     # 3. No auth but report exists (for development/testing)
 #     if not report.is_sample and user_id and report.user_id != user_id:
 #         raise HTTPException(status_code=403, detail="Access denied")
-    
+
 #     return report
+
 
 # Revised get_interview_report to use database
 @app.get("/api/interview/reports/{report_id}")
 async def get_interview_report(
-    report_id: str,
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    report_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
 ):
     try:
-        user_id = get_user_id_from_auth(authorization)
+        user_id = None
+        if authorization or DEV_AUTH_BYPASS:
+            user_id = get_current_user(authorization=authorization, db=db).id
 
         # Try to find report by ID first, then by session_id
-        report = db.query(models.InterviewReport).filter(
-            models.InterviewReport.id == report_id
-        ).first()
-        
+        report = (
+            db.query(models.InterviewReport).filter(models.InterviewReport.id == report_id).first()
+        )
+
         if not report:
             # Try finding by session_id
-            report = db.query(models.InterviewReport).filter(
-                models.InterviewReport.session_id == report_id
-            ).first()
+            report = (
+                db.query(models.InterviewReport)
+                .filter(models.InterviewReport.session_id == report_id)
+                .first()
+            )
 
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
@@ -4878,7 +5260,7 @@ async def get_interview_report(
         if not report.is_sample:
             is_guest_report = report.user_id == "guest"
             is_owner = user_id and report.user_id == user_id
-            
+
             # Allow guest reports to be accessed by anyone with the UUID
             # (UUID serves as a capability token since it's unguessable)
             if not is_guest_report and not is_owner:
@@ -4887,8 +5269,9 @@ async def get_interview_report(
                 raise HTTPException(status_code=403, detail="Access denied")
 
         # Convert metrics JSON string to dict for API response
-        if hasattr(report, 'metrics') and report.metrics:
+        if hasattr(report, "metrics") and report.metrics:
             import json
+
             try:
                 metrics_dict = json.loads(report.metrics)
             except Exception:
@@ -4918,12 +5301,20 @@ async def get_interview_report(
                     explainability["source"] = score_provenance.get("source")
                 if score_provenance.get("confidence") and not explainability.get("confidence"):
                     explainability["confidence"] = score_provenance.get("confidence")
-                if score_provenance.get("rubric_version") and not explainability.get("rubric_version"):
+                if score_provenance.get("rubric_version") and not explainability.get(
+                    "rubric_version"
+                ):
                     explainability["rubric_version"] = score_provenance.get("rubric_version")
-                if score_provenance.get("scorer_version") and not explainability.get("scorer_version"):
+                if score_provenance.get("scorer_version") and not explainability.get(
+                    "scorer_version"
+                ):
                     explainability["scorer_version"] = score_provenance.get("scorer_version")
-            explainability.setdefault("rubric_version", metrics_dict.get("rubric_version", EVAL_RUBRIC_VERSION))
-            explainability.setdefault("scorer_version", metrics_dict.get("scorer_version", EVAL_SCORER_VERSION))
+            explainability.setdefault(
+                "rubric_version", metrics_dict.get("rubric_version", EVAL_RUBRIC_VERSION)
+            )
+            explainability.setdefault(
+                "scorer_version", metrics_dict.get("scorer_version", EVAL_SCORER_VERSION)
+            )
             metrics_dict["evaluation_explainability"] = explainability
             report.metrics = metrics_dict
         else:
@@ -4950,43 +5341,47 @@ async def get_interview_report(
                     "scorer_version": EVAL_SCORER_VERSION,
                 },
             }
-        
+
         # Convert recommendations JSON string to list for API response
-        if hasattr(report, 'recommendations') and report.recommendations:
+        if hasattr(report, "recommendations") and report.recommendations:
             import json
+
             try:
                 if isinstance(report.recommendations, str):
                     report.recommendations = json.loads(report.recommendations)
             except Exception:
                 report.recommendations = []
-        
+
         # Convert scores JSON string to dict for API response
-        if hasattr(report, 'scores') and report.scores:
+        if hasattr(report, "scores") and report.scores:
             import json
+
             try:
                 if isinstance(report.scores, str):
                     report.scores = json.loads(report.scores)
             except Exception:
                 report.scores = {}
-        
+
         # Convert transcript JSON string to list for API response
-        if hasattr(report, 'transcript') and report.transcript:
+        if hasattr(report, "transcript") and report.transcript:
             import json
+
             try:
                 if isinstance(report.transcript, str):
                     report.transcript = json.loads(report.transcript)
             except Exception:
                 report.transcript = []
-        
+
         # Convert ai_feedback JSON string to dict for API response
-        if hasattr(report, 'ai_feedback') and report.ai_feedback:
+        if hasattr(report, "ai_feedback") and report.ai_feedback:
             import json
+
             try:
                 if isinstance(report.ai_feedback, str):
                     report.ai_feedback = json.loads(report.ai_feedback)
             except Exception:
                 report.ai_feedback = None
-        
+
         return report
 
     except HTTPException:
@@ -5047,12 +5442,13 @@ async def get_interview_report_replay(
     )
     return replay_payload
 
+
 @app.get("/api/interview/reports/{report_id}/download")
 async def download_interview_report(
     report_id: str,
     format: str = "pdf",
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Download interview report as PDF."""
     if format.lower() != "pdf":
@@ -5069,15 +5465,29 @@ async def download_interview_report(
     capture_status = metrics.get("capture_status")
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
+    )
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("Title", parent=styles["Title"], fontSize=20, alignment=TA_LEFT, spaceAfter=12)
+    title_style = ParagraphStyle(
+        "Title", parent=styles["Title"], fontSize=20, alignment=TA_LEFT, spaceAfter=12
+    )
     h_style = ParagraphStyle("Heading", parent=styles["Heading2"], fontSize=14, spaceAfter=8)
     body_style = styles["BodyText"]
 
     content = []
     content.append(Paragraph(report.title or "Interview Report", title_style))
-    content.append(Paragraph("Evaluate Yourself", ParagraphStyle("Brand", parent=styles["Heading1"], fontSize=16, textColor=colors.HexColor("#1d4ed8"))))
+    content.append(
+        Paragraph(
+            "Evaluate Yourself",
+            ParagraphStyle(
+                "Brand",
+                parent=styles["Heading1"],
+                fontSize=16,
+                textColor=colors.HexColor("#1d4ed8"),
+            ),
+        )
+    )
     content.append(Paragraph(f"<b>Date:</b> {report.date}", body_style))
     content.append(Paragraph(f"<b>Type:</b> {report.type}", body_style))
     content.append(Paragraph(f"<b>Mode:</b> {report.mode}", body_style))
@@ -5086,12 +5496,29 @@ async def download_interview_report(
 
     if capture_status == "INCOMPLETE_NO_CANDIDATE_AUDIO":
         content.append(Paragraph("Evaluation Status", h_style))
-        content.append(Paragraph("<b>Evaluation incomplete:</b> candidate speech was not captured in this session.", body_style))
-        content.append(Paragraph("Please retry after verifying microphone permission and transcription capture.", body_style))
+        content.append(
+            Paragraph(
+                "<b>Evaluation incomplete:</b> candidate speech was not captured in this session.",
+                body_style,
+            )
+        )
+        content.append(
+            Paragraph(
+                "Please retry after verifying microphone permission and transcription capture.",
+                body_style,
+            )
+        )
     elif capture_status == "INCOMPLETE_PARTIAL_CAPTURE":
         content.append(Paragraph("Evaluation Status", h_style))
-        content.append(Paragraph("<b>Evaluation partial:</b> this session ended before enough turns were captured.", body_style))
-        content.append(Paragraph("Score reflects partial evidence and has reduced confidence.", body_style))
+        content.append(
+            Paragraph(
+                "<b>Evaluation partial:</b> this session ended before enough turns were captured.",
+                body_style,
+            )
+        )
+        content.append(
+            Paragraph("Score reflects partial evidence and has reduced confidence.", body_style)
+        )
     else:
         content.append(Paragraph("Summary Scores", h_style))
         overall = report.overall_score if report.overall_score is not None else 0
@@ -5104,9 +5531,22 @@ async def download_interview_report(
                 label = k.replace("_", " ").title()
                 value = max(0, min(100, int(v))) if v is not None else 0
                 drawing.add(String(0, y, label, fontSize=9, fillColor=colors.HexColor("#0f172a")))
-                drawing.add(Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None))
-                drawing.add(Rect(140, y - 4, 3 * value, 8, fillColor=colors.HexColor("#2563eb"), strokeColor=None))
-                drawing.add(String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a")))
+                drawing.add(
+                    Rect(140, y - 4, 300, 8, fillColor=colors.HexColor("#e2e8f0"), strokeColor=None)
+                )
+                drawing.add(
+                    Rect(
+                        140,
+                        y - 4,
+                        3 * value,
+                        8,
+                        fillColor=colors.HexColor("#2563eb"),
+                        strokeColor=None,
+                    )
+                )
+                drawing.add(
+                    String(450, y - 1, str(value), fontSize=9, fillColor=colors.HexColor("#0f172a"))
+                )
                 y -= 18
             content.append(drawing)
     content.append(Spacer(1, 12))
@@ -5117,14 +5557,18 @@ async def download_interview_report(
         for k, v in metrics.items():
             rows.append([k.replace("_", " ").title(), str(v)])
         table = Table(rows, colWidths=[200, 260])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ]))
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ]
+            )
+        )
         content.append(table)
     content.append(Spacer(1, 12))
 
@@ -5148,13 +5592,14 @@ async def download_interview_report(
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="interview-report-{report_id}.pdf"'}
+        headers={"Content-Disposition": f'attachment; filename="interview-report-{report_id}.pdf"'},
     )
+
 
 # @app.post("/api/interview/reports")
 # async def create_interview_report(request: CreateInterviewReportRequest, authorization: Optional[str] = Header(None)):
 #     user_id = get_user_id(authorization)
-    
+
 #     report_id = str(uuid.uuid4())
 #     report = InterviewReport(
 #         id=report_id,
@@ -5171,17 +5616,18 @@ async def download_interview_report(
 #         questions=request.questions,
 #         is_sample=False
 #     )
-    
+
 #     interview_reports[report_id] = report
-    
+
 #     return {"id": report_id}
+
 
 # Revised create_interview_report to use database
 @app.post("/api/interview/reports", status_code=201)
 async def create_interview_report(
     request: CreateInterviewReportRequest,
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     if EVAL_REPORT_POST_ENDPOINT_MODE == "disabled":
         raise HTTPException(
@@ -5195,7 +5641,7 @@ async def create_interview_report(
         if not current_user:
             raise HTTPException(status_code=401, detail="Authentication required")
 
-        user_id = current_user.clerk_user_id
+        user_id = current_user.id
 
         report = models.InterviewReport(
             id=str(uuid.uuid4()),
@@ -5207,11 +5653,11 @@ async def create_interview_report(
             mode=request.mode,
             duration=request.duration,
             overall_score=request.overall_score,
-            scores=json.dumps(request.scores),
-            transcript=json.dumps(request.transcript),
+            scores=json.dumps(request.scores.model_dump()),
+            transcript=json.dumps([entry.model_dump(mode="json") for entry in request.transcript]),
             recommendations=json.dumps(request.recommendations),
             questions=json.dumps(request.questions),
-            is_sample=False
+            is_sample=False,
         )
 
         db.add(report)
@@ -5234,9 +5680,11 @@ def get_interview_session_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = db.query(models.InterviewSession).filter(
-        models.InterviewSession.session_id == session_id
-    ).first()
+    row = (
+        db.query(models.InterviewSession)
+        .filter(models.InterviewSession.session_id == session_id)
+        .first()
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
     if row.clerk_user_id != current_user.clerk_user_id:
@@ -5309,7 +5757,9 @@ def get_interview_session_gaze_events(
     if summary_from_session:
         summary["monitoring_started_at"] = summary_from_session.get("monitoring_started_at")
         summary["monitoring_ended_at"] = summary_from_session.get("monitoring_ended_at")
-        summary["algorithm_version"] = summary_from_session.get("algorithm_version", "opencv_haar_v1")
+        summary["algorithm_version"] = summary_from_session.get(
+            "algorithm_version", "opencv_haar_v1"
+        )
 
     return {
         "session_id": session_id,
@@ -5362,11 +5812,15 @@ async def capture_interview_evidence(
     if authorization:
         current_user = get_current_user(authorization=authorization, db=db)
     if not current_user:
-        raise HTTPException(status_code=401, detail="Authorization is required to capture interview evidence.")
+        raise HTTPException(
+            status_code=401, detail="Authorization is required to capture interview evidence."
+        )
 
-    row = db.query(models.InterviewSession).filter(
-        models.InterviewSession.session_id == session_id
-    ).first()
+    row = (
+        db.query(models.InterviewSession)
+        .filter(models.InterviewSession.session_id == session_id)
+        .first()
+    )
     if row and row.clerk_user_id != current_user.clerk_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -5400,7 +5854,11 @@ async def capture_interview_evidence(
     if request.capture_integrity and isinstance(request.capture_integrity, dict):
         capture_integrity.update(request.capture_integrity)
     trust_level = determine_score_trust_level(
-        capture_status="COMPLETE" if capture_integrity.get("trusted_candidate_turn_count", 0) > 0 else "INCOMPLETE_NO_CANDIDATE_AUDIO",
+        capture_status=(
+            "COMPLETE"
+            if capture_integrity.get("trusted_candidate_turn_count", 0) > 0
+            else "INCOMPLETE_NO_CANDIDATE_AUDIO"
+        ),
         capture_integrity=capture_integrity,
         contract_passed=True,
         hard_guard_flags=[],
@@ -5445,7 +5903,10 @@ async def capture_interview_evidence(
     runtime_data["resume_token"] = runtime_data.get("resume_token") or uuid.uuid4().hex
     try:
         redis_client = get_redis_client()
-        ttl_seconds = max(300, int(runtime_data.get("duration_minutes_effective") or FREE_TRIAL_MINUTES) * 60 + 600)
+        ttl_seconds = max(
+            300,
+            int(runtime_data.get("duration_minutes_effective") or FREE_TRIAL_MINUTES) * 60 + 600,
+        )
         redis_client.setex(_runtime_session_key(session_id), ttl_seconds, json.dumps(runtime_data))
     except Exception:
         logging.exception("Failed to persist capture runtime state for session %s", session_id)
@@ -5491,18 +5952,19 @@ async def capture_interview_evidence(
         "trust_level": trust_level,
     }
 
+
 @app.post("/api/interview/{session_id}/transcript")
 async def save_interview_transcript(
-    session_id: str, 
+    session_id: str,
     request: Dict,
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Save interview transcript to file and generate report in database."""
     try:
         # Handle both legacy and canonical transcript formats
         transcript_input = request.get("transcript", [])
-        
+
         # Optionally accept other session data (questions, metrics, etc.)
         questions = request.get("questions", [])  # Can be list or integer
         questions_answered = request.get("questions_answered")  # Explicit count
@@ -5529,7 +5991,10 @@ async def save_interview_transcript(
             transcript_input = {
                 "mode": "capture_bundle",
                 "qa_pairs": [],
-                "raw_messages": [*trusted_transcript_from_artifact, *fallback_transcript_from_artifact],
+                "raw_messages": [
+                    *trusted_transcript_from_artifact,
+                    *fallback_transcript_from_artifact,
+                ],
             }
             if not capture_stats and isinstance(artifact_payload.get("capture_integrity"), dict):
                 capture_stats = artifact_payload.get("capture_integrity")
@@ -5607,12 +6072,14 @@ async def save_interview_transcript(
         candidate_turn_count = sum(
             1
             for m in ordered_messages
-            if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
+            if (m.get("speaker") or "").lower() in ["user", "candidate"]
+            and (m.get("text") or "").strip()
         )
         trusted_candidate_turn_count = sum(
             1
             for m in trusted_ordered_messages
-            if (m.get("speaker") or "").lower() in ["user", "candidate"] and (m.get("text") or "").strip()
+            if (m.get("speaker") or "").lower() in ["user", "candidate"]
+            and (m.get("text") or "").strip()
         )
         if candidate_turn_count == 0 and isinstance(transcript, list):
             candidate_turn_count = sum(
@@ -5661,7 +6128,9 @@ async def save_interview_transcript(
                     response_times.append(delta)
                 last_ai_ts = None
 
-        avg_response_time_derived = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
+        avg_response_time_derived = (
+            round(sum(response_times) / len(response_times), 2) if response_times else 0.0
+        )
         communication_metrics = analyze_communication_metrics(
             trusted_messages=trusted_ordered_messages,
             total_duration_minutes=total_duration_derived,
@@ -5689,9 +6158,15 @@ async def save_interview_transcript(
             fallback_summary=session_gaze_summary,
         )
         if session_gaze_summary:
-            gaze_summary_derived["monitoring_started_at"] = session_gaze_summary.get("monitoring_started_at")
-            gaze_summary_derived["monitoring_ended_at"] = session_gaze_summary.get("monitoring_ended_at")
-            gaze_summary_derived["algorithm_version"] = session_gaze_summary.get("algorithm_version", "opencv_haar_v1")
+            gaze_summary_derived["monitoring_started_at"] = session_gaze_summary.get(
+                "monitoring_started_at"
+            )
+            gaze_summary_derived["monitoring_ended_at"] = session_gaze_summary.get(
+                "monitoring_ended_at"
+            )
+            gaze_summary_derived["algorithm_version"] = session_gaze_summary.get(
+                "algorithm_version", "opencv_haar_v1"
+            )
         if eye_contact_pct_derived is None:
             eye_contact_pct_derived = gaze_summary_derived.get("eye_contact_pct")
         gaze_flags_count_derived = int(gaze_summary_derived.get("total_events") or 0)
@@ -5745,7 +6220,9 @@ async def save_interview_transcript(
                             "relevance": int(max(1, min(5, int(relevance)))),
                             "confidence": "high",
                             "reason_code": "runtime_adaptive_turn",
-                            "rationale": str(item.get("reason") or "runtime adaptive turn evaluation"),
+                            "rationale": str(
+                                item.get("reason") or "runtime adaptive turn evaluation"
+                            ),
                             "evidence_excerpt": str(item.get("candidate_excerpt") or ""),
                         }
                     )
@@ -5772,14 +6249,28 @@ async def save_interview_transcript(
                 company_context=company_context,
             )
             if deterministic_turn_evaluations:
-                d_clarity = [e.get("clarity") for e in deterministic_turn_evaluations if isinstance(e.get("clarity"), (int, float))]
-                d_depth = [e.get("depth") for e in deterministic_turn_evaluations if isinstance(e.get("depth"), (int, float))]
-                d_relevance = [e.get("relevance") for e in deterministic_turn_evaluations if isinstance(e.get("relevance"), (int, float))]
+                d_clarity = [
+                    e.get("clarity")
+                    for e in deterministic_turn_evaluations
+                    if isinstance(e.get("clarity"), (int, float))
+                ]
+                d_depth = [
+                    e.get("depth")
+                    for e in deterministic_turn_evaluations
+                    if isinstance(e.get("depth"), (int, float))
+                ]
+                d_relevance = [
+                    e.get("relevance")
+                    for e in deterministic_turn_evaluations
+                    if isinstance(e.get("relevance"), (int, float))
+                ]
                 deterministic_shadow_summary = {
                     "turn_count": len(deterministic_turn_evaluations),
                     "avg_clarity": round(sum(d_clarity) / len(d_clarity), 2) if d_clarity else None,
                     "avg_depth": round(sum(d_depth) / len(d_depth), 2) if d_depth else None,
-                    "avg_relevance": round(sum(d_relevance) / len(d_relevance), 2) if d_relevance else None,
+                    "avg_relevance": (
+                        round(sum(d_relevance) / len(d_relevance), 2) if d_relevance else None
+                    ),
                 }
 
         clean_turn_evaluations = []
@@ -5821,9 +6312,13 @@ async def save_interview_transcript(
             if excerpt:
                 continue
             if idx < len(candidate_turn_pairs):
-                eval_row["evidence_excerpt"] = str(candidate_turn_pairs[idx].get("answer") or "").strip()
+                eval_row["evidence_excerpt"] = str(
+                    candidate_turn_pairs[idx].get("answer") or ""
+                ).strip()
 
-        confidence = compute_deterministic_confidence_tier(candidate_word_count, len(clean_turn_evaluations))
+        confidence = compute_deterministic_confidence_tier(
+            candidate_word_count, len(clean_turn_evaluations)
+        )
         if confidence == "none":
             confidence = "low"
 
@@ -5831,9 +6326,12 @@ async def save_interview_transcript(
             int(effective_questions_answered or 0),
             len(candidate_turn_pairs),
         )
-        partial_capture_threshold = max(1, int(math.ceil(expected_turns * EVAL_PARTIAL_CAPTURE_TURN_RATIO)))
+        partial_capture_threshold = max(
+            1, int(math.ceil(expected_turns * EVAL_PARTIAL_CAPTURE_TURN_RATIO))
+        )
         low_evidence_word_count = (
-            candidate_word_count > 0 and candidate_word_count < EVAL_MIN_CANDIDATE_WORDS_FOR_VALID_SCORE
+            candidate_word_count > 0
+            and candidate_word_count < EVAL_MIN_CANDIDATE_WORDS_FOR_VALID_SCORE
         )
         if (
             capture_status == "COMPLETE"
@@ -5849,9 +6347,21 @@ async def save_interview_transcript(
 
         turn_eval_summary = None
         if clean_turn_evaluations:
-            clarity_vals = [e.get("clarity") for e in clean_turn_evaluations if isinstance(e.get("clarity"), (int, float))]
-            depth_vals = [e.get("depth") for e in clean_turn_evaluations if isinstance(e.get("depth"), (int, float))]
-            relevance_vals = [e.get("relevance") for e in clean_turn_evaluations if isinstance(e.get("relevance"), (int, float))]
+            clarity_vals = [
+                e.get("clarity")
+                for e in clean_turn_evaluations
+                if isinstance(e.get("clarity"), (int, float))
+            ]
+            depth_vals = [
+                e.get("depth")
+                for e in clean_turn_evaluations
+                if isinstance(e.get("depth"), (int, float))
+            ]
+            relevance_vals = [
+                e.get("relevance")
+                for e in clean_turn_evaluations
+                if isinstance(e.get("relevance"), (int, float))
+            ]
 
             def _avg(values):
                 return round(sum(values) / len(values), 2) if values else None
@@ -5899,9 +6409,15 @@ async def save_interview_transcript(
                 )
             if runtime_shadow_score is not None and deterministic_shadow_score is not None:
                 deterministic_shadow_summary["runtime_overall_score"] = runtime_shadow_score
-                deterministic_shadow_summary["deterministic_overall_score"] = deterministic_shadow_score
-                deterministic_shadow_summary["score_delta"] = runtime_shadow_score - deterministic_shadow_score
-                deterministic_shadow_summary["abs_score_delta"] = abs(runtime_shadow_score - deterministic_shadow_score)
+                deterministic_shadow_summary["deterministic_overall_score"] = (
+                    deterministic_shadow_score
+                )
+                deterministic_shadow_summary["score_delta"] = (
+                    runtime_shadow_score - deterministic_shadow_score
+                )
+                deterministic_shadow_summary["abs_score_delta"] = abs(
+                    runtime_shadow_score - deterministic_shadow_score
+                )
 
         trust_level = determine_score_trust_level(
             capture_status=capture_status,
@@ -5919,13 +6435,25 @@ async def save_interview_transcript(
         )
         handoff_summary = _agent_handoff_summary_from_runtime(
             runtime_session_data if isinstance(runtime_session_data, dict) else {},
-            round_index=int(runtime_session_data.get("round_index") or 0) if isinstance(runtime_session_data, dict) else 0,
+            round_index=(
+                int(runtime_session_data.get("round_index") or 0)
+                if isinstance(runtime_session_data, dict)
+                else 0
+            ),
         )
         round_memory_summary = build_round_memory_summary(
             session_id=session_id,
-            round_index=int(runtime_session_data.get("round_index") or effective_questions_answered or 0) if isinstance(runtime_session_data, dict) else effective_questions_answered,
+            round_index=(
+                int(runtime_session_data.get("round_index") or effective_questions_answered or 0)
+                if isinstance(runtime_session_data, dict)
+                else effective_questions_answered
+            ),
             trusted_messages=trusted_ordered_messages,
-            selected_skills=runtime_session_data.get("selected_skills") if isinstance(runtime_session_data, dict) else [],
+            selected_skills=(
+                runtime_session_data.get("selected_skills")
+                if isinstance(runtime_session_data, dict)
+                else []
+            ),
             turn_evaluations=clean_turn_evaluations,
             communication_metrics=communication_metrics,
             handoff_summary=handoff_summary,
@@ -5944,7 +6472,9 @@ async def save_interview_transcript(
             "interviewer_word_count": interviewer_word_count,
             "total_duration": total_duration_derived,
             "avg_response_time_seconds": avg_response_time_derived,
-            "words_per_minute": communication_metrics.get("words_per_minute", round(user_words_derived / max(total_duration_derived, 1))),
+            "words_per_minute": communication_metrics.get(
+                "words_per_minute", round(user_words_derived / max(total_duration_derived, 1))
+            ),
             "communication_signals": communication_metrics,
             "eye_contact_pct": eye_contact_pct_derived,
             "gaze_flags_count": gaze_flags_count_derived,
@@ -5962,7 +6492,9 @@ async def save_interview_transcript(
             "capture_integrity": capture_integrity,
             "capture_stats": capture_stats if isinstance(capture_stats, dict) else None,
             "client_turn_evaluations_received": len(client_turn_evaluations),
-            "client_turn_evaluations_ignored": (not EVAL_CLIENT_TURNS_TRUSTED and len(client_turn_evaluations) > 0),
+            "client_turn_evaluations_ignored": (
+                not EVAL_CLIENT_TURNS_TRUSTED and len(client_turn_evaluations) > 0
+            ),
             "evaluation_channels": route_evaluation_channels(
                 trusted_transcript=trusted_raw_messages,
                 capture_integrity=capture_integrity,
@@ -5987,12 +6519,15 @@ async def save_interview_transcript(
                 "rubric_version": EVAL_RUBRIC_VERSION,
                 "scorer_version": EVAL_SCORER_VERSION,
                 "trusted_candidate_turn_count": trusted_candidate_turn_count,
-                "fallback_candidate_turn_count": capture_integrity.get("fallback_candidate_turn_count", 0),
+                "fallback_candidate_turn_count": capture_integrity.get(
+                    "fallback_candidate_turn_count", 0
+                ),
                 "confidence_score": confidence_score,
             },
         }
         if deterministic_shadow_summary and (
-            not EVAL_DETERMINISTIC_RUBRIC_ENABLED or evaluation_source != "server_deterministic_rubric"
+            not EVAL_DETERMINISTIC_RUBRIC_ENABLED
+            or evaluation_source != "server_deterministic_rubric"
         ):
             derived_metrics["deterministic_rubric_shadow_summary"] = deterministic_shadow_summary
         if hard_guard_flags:
@@ -6026,15 +6561,19 @@ async def save_interview_transcript(
         # Resolve report owner from authenticated caller only.
         current_user = get_current_user(authorization=authorization, db=db)
         user_id = current_user.clerk_user_id
+        report_user_id = current_user.id
 
-        session_row = db.query(models.InterviewSession).filter(
-            models.InterviewSession.session_id == session_id
-        ).first()
+        session_row = (
+            db.query(models.InterviewSession)
+            .filter(models.InterviewSession.session_id == session_id)
+            .first()
+        )
         if session_row and session_row.clerk_user_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
         # Update or reconstruct the in-memory session state
         from services.interview_state import InterviewState
+
         session_state = load_interview_state(session_id)
         if not session_state:
             # Reconstruct minimal session state if missing
@@ -6042,11 +6581,11 @@ async def save_interview_transcript(
                 session_id=session_id,
                 interview_type=interview_type,
                 difficulty="mid",
-                max_questions=len(questions) if questions else 6
+                max_questions=len(questions) if questions else 6,
             )
             save_interview_state(session_state)
 
-       # ✅ Update session state with posted Q/A transcript (correct format)
+        # ✅ Update session state with posted Q/A transcript (correct format)
         session_state.transcript_history = []
 
         for idx, entry in enumerate(trusted_transcript):
@@ -6057,19 +6596,20 @@ async def save_interview_transcript(
             if not question and not answer:
                 continue
 
-            session_state.transcript_history.append({
-                "question": question or "",
-                "answer": answer or "",
-                "question_index": idx,
-                "timestamp": entry.get("timestamp", datetime.now().isoformat())
-            })
+            session_state.transcript_history.append(
+                {
+                    "question": question or "",
+                    "answer": answer or "",
+                    "question_index": idx,
+                    "timestamp": entry.get("timestamp", datetime.now().isoformat()),
+                }
+            )
 
         # ✅ ensure question_index reflects answers count
         session_state.question_index = len(session_state.transcript_history)
 
         print(f"📊 Transcript Q/A pairs loaded: {session_state.question_index}")
 
-        
         # Set question_index based on questions_answered or questions count
         if questions_answered is not None:
             session_state.question_index = int(questions_answered)
@@ -6079,7 +6619,7 @@ async def save_interview_transcript(
             session_state.question_index = len(questions)
         else:
             session_state.question_index = len(trusted_transcript or transcript)
-        
+
         # Optionally update metrics if provided
         if metrics:
             for k, v in metrics.items():
@@ -6094,47 +6634,56 @@ async def save_interview_transcript(
         os.makedirs(transcripts_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename_base = f"transcript_{session_id}_{timestamp}"
-        
+
         # Save complete canonical payload for audit
         json_filename = os.path.join(transcripts_dir, f"{filename_base}.json")
-        with open(json_filename, 'w', encoding='utf-8') as f:
-            json.dump({
-                "session_id": session_id,
-                "timestamp": datetime.now().isoformat(),
-                "transcript": transcript,  # QA pairs
-                "trusted_transcript": trusted_transcript,
-                "raw_messages": raw_messages if raw_messages else None,  # Raw messages if available
-                "trusted_raw_messages": trusted_raw_messages if trusted_raw_messages else None,
-                "fallback_raw_messages": fallback_raw_messages if fallback_raw_messages else None,
-                "capture_integrity": capture_integrity,
-                "format": "canonical" if isinstance(transcript_input, dict) else "legacy"
-            }, f, indent=2, ensure_ascii=False)
-        
+        with open(json_filename, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "session_id": session_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "transcript": transcript,  # QA pairs
+                    "trusted_transcript": trusted_transcript,
+                    "raw_messages": (
+                        raw_messages if raw_messages else None
+                    ),  # Raw messages if available
+                    "trusted_raw_messages": trusted_raw_messages if trusted_raw_messages else None,
+                    "fallback_raw_messages": (
+                        fallback_raw_messages if fallback_raw_messages else None
+                    ),
+                    "capture_integrity": capture_integrity,
+                    "format": "canonical" if isinstance(transcript_input, dict) else "legacy",
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+
         # Save human-readable text version
         text_filename = os.path.join(transcripts_dir, f"{filename_base}.txt")
-        with open(text_filename, 'w', encoding='utf-8') as f:
+        with open(text_filename, "w", encoding="utf-8") as f:
             f.write(f"Interview Transcript - Session ID: {session_id}\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
-            
+
             # Write QA pairs
             for idx, entry in enumerate(transcript, 1):
                 question = entry.get("question", "")
                 answer = entry.get("answer", "")
                 timestamp_str = entry.get("timestamp", "")
-                
+
                 if timestamp_str:
                     try:
                         if isinstance(timestamp_str, str):
-                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                            timestamp_str = dt.strftime('%H:%M:%S')
+                            dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                            timestamp_str = dt.strftime("%H:%M:%S")
                     except Exception:  # noqa: BLE001
                         pass
-                
+
                 f.write(f"Q{idx} [{timestamp_str}]:\n{question}\n\n")
                 f.write(f"A{idx} [{timestamp_str}]:\n{answer}\n\n")
                 f.write("-" * 80 + "\n\n")
-        
+
         print(f"✅ Transcript saved for session {session_id}")
         print(f"   JSON: {json_filename}")
         print(f"   Text: {text_filename}")
@@ -6170,6 +6719,7 @@ async def save_interview_transcript(
                 hard_guard_flags.append("HARD_GUARD_FALLBACK_ONLY_EVIDENCE")
             if evaluation_source not in ALLOWED_PRIMARY_EVALUATION_SOURCES:
                 hard_guard_flags.append(f"HARD_GUARD_INVALID_SOURCE:{evaluation_source}")
+
         def _zero_score_breakdown() -> Dict[str, Any]:
             return {
                 "communication": 0,
@@ -6188,7 +6738,11 @@ async def save_interview_transcript(
                     {
                         "turn_id": int(turn.get("turn_id") or idx + 1),
                         "candidate_text_excerpt": (
-                            str(turn.get("evidence_excerpt") or turn.get("candidate_text_excerpt") or "").strip()
+                            str(
+                                turn.get("evidence_excerpt")
+                                or turn.get("candidate_text_excerpt")
+                                or ""
+                            ).strip()
                         ),
                         "clarity": turn.get("clarity"),
                         "depth": turn.get("depth"),
@@ -6200,10 +6754,14 @@ async def save_interview_transcript(
 
         turn_evidence = _turn_evidence_payload()
 
-        def _merge_contract_into_metrics(metrics_payload: Dict[str, Any], contract_payload: Dict[str, Any]) -> Dict[str, Any]:
+        def _merge_contract_into_metrics(
+            metrics_payload: Dict[str, Any], contract_payload: Dict[str, Any]
+        ) -> Dict[str, Any]:
             merged = metrics_payload if isinstance(metrics_payload, dict) else {}
             merged.update({k: v for k, v in derived_metrics.items() if v is not None})
-            merged["evaluation_contract_version"] = contract_payload.get("evaluation_contract_version", EVALUATION_CONTRACT_VERSION)
+            merged["evaluation_contract_version"] = contract_payload.get(
+                "evaluation_contract_version", EVALUATION_CONTRACT_VERSION
+            )
             merged["rubric_version"] = contract_payload.get("rubric_version", EVAL_RUBRIC_VERSION)
             merged["scorer_version"] = contract_payload.get("scorer_version", EVAL_SCORER_VERSION)
             merged["capture_evidence"] = contract_payload.get("capture_evidence", {})
@@ -6211,18 +6769,26 @@ async def save_interview_transcript(
             merged["turn_evidence"] = contract_payload.get("turn_evidence", [])
             merged["validation_flags"] = contract_payload.get("validation_flags", [])
             merged["contract_passed"] = bool(contract_payload.get("contract_passed"))
-            merged["contract_enforcement_mode"] = contract_payload.get("contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE)
+            merged["contract_enforcement_mode"] = contract_payload.get(
+                "contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE
+            )
             explainability = merged.get("evaluation_explainability", {})
             if not isinstance(explainability, dict):
                 explainability = {}
             provenance = contract_payload.get("score_provenance", {})
             if isinstance(provenance, dict):
                 explainability["source"] = provenance.get("source", explainability.get("source"))
-                explainability["confidence"] = provenance.get("confidence", explainability.get("confidence"))
+                explainability["confidence"] = provenance.get(
+                    "confidence", explainability.get("confidence")
+                )
                 if provenance.get("forced_zero_reason"):
                     explainability["forced_zero_reason"] = provenance.get("forced_zero_reason")
-            explainability["rubric_version"] = contract_payload.get("rubric_version", EVAL_RUBRIC_VERSION)
-            explainability["scorer_version"] = contract_payload.get("scorer_version", EVAL_SCORER_VERSION)
+            explainability["rubric_version"] = contract_payload.get(
+                "rubric_version", EVAL_RUBRIC_VERSION
+            )
+            explainability["scorer_version"] = contract_payload.get(
+                "scorer_version", EVAL_SCORER_VERSION
+            )
             explainability["turns_evaluated"] = contract_payload.get("capture_evidence", {}).get(
                 "turns_evaluated", explainability.get("turns_evaluated")
             )
@@ -6238,8 +6804,12 @@ async def save_interview_transcript(
                 "turns_evaluated": len(clean_turn_evaluations),
                 "candidate_word_count_total": user_words_derived,
                 "candidate_turn_count_total": candidate_turn_count,
-                "fallback_candidate_turn_count": capture_integrity.get("fallback_candidate_turn_count", 0),
-                "evaluation_uses_fallback_transcript": capture_integrity.get("contains_fallback_candidate_transcript", False),
+                "fallback_candidate_turn_count": capture_integrity.get(
+                    "fallback_candidate_turn_count", 0
+                ),
+                "evaluation_uses_fallback_transcript": capture_integrity.get(
+                    "contains_fallback_candidate_transcript", False
+                ),
             }
             score_provenance = {
                 "source": evaluation_source,
@@ -6263,31 +6833,47 @@ async def save_interview_transcript(
             )
 
         try:
-            existing_report = db.query(models.InterviewReport).filter(
-                models.InterviewReport.session_id == session_id
-            ).first()
+            existing_report = (
+                db.query(models.InterviewReport)
+                .filter(models.InterviewReport.session_id == session_id)
+                .first()
+            )
 
             if not existing_report:
                 from services.report_generator import generate_report as generate_interview_report
+
                 # Use updated session_state for report
                 if session_state.start_time:
-                    duration_minutes = int((datetime.now() - session_state.start_time).total_seconds() / 60)
+                    duration_minutes = int(
+                        (datetime.now() - session_state.start_time).total_seconds() / 60
+                    )
                 if not interview_type:
                     interview_type = session_state.interview_type or "mixed"
                 if duration_minutes <= 0:
                     duration_minutes = 1
 
-                report_data = generate_interview_report(session_state, interview_type, duration_minutes)
+                report_data = generate_interview_report(
+                    session_state, interview_type, duration_minutes
+                )
                 # Inject eye_contact score from gaze data
                 if eye_contact_pct_derived is not None:
                     eye_contact_score = min(100, round(float(eye_contact_pct_derived) * 1.2))
                     if hasattr(report_data.scores, "eye_contact"):
-                        report_data.scores = report_data.scores.copy(update={"eye_contact": eye_contact_score})
+                        report_data.scores = report_data.scores.copy(
+                            update={"eye_contact": eye_contact_score}
+                        )
                     # Blend into overall_score (10% weight)
-                    if not (derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or bool(hard_guard_flags)):
-                        blended = int(round(report_data.overall_score * 0.90 + eye_contact_score * 0.10))
+                    if not (
+                        derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO"
+                        or bool(hard_guard_flags)
+                    ):
+                        blended = int(
+                            round(report_data.overall_score * 0.90 + eye_contact_score * 0.10)
+                        )
                         report_data.overall_score = max(0, min(100, blended))
-                force_zero = derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or bool(hard_guard_flags)
+                force_zero = derived_metrics.get(
+                    "capture_status"
+                ) == "INCOMPLETE_NO_CANDIDATE_AUDIO" or bool(hard_guard_flags)
                 if force_zero:
                     report_data.overall_score = 0
                     report_data.scores = ScoreBreakdown(**_zero_score_breakdown())
@@ -6308,8 +6894,12 @@ async def save_interview_transcript(
                 contract_passed = bool(contract_payload.get("contract_passed"))
                 validation_flags = list(contract_payload.get("validation_flags") or [])
                 score_provenance = contract_payload.get("score_provenance") or {}
-                contract_enforcement_mode = contract_payload.get("contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE)
-                final_overall = int(contract_payload.get("final_scores", {}).get("overall_score", 0) or 0)
+                contract_enforcement_mode = contract_payload.get(
+                    "contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE
+                )
+                final_overall = int(
+                    contract_payload.get("final_scores", {}).get("overall_score", 0) or 0
+                )
                 if final_overall <= 0:
                     report_data.overall_score = 0
                     report_data.scores = ScoreBreakdown(**_zero_score_breakdown())
@@ -6329,20 +6919,29 @@ async def save_interview_transcript(
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
-                    user_id=user_id,
+                    user_id=report_user_id,
                     title=report_data.title,
                     date=datetime.now(),
                     type=report_data.type,
                     mode=report_data.mode,
                     duration=report_data.duration,
                     overall_score=report_data.overall_score,
-                    scores=json.dumps(report_data.scores.dict() if hasattr(report_data.scores, "dict") else report_data.scores),
+                    scores=json.dumps(
+                        report_data.scores.dict()
+                        if hasattr(report_data.scores, "dict")
+                        else report_data.scores
+                    ),
                     transcript=json.dumps(ordered_messages),
                     recommendations=json.dumps(report_data.recommendations),
                     questions=report_data.questions,
                     is_sample=False,
                     metrics=json.dumps(merged_metrics) if merged_metrics else None,
-                    ai_feedback=json.dumps(report_data.ai_feedback) if hasattr(report_data, "ai_feedback") and report_data.ai_feedback is not None else None,
+                    ai_feedback=(
+                        json.dumps(report_data.ai_feedback)
+                        if hasattr(report_data, "ai_feedback")
+                        and report_data.ai_feedback is not None
+                        else None
+                    ),
                 )
                 db.add(db_report)
                 db.commit()
@@ -6352,21 +6951,32 @@ async def save_interview_transcript(
             else:
                 merged_existing_metrics = {}
                 try:
-                    merged_existing_metrics = json.loads(existing_report.metrics) if existing_report.metrics else {}
+                    merged_existing_metrics = (
+                        json.loads(existing_report.metrics) if existing_report.metrics else {}
+                    )
                 except Exception:
                     merged_existing_metrics = {}
 
                 current_existing_overall = int(existing_report.overall_score or 0)
-                if derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO" or hard_guard_flags:
+                if (
+                    derived_metrics.get("capture_status") == "INCOMPLETE_NO_CANDIDATE_AUDIO"
+                    or hard_guard_flags
+                ):
                     current_existing_overall = 0
                 contract_payload = _build_contract_payload(current_existing_overall)
                 contract_passed = bool(contract_payload.get("contract_passed"))
                 validation_flags = list(contract_payload.get("validation_flags") or [])
                 score_provenance = contract_payload.get("score_provenance") or {}
-                contract_enforcement_mode = contract_payload.get("contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE)
-                final_overall = int(contract_payload.get("final_scores", {}).get("overall_score", 0) or 0)
+                contract_enforcement_mode = contract_payload.get(
+                    "contract_enforcement_mode", EVAL_CONTRACT_ENFORCEMENT_MODE
+                )
+                final_overall = int(
+                    contract_payload.get("final_scores", {}).get("overall_score", 0) or 0
+                )
 
-                merged_existing_metrics = _merge_contract_into_metrics(merged_existing_metrics, contract_payload)
+                merged_existing_metrics = _merge_contract_into_metrics(
+                    merged_existing_metrics, contract_payload
+                )
                 merged_existing_metrics["score_trust_level"] = determine_score_trust_level(
                     capture_status=capture_status,
                     capture_integrity=capture_integrity,
@@ -6376,8 +6986,12 @@ async def save_interview_transcript(
                 existing_report.metrics = json.dumps(merged_existing_metrics)
                 existing_report.transcript = json.dumps(ordered_messages)
                 existing_report.overall_score = final_overall
-                if existing_report.user_id in (None, "", "guest") and user_id not in (None, "", "guest"):
-                    existing_report.user_id = user_id
+                if existing_report.user_id in (None, "", "guest") and report_user_id not in (
+                    None,
+                    "",
+                    "guest",
+                ):
+                    existing_report.user_id = report_user_id
 
                 if final_overall <= 0:
                     existing_report.scores = json.dumps(_zero_score_breakdown())
@@ -6385,9 +6999,15 @@ async def save_interview_transcript(
 
                 db.commit()
                 report_id = existing_report.id
-                print(f"ℹ️ Report already exists for session {session_id}, updated metrics/transcript (id={report_id})")
+                print(
+                    f"ℹ️ Report already exists for session {session_id}, updated metrics/transcript (id={report_id})"
+                )
 
-            summary_round_index = int(runtime_session_data.get("round_index") or effective_questions_answered or 0) if isinstance(runtime_session_data, dict) else effective_questions_answered
+            summary_round_index = (
+                int(runtime_session_data.get("round_index") or effective_questions_answered or 0)
+                if isinstance(runtime_session_data, dict)
+                else effective_questions_answered
+            )
             persist_session_memory_snapshot(
                 db,
                 session_id=session_id,
@@ -6395,7 +7015,11 @@ async def save_interview_transcript(
                 round_index=summary_round_index,
                 snapshot_kind="round_summary",
                 memory=round_memory_summary,
-                resume_token=runtime_session_data.get("resume_token") if isinstance(runtime_session_data, dict) else None,
+                resume_token=(
+                    runtime_session_data.get("resume_token")
+                    if isinstance(runtime_session_data, dict)
+                    else None
+                ),
             )
             persist_session_memory_snapshot(
                 db,
@@ -6408,7 +7032,11 @@ async def save_interview_transcript(
                     "agent_handoff_summary": handoff_summary,
                     "provider_trace": derived_metrics.get("provider_trace"),
                 },
-                resume_token=runtime_session_data.get("resume_token") if isinstance(runtime_session_data, dict) else None,
+                resume_token=(
+                    runtime_session_data.get("resume_token")
+                    if isinstance(runtime_session_data, dict)
+                    else None
+                ),
             )
         except Exception as report_err:
             # Don't fail the entire request if report generation fails; transcript is still saved
@@ -6418,15 +7046,19 @@ async def save_interview_transcript(
 
         # Mark durable interview session row as completed/failed with final metadata.
         try:
-            session_row = db.query(models.InterviewSession).filter(
-                models.InterviewSession.session_id == session_id
-            ).first()
+            session_row = (
+                db.query(models.InterviewSession)
+                .filter(models.InterviewSession.session_id == session_id)
+                .first()
+            )
             final_status = "COMPLETED" if report_id else "FAILED"
             final_meta = runtime_session_data if isinstance(runtime_session_data, dict) else {}
-            final_meta.update({
-                "ended_at": datetime.utcnow().isoformat(),
-                "questions_answered": effective_questions_answered,
-            })
+            final_meta.update(
+                {
+                    "ended_at": datetime.utcnow().isoformat(),
+                    "questions_answered": effective_questions_answered,
+                }
+            )
             if isinstance(gaze_summary_derived, dict):
                 final_meta["gaze_summary"] = gaze_summary_derived
             if session_feedback is not None:
@@ -6464,7 +7096,8 @@ async def save_interview_transcript(
             "report_id": report_id,
             "capture_status": derived_metrics.get("capture_status"),
             "capture_integrity": capture_integrity,
-            "evaluation_source": score_provenance.get("source") or derived_metrics.get("evaluation_explainability", {}).get("source"),
+            "evaluation_source": score_provenance.get("source")
+            or derived_metrics.get("evaluation_explainability", {}).get("source"),
             "score_trust_level": determine_score_trust_level(
                 capture_status=capture_status,
                 capture_integrity=capture_integrity,
@@ -6482,17 +7115,15 @@ async def save_interview_transcript(
             "validation_flags": validation_flags,
             "contract_enforcement_mode": contract_enforcement_mode,
             "score_provenance": score_provenance,
-            "files": {
-                "json": json_filename,
-                "text": text_filename
-            }
+            "files": {"json": json_filename, "text": text_filename},
         }
-    
+
     except Exception as e:
         print(f"❌ Error saving transcript: {e}")
 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save transcript: {str(e)}")
+
 
 # Gaze tracking WebSocket endpoints
 @app.websocket("/ws/gaze/{session_id}")
@@ -6512,7 +7143,9 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
         decoded = _verify_clerk_token_jwks(token)
         clerk_user_id = decoded.get("sub") or decoded.get("user_id")
         if not clerk_user_id:
-            await websocket.send_text(json.dumps({"type": "error", "error": "Invalid token subject"}))
+            await websocket.send_text(
+                json.dumps({"type": "error", "error": "Invalid token subject"})
+            )
             await websocket.close(code=4401, reason="Invalid token")
             return
 
@@ -6524,7 +7157,9 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
                 .first()
             )
             if not row:
-                await websocket.send_text(json.dumps({"type": "error", "error": "Session not found"}))
+                await websocket.send_text(
+                    json.dumps({"type": "error", "error": "Session not found"})
+                )
                 await websocket.close(code=4404, reason="Session not found")
                 return
             if row.clerk_user_id != clerk_user_id:
@@ -6534,7 +7169,9 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
         finally:
             auth_db.close()
 
-        await websocket.send_text(json.dumps({"type": "init", "status": "connected", "session_id": session_id}))
+        await websocket.send_text(
+            json.dumps({"type": "init", "status": "connected", "session_id": session_id})
+        )
 
         while True:
             raw = await websocket.receive_text()
@@ -6543,7 +7180,9 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
             t_ms = int(data.get("t") or int(datetime.now(tz=timezone.utc).timestamp() * 1000))
 
             if msg_type == "init":
-                await websocket.send_text(json.dumps({"type": "init", "status": "connected", "session_id": session_id}))
+                await websocket.send_text(
+                    json.dumps({"type": "init", "status": "connected", "session_id": session_id})
+                )
                 continue
 
             if msg_type == "camera_state":
@@ -6558,9 +7197,8 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
                 continue
 
             client_metrics = data.get("clientMetrics")
-            client_metrics_ready = (
-                isinstance(client_metrics, dict)
-                and bool(client_metrics.get("detectorReady"))
+            client_metrics_ready = isinstance(client_metrics, dict) and bool(
+                client_metrics.get("detectorReady")
             )
             if client_metrics_ready and client_metrics.get("gazeDirection"):
                 try:
@@ -6573,7 +7211,9 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
                     "eyeContact": bool(client_metrics.get("eyeContact")),
                     "gazeDirection": gaze_direction,
                     "conf": max(0.0, min(1.0, conf_val)),
-                    "faceDetected": bool(client_metrics.get("faceDetected", gaze_direction != "NO_FACE")),
+                    "faceDetected": bool(
+                        client_metrics.get("faceDetected", gaze_direction != "NO_FACE")
+                    ),
                     "detectorReady": bool(client_metrics.get("detectorReady", True)),
                 }
             else:
@@ -6620,6 +7260,18 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
 async def legacy_gaze_websocket(websocket: WebSocket):
     """Legacy unauthenticated gaze websocket kept for local utility tooling."""
     await websocket.accept()
+    if is_production:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "error": "Legacy unauthenticated gaze websocket is disabled in production. Use /ws/gaze/{session_id}.",
+                }
+            )
+        )
+        await websocket.close(code=1008, reason="Legacy websocket disabled in production")
+        return
+
     tracker = GazeSessionTracker()
     try:
         while True:
@@ -6633,15 +7285,18 @@ async def legacy_gaze_websocket(websocket: WebSocket):
                 continue
             if msg_type == "camera_state":
                 tracker.set_camera_enabled(enabled=bool(data.get("enabled", True)), t_ms=t_ms)
-                await websocket.send_text(json.dumps({"type": "camera_state", "t": t_ms, "enabled": tracker.camera_enabled}))
+                await websocket.send_text(
+                    json.dumps(
+                        {"type": "camera_state", "t": t_ms, "enabled": tracker.camera_enabled}
+                    )
+                )
                 continue
             if msg_type != "frame":
                 continue
 
             client_metrics = data.get("clientMetrics")
-            client_metrics_ready = (
-                isinstance(client_metrics, dict)
-                and bool(client_metrics.get("detectorReady"))
+            client_metrics_ready = isinstance(client_metrics, dict) and bool(
+                client_metrics.get("detectorReady")
             )
             if client_metrics_ready and client_metrics.get("gazeDirection"):
                 try:
@@ -6654,7 +7309,9 @@ async def legacy_gaze_websocket(websocket: WebSocket):
                     "eyeContact": bool(client_metrics.get("eyeContact")),
                     "gazeDirection": gaze_direction,
                     "conf": max(0.0, min(1.0, conf_val)),
-                    "faceDetected": bool(client_metrics.get("faceDetected", gaze_direction != "NO_FACE")),
+                    "faceDetected": bool(
+                        client_metrics.get("faceDetected", gaze_direction != "NO_FACE")
+                    ),
                     "detectorReady": bool(client_metrics.get("detectorReady", True)),
                 }
             else:
@@ -6684,9 +7341,11 @@ async def legacy_gaze_websocket(websocket: WebSocket):
     except Exception as e:
         logging.exception("Legacy gaze websocket error: %s", e)
 
+
 # ─────────────────────────────────────────────────────────────────────
 # Presence heartbeat + admin live ops + token monitoring + security
 # ─────────────────────────────────────────────────────────────────────
+
 
 class _HeartbeatPayload(BaseModel):
     route: Optional[str] = None
@@ -6701,6 +7360,7 @@ def me_heartbeat(
     """Frontend pings every ~30s to keep the user marked as active."""
     try:
         from services.presence import presence_service
+
         presence_service.mark_active(
             user_id=str(current_user.id),
             clerk_user_id=getattr(current_user, "clerk_user_id", None),
@@ -6729,6 +7389,7 @@ def admin_live_token(
     cannot send custom Authorization headers."""
     admin = _require_admin_user(authorization, db)
     from api.auth import _token_service as auth_ts
+
     token = auth_ts.create_user_token(
         user_id=str(admin.id),
         email=getattr(admin, "email", "") or "",
@@ -6741,6 +7402,7 @@ def _validate_admin_query_token(token: Optional[str], db: Session) -> Optional[U
     if not token:
         return None
     from api.auth import _token_service as auth_ts
+
     payload = auth_ts.validate_token(token) if auth_ts else None
     if not payload or not payload.get("is_admin"):
         return None
@@ -6818,11 +7480,15 @@ async def admin_live_stream(
             except Exception:
                 pass
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache, no-transform",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    })
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/api/admin/live/active-users")
@@ -6834,6 +7500,7 @@ def admin_live_active_users(
 ):
     _require_admin_user(authorization, db)
     from services.presence import presence_service
+
     window_seconds = max(10, min(int(window_seconds or 60), 600))
     limit = max(1, min(int(limit or 200), 500))
     items = presence_service.list_active(window_seconds=window_seconds, limit=limit)
@@ -6849,18 +7516,23 @@ def admin_tokens_summary(
     _require_admin_user(authorization, db)
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import func as _func
+
     days = max(1, min(int(days or 7), 90))
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     LUE = models.LLMUsageEvent
     base = db.query(LUE).filter(LUE.created_at >= since)
 
-    totals = db.query(
-        _func.coalesce(_func.sum(LUE.total_tokens), 0),
-        _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
-        _func.coalesce(_func.sum(LUE.audio_input_seconds + LUE.audio_output_seconds), 0),
-        _func.count(LUE.id),
-    ).filter(LUE.created_at >= since).one()
+    totals = (
+        db.query(
+            _func.coalesce(_func.sum(LUE.total_tokens), 0),
+            _func.coalesce(_func.sum(LUE.est_cost_usd_micro), 0),
+            _func.coalesce(_func.sum(LUE.audio_input_seconds + LUE.audio_output_seconds), 0),
+            _func.count(LUE.id),
+        )
+        .filter(LUE.created_at >= since)
+        .one()
+    )
     total_tokens, total_cost_micro, total_audio_seconds, total_events = totals
 
     by_model_rows = (
@@ -6911,18 +7583,29 @@ def admin_tokens_summary(
             "events": int(total_events or 0),
         },
         "by_model": [
-            {"model": m or "unknown", "tokens": int(t or 0),
-             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4), "events": int(n or 0)}
+            {
+                "model": m or "unknown",
+                "tokens": int(t or 0),
+                "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4),
+                "events": int(n or 0),
+            }
             for m, t, c, n in by_model_rows
         ],
         "by_route": [
-            {"route": r or "unknown", "tokens": int(t or 0),
-             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4), "events": int(n or 0)}
+            {
+                "route": r or "unknown",
+                "tokens": int(t or 0),
+                "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4),
+                "events": int(n or 0),
+            }
             for r, t, c, n in by_route_rows
         ],
         "top_users": [
-            {"user_id": uid, "tokens": int(t or 0),
-             "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4)}
+            {
+                "user_id": uid,
+                "tokens": int(t or 0),
+                "est_cost_usd": round(float(c or 0) / 1_000_000.0, 4),
+            }
             for uid, t, c in top_users_rows
         ],
     }
@@ -6937,6 +7620,7 @@ def admin_tokens_timeseries(
     _require_admin_user(authorization, db)
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import func as _func
+
     days = max(1, min(int(days or 7), 90))
     since = datetime.now(timezone.utc) - timedelta(days=days)
     LUE = models.LLMUsageEvent
@@ -7013,9 +7697,14 @@ def admin_security_unlock(
     if not target_email or "@" not in target_email:
         raise HTTPException(status_code=400, detail="email required")
     from services.auth import lockout_service as _lockout, audit_log as _audit
+
     cleared = _lockout.admin_unlock(target_email)
-    _audit.log_event("admin_unlock", user_id=str(admin.id), email=admin.email,
-                     detail={"target_email": target_email, "keys_cleared": cleared})
+    _audit.log_event(
+        "admin_unlock",
+        user_id=str(admin.id),
+        email=admin.email,
+        detail={"target_email": target_email, "keys_cleared": cleared},
+    )
     return {"ok": True, "keys_cleared": cleared}
 
 
@@ -7027,6 +7716,7 @@ def admin_security_sessions(
 ):
     _require_admin_user(authorization, db)
     from services.auth import refresh_token_store as _rts
+
     recs = _rts.list_active_sessions(db, user_id)
     return {
         "items": [
@@ -7052,9 +7742,15 @@ def admin_security_revoke_session(
 ):
     admin = _require_admin_user(authorization, db)
     from services.auth import refresh_token_store as _rts, audit_log as _audit
+
     ok = _rts.revoke(db, jti, reason="admin_revoke")
-    _audit.log_event("admin_session_revoke", outcome="success" if ok else "failure",
-                     user_id=str(admin.id), email=admin.email, detail={"jti": jti})
+    _audit.log_event(
+        "admin_session_revoke",
+        outcome="success" if ok else "failure",
+        user_id=str(admin.id),
+        email=admin.email,
+        detail={"jti": jti},
+    )
     return {"ok": ok}
 
 
@@ -7073,6 +7769,8 @@ def serve_frontend(full_path: str):
         return FileResponse(file_path)
     return FileResponse(FRONTEND_INDEX)
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

@@ -53,7 +53,7 @@ def test_report_feedback_persists_to_table_and_metrics():
         report = models.InterviewReport(
             id="report_1",
             session_id="session_1",
-            user_id="clerk_1",
+            user_id="u1",
             title="Report",
             type="mixed",
             mode="Voice-Only Realtime",
