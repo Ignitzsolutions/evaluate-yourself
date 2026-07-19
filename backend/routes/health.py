@@ -20,8 +20,10 @@ def health_check():
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_REALTIME_API_KEY")
     openai_ok = bool(openai_key and openai_key != "your-openai-api-key-here")
 
+    core_ok = db_ok and redis_ok
     payload = {
-        "status": "healthy" if (db_ok and redis_ok and openai_ok) else "degraded",
+        "status": "healthy" if core_ok else "degraded",
+        "runtime": "ready" if openai_ok else "ai_provider_unconfigured",
         "components": {
             "openai": {
                 "ok": openai_ok,
@@ -39,5 +41,5 @@ def health_check():
             },
         },
     }
-    status_code = 200 if payload["status"] == "healthy" else 503
+    status_code = 200 if core_ok else 503
     return JSONResponse(status_code=status_code, content=payload)

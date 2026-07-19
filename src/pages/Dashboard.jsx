@@ -1,21 +1,36 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper, Alert, CircularProgress } from "@mui/material";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Container,
+  Divider,
+  Grid,
+  Paper,
+  Stack,
+  Typography,
+} from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useNavigate } from "react-router-dom";
-import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
+import { Assessment, PlayArrow, Speed, TrendingUp } from "@mui/icons-material";
 import { useUser, useAuth } from "../context/AuthContext";
 import { authFetch, throwForResponse, getApiErrorMessage } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { formatInterviewTypeLabel } from "../utils/interviewTypeLabels";
 
-const API_BASE = getApiBaseUrl();
+const formatReportDate = (value) => {
+  if (!value) return "Recent session";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Recent session" : date.toLocaleDateString([], { month: "short", day: "numeric" });
+};
 
 export default function Dashboard() {
-  const nav = useNavigate();
-  const go = useNavigate();
+  const navigate = useNavigate();
   const { user } = useUser();
   const { getToken, isLoaded } = useAuth();
   const [backendUser, setBackendUser] = useState(null);
-  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | error
+  const [syncStatus, setSyncStatus] = useState("idle");
   const [syncError, setSyncError] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
@@ -31,7 +46,7 @@ export default function Dashboard() {
     }
     setSyncStatus("syncing");
     try {
-      const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+      const resp = await authFetch(apiUrl("/api/me"), token, { method: "GET" });
       await throwForResponse(resp, { defaultMessage: "Failed to sync user with backend." });
       const data = await resp.json();
       setBackendUser(data);
@@ -56,7 +71,7 @@ export default function Dashboard() {
         setHistoryReports([]);
         return;
       }
-      const resp = await authFetch(`${API_BASE}/api/interview/reports`, token, { method: "GET" });
+      const resp = await authFetch(apiUrl("/api/interview/reports"), token, { method: "GET" });
       await throwForResponse(resp, { defaultMessage: "Failed to fetch interview history." });
       const data = await resp.json();
       setHistoryReports(Array.isArray(data) ? data : []);
@@ -73,332 +88,350 @@ export default function Dashboard() {
 
   const progressSummary = useMemo(() => {
     const total = historyReports.length;
-    if (!total) {
-      return {
-        totalInterviews: 0,
-        avgScore: null,
-        bestScore: null,
-        latestType: null,
-      };
-    }
     const scores = historyReports
       .map((r) => Number(r.score))
       .filter((n) => Number.isFinite(n));
-    const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-    const bestScore = scores.length ? Math.max(...scores) : null;
     return {
       totalInterviews: total,
-      avgScore,
-      bestScore,
+      avgScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+      bestScore: scores.length ? Math.max(...scores) : null,
       latestType: historyReports[0]?.type || null,
     };
   }, [historyReports]);
 
+  const latestReportId = historyReports[0]?.id || null;
+  const recentReports = historyReports.slice(0, 5);
 
-  const cards = [
-    {
-      icon: <PlayArrow sx={{ fontSize: 38, opacity: 0.8 }} />,
-      title: "Start an Interview",
-      subtitle: "Practice in a real interview setup",
-      body: "Launch a live AI interview that feels like a real conversation. Choose one question or a full interview and respond naturally.",
-      cta: "Start Now",
-      action: () => go("/interviews")
-    },
-    {
-      icon: <TrendingUp sx={{ fontSize: 38, opacity: 0.8 }} />,
-      title: "Experience How You Perform",
-      subtitle: "See how you actually answer under pressure",
-      body: "While you speak, the system observes your pace, clarity, confidence, and technical understanding — just like a real interviewer would.",
-      cta: "View Insights",
-      action: () => go("/analytics")
-    },
-    {
-      icon: <Assessment sx={{ fontSize: 38, opacity: 0.8 }} />,
-      title: "Review Your Report",
-      subtitle: "Clear mistakes and improvement areas",
-      body: "After the interview, get a detailed report highlighting where you struggled, what worked, and why it matters in real interviews.",
-      cta: "Open Report",
-      action: () => {
-        const latestReportId = historyReports[0]?.id;
-        if (latestReportId) {
-          go(`/report/${latestReportId}`);
-          return;
-        }
-        go("/interviews");
-      }
-    },
-    {
-      icon: <Psychology sx={{ fontSize: 38, opacity: 0.8 }} />,
-      title: "Adaptive Follow-ups",
-      subtitle: "Questions change based on your response",
-      body: "If your answer is unclear or shallow, the interviewer probes deeper. If it’s strong, the difficulty increases."
-    },
-    {
-      icon: <TrendingUp sx={{ fontSize: 38, opacity: 0.8 }} />,
-      title: "Improve Over Time",
-      subtitle: "Track progress across sessions",
-      body: "Your dashboard shows how your communication, depth, and confidence improve with practice — so every session has a purpose."
-    }
+  const controlTiles = [
+    { label: "Sessions", value: progressSummary.totalInterviews, note: "completed practice runs", icon: <Speed sx={{ fontSize: 20 }} /> },
+    { label: "Average score", value: progressSummary.avgScore != null ? `${progressSummary.avgScore}%` : "--", note: "across saved reports", icon: <TrendingUp sx={{ fontSize: 20 }} /> },
+    { label: "Best score", value: progressSummary.bestScore != null ? `${progressSummary.bestScore}%` : "--", note: "highest session outcome", icon: <Assessment sx={{ fontSize: 20 }} /> },
   ];
 
   return (
-    <>
-      {/* PAGE WRAPPER FIXED TO WHITE SURFACE ONLY IN THIS COMPONENT */}
-      <div style={{ minHeight: "100vh", display: "grid", gridTemplateRows: "1fr auto", background: "#fff", margin: 0, padding: 0 }}>
+    <Box
+      sx={{
+        minHeight: "100dvh",
+        background:
+          "linear-gradient(180deg, #ffffff 0%, #fbfdff 45%, #ffffff 100%)",
+        color: "#0f172a",
+        position: "relative",
+      }}
+    >
+      <Box
+        sx={{
+          position: "fixed",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "radial-gradient(900px 380px at 4% 0%, rgba(15,118,110,.10), transparent 58%), radial-gradient(700px 320px at 96% 8%, rgba(15,23,42,.06), transparent 56%)",
+        }}
+      />
 
-        {/* MAIN CONTENT */}
-        <Container maxWidth="lg" sx={{ py: { xs: 4, md: 8 }, px: { xs: 2, md: 3 } }}>
-          <Stack spacing={1.8} textAlign="left" alignItems="flex-start" sx={{ mb: 6 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-              <Typography variant="h5" sx={{ fontWeight: 700, opacity: 0.85 }}>
-                Hello, {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || "User"} 👋
-              </Typography>
-              {syncStatus === "syncing" && <CircularProgress size={18} sx={{ ml: 0.5 }} />}
-              {syncStatus === "ok" && backendUser && (
-                <Typography component="span" sx={{ fontSize: 13, opacity: 0.6 }}>
-                  • Synced with backend
-                </Typography>
-              )}
-            </Box>
-            {syncError && (
-              <Alert severity="warning" onClose={() => setSyncError(null)} sx={{ width: "100%", maxWidth: 560 }}>
-                {syncError}
-              </Alert>
+      <Container maxWidth="lg" sx={{ position: "relative", py: { xs: 4, md: 8 }, px: { xs: 2, md: 3 } }}>
+        <Stack spacing={2} sx={{ mb: 4 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, flexWrap: "wrap" }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: "-0.04em" }}>
+              Coach control room
+            </Typography>
+            {syncStatus === "syncing" && (
+              <Chip
+                label="Syncing"
+                size="small"
+                sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
+              />
             )}
-            <Typography sx={{ fontSize: 15, opacity: 0.55 }}>
-              Welcome back! Ready to sharpen your interview skills.
-            </Typography>
+            {syncStatus === "ok" && backendUser && (
+              <Chip
+                label="Backend connected"
+                size="small"
+                sx={{ borderRadius: 999, bgcolor: alpha("#0f172a", 0.05), color: "#334155", fontWeight: 700 }}
+              />
+            )}
+          </Box>
+          <Typography sx={{ fontSize: { xs: 16, md: 18 }, lineHeight: 1.7, color: "#475569", maxWidth: 760 }}>
+            Welcome back, {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || "user"}. This surface is tuned to help you launch the next session, inspect recent performance, and stay oriented without the usual dashboard clutter.
+          </Typography>
+          {syncError && (
+            <Alert severity="warning" onClose={() => setSyncError(null)} sx={{ width: "100%", maxWidth: 720 }}>
+              {syncError}
+            </Alert>
+          )}
+        </Stack>
 
-            <Typography variant="h3" sx={{ fontWeight: 800, opacity: 0.9, fontSize: { xs: "2rem", md: "3rem" } }}>
-              How to Use{" "}
-              <Box component="span" sx={{ color: (theme) => theme.palette.primary.main }}>
-                Evaluate Yourself
-              </Box>
-            </Typography>
-
-            <Typography sx={{ fontSize: { xs: 15, md: 17 }, opacity: 0.6, maxWidth: 700 }}>
-              A realistic interview experience designed to help you practice, improve, and get ready.
-            </Typography>
-          </Stack>
-
-          <Divider sx={{ my: { xs: 4, md: 6 } }} />
-
-          {/* ROW 1 → 3 CARDS WITH BUTTONS */}
-          <Grid container spacing={3} justifyContent="flex-start">
-            {cards.slice(0, 3).map((card, i) => (
-              <Grid item key={i} xs={12} sm={6} lg={4}>
-                <Card sx={{ borderRadius: 4, boxShadow: 1.4 }}>
-                  <CardContent sx={{ p: 4 }}>
-                    <Stack spacing={2.5} alignItems="flex-start" textAlign="left" sx={{ width: "100%" }}>
-                      {card.icon}
-                      <Typography variant="h6" sx={{ fontWeight: 700, opacity: 0.9 }}>
-                        {card.title}
-                      </Typography>
-
-                      <Paper elevation={0} sx={{ px: 2, py: 0.6, borderRadius: 2, opacity: 0.5, alignSelf: "flex-start" }}>
-                        <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{card.subtitle}</Typography>
-                      </Paper>
-
-                      <Typography sx={{ fontSize: 15, opacity: 0.75, lineHeight: 1.5 }}>
-                        {card.body}
-                      </Typography>
-
-                      <Button variant="contained" size="large" onClick={card.action} sx={{ px: 3.5, fontSize: 15, borderRadius: 2, alignSelf: "flex-start" }}>
-                        {card.cta}
-                      </Button>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-
-          {/* ROW 2 → REMAINING CARDS WITHOUT BUTTON */}
-          <Grid container spacing={4} justifyContent="flex-start">
-            {cards.slice(3).map((card, i) => (
-              <Grid item xs={12} sm={6} md={4} key={i}>
-                <Card sx={{ borderRadius: 4, boxShadow: 1, height: "100%" }}>
-                  <CardContent sx={{ p: 4 }}>
-                    <Stack spacing={2.2} alignItems="flex-start" textAlign="left">
-                      {card.icon}
-                      <Typography variant="h6" sx={{ fontWeight: 600, opacity: 0.85 }}>
-                        {card.title}
-                      </Typography>
-                      <Typography sx={{ fontSize: 14, opacity: 0.55 }}>{card.subtitle}</Typography>
-                      <Typography sx={{ fontSize: 15, opacity: 0.7, lineHeight: 1.5 }}>
-                        {card.body}
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-
-          <Divider sx={{ my: 8 }} />
-
-          {/* Real Progress + Recent History */}
-          <Box sx={{ mb: 8 }}>
-            <Typography variant="h4" sx={{ fontWeight: 700, opacity: 0.9, mb: 4 }}>
-              Your Interview History
-            </Typography>
-
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 1, border: "1px solid #e0e0e0", height: "100%" }}>
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <Speed sx={{ fontSize: 24, color: "#6b7280" }} />
-                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
-                          Total Interviews
-                        </Typography>
-                      </Box>
-                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
-                        {progressSummary.totalInterviews}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
-                        Completed by this account
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 1, border: "1px solid #e0e0e0", height: "100%" }}>
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <TrendingUp sx={{ fontSize: 24, color: "#6b7280" }} />
-                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
-                          Average Score
-                        </Typography>
-                      </Box>
-                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
-                        {progressSummary.avgScore != null ? `${progressSummary.avgScore}%` : "--"}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
-                        Based on your saved reports
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 1, border: "1px solid #e0e0e0", height: "100%" }}>
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <Assessment sx={{ fontSize: 24, color: "#6b7280" }} />
-                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
-                          Best Score
-                        </Typography>
-                      </Box>
-                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
-                        {progressSummary.bestScore != null ? `${progressSummary.bestScore}%` : "--"}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
-                        Highest score so far
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 1, border: "1px solid #e0e0e0", height: "100%" }}>
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <PlayArrow sx={{ fontSize: 24, color: "#6b7280" }} />
-                        <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "16px" }}>
-                          Latest Type
-                        </Typography>
-                      </Box>
-                      <Typography variant="h4" sx={{ fontWeight: 700, color: "#111827" }}>
-                        {progressSummary.latestType ? formatInterviewTypeLabel(progressSummary.latestType) : "--"}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#6b7280", fontSize: "13px" }}>
-                        Most recent interview mode
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-                Recent Sessions
-              </Typography>
-              {historyLoading && (
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <CircularProgress size={18} />
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Loading your history…</Typography>
+        <Grid container spacing={3} alignItems="stretch">
+          <Grid item xs={12} lg={8}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: { xs: 3, md: 4 },
+                borderRadius: 6,
+                border: "1px solid rgba(148,163,184,.18)",
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,251,255,.96) 100%)",
+                boxShadow: "0 18px 50px rgba(15,23,42,.06)",
+                minHeight: "100%",
+              }}
+            >
+              <Stack spacing={3}>
+                <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+                  <Stack spacing={1.2} sx={{ maxWidth: 620 }}>
+                    <Chip
+                      label="Current focus"
+                      size="small"
+                      sx={{ width: "fit-content", borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
+                    />
+                    <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: "-0.05em", lineHeight: 1.02 }}>
+                      Start a session, review the last one, or inspect your trend line.
+                    </Typography>
+                    <Typography sx={{ fontSize: 16, lineHeight: 1.75, color: "#475569" }}>
+                      The dashboard is intentionally sparse: one clear action surface, one progress view, and one recent-history stream.
+                    </Typography>
+                  </Stack>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+                    <Button
+                      variant="contained"
+                      onClick={() => navigate("/interviews")}
+                      startIcon={<PlayArrow />}
+                      sx={{
+                        borderRadius: 999,
+                        px: 3,
+                        py: 1.25,
+                        bgcolor: "#0f172a",
+                        "&:hover": { bgcolor: "#111827" },
+                      }}
+                    >
+                      Start interview
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => navigate(latestReportId ? `/report/${latestReportId}` : "/interviews")}
+                      sx={{
+                        borderRadius: 999,
+                        px: 3,
+                        py: 1.25,
+                        borderColor: "rgba(15,23,42,.16)",
+                        color: "#0f172a",
+                      }}
+                    >
+                      Open latest report
+                    </Button>
+                  </Stack>
                 </Box>
-              )}
+
+                <Grid container spacing={1.5}>
+                  {controlTiles.map((tile) => (
+                    <Grid item xs={12} sm={4} key={tile.label}>
+                      <Box
+                        sx={{
+                          p: 2,
+                          borderRadius: 4,
+                          border: "1px solid rgba(148,163,184,.18)",
+                          backgroundColor: "rgba(255,255,255,.8)",
+                          minHeight: 132,
+                        }}
+                      >
+                        <Stack spacing={1}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "#0f766e" }}>
+                            {tile.icon}
+                            <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>
+                              {tile.label}
+                            </Typography>
+                          </Box>
+                          <Typography sx={{ fontSize: 34, fontWeight: 800, letterSpacing: "-0.05em", color: "#0f172a" }}>
+                            {tile.value}
+                          </Typography>
+                          <Typography sx={{ fontSize: 14, color: "#64748b", lineHeight: 1.6 }}>
+                            {tile.note}
+                          </Typography>
+                        </Stack>
+                      </Box>
+                    </Grid>
+                  ))}
+                </Grid>
+
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 4,
+                    background: alpha("#0f766e", 0.04),
+                    border: "1px solid rgba(15,118,110,.10)",
+                  }}
+                >
+                  <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
+                    Coach note
+                  </Typography>
+                  <Typography sx={{ mt: 1, fontSize: 16, lineHeight: 1.8, color: "#334155" }}>
+                    {progressSummary.latestType
+                      ? `Your latest saved interview was ${formatInterviewTypeLabel(progressSummary.latestType)}.`
+                      : "You do not have a saved interview yet. Start with a fresh session and the dashboard will begin to populate."}
+                  </Typography>
+                </Paper>
+              </Stack>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} lg={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: { xs: 3, md: 4 },
+                borderRadius: 6,
+                border: "1px solid rgba(148,163,184,.18)",
+                background: "linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.96) 100%)",
+                boxShadow: "0 18px 50px rgba(15,23,42,.06)",
+                height: "100%",
+              }}
+            >
+              <Stack spacing={2.3}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
+                  Session summary
+                </Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: "-0.03em" }}>
+                  Everything you need, stripped down to the essentials.
+                </Typography>
+                <Stack spacing={1.5}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                    <Typography sx={{ color: "#64748b" }}>Total practice runs</Typography>
+                    <Typography sx={{ fontWeight: 700, color: "#0f172a" }}>{progressSummary.totalInterviews}</Typography>
+                  </Box>
+                  <Divider sx={{ borderColor: "rgba(148,163,184,.14)" }} />
+                  <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                    <Typography sx={{ color: "#64748b" }}>Average score</Typography>
+                    <Typography sx={{ fontWeight: 700, color: "#0f172a" }}>
+                      {progressSummary.avgScore != null ? `${progressSummary.avgScore}%` : "--"}
+                    </Typography>
+                  </Box>
+                  <Divider sx={{ borderColor: "rgba(148,163,184,.14)" }} />
+                  <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                    <Typography sx={{ color: "#64748b" }}>Best score</Typography>
+                    <Typography sx={{ fontWeight: 700, color: "#0f172a" }}>
+                      {progressSummary.bestScore != null ? `${progressSummary.bestScore}%` : "--"}
+                    </Typography>
+                  </Box>
+                </Stack>
+                <Button
+                  variant="contained"
+                  onClick={() => navigate("/analytics")}
+                  sx={{
+                    mt: 1,
+                    borderRadius: 999,
+                    py: 1.2,
+                    bgcolor: "#0f172a",
+                    "&:hover": { bgcolor: "#111827" },
+                  }}
+                >
+                  Open analytics
+                </Button>
+              </Stack>
+            </Paper>
+          </Grid>
+        </Grid>
+
+        <Box sx={{ mt: 4 }}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 2.5, md: 3 },
+              borderRadius: 6,
+              border: "1px solid rgba(148,163,184,.18)",
+              background: "rgba(255,255,255,.94)",
+              boxShadow: "0 12px 34px rgba(15,23,42,.04)",
+            }}
+          >
+            <Stack spacing={2.5}>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+                <Box>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#0f766e" }}>
+                    Recent sessions
+                  </Typography>
+                  <Typography variant="h5" sx={{ mt: 0.8, fontWeight: 800, letterSpacing: "-0.03em" }}>
+                    Recent report stream
+                  </Typography>
+                </Box>
+                {historyLoading && (
+                  <Chip
+                    label="Loading"
+                    size="small"
+                    sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
+                  />
+                )}
+              </Box>
+
               {historyError && (
-                <Alert severity="warning" onClose={() => setHistoryError(null)} sx={{ mb: 2 }}>
+                <Alert severity="warning" onClose={() => setHistoryError(null)}>
                   {historyError}
                 </Alert>
               )}
-              {!historyLoading && !historyError && historyReports.length === 0 && (
-                <Paper variant="outlined" sx={{ p: 3 }}>
-                  <Typography variant="body2" sx={{ opacity: 0.75 }}>
-                    No interview history yet. Complete one interview to see your reports here.
+
+              {recentReports.length === 0 && !historyLoading ? (
+                <Box
+                  sx={{
+                    py: 5,
+                    textAlign: "center",
+                    color: "#64748b",
+                    borderRadius: 4,
+                    border: "1px dashed rgba(148,163,184,.24)",
+                  }}
+                >
+                  <Typography sx={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
+                    No saved reports yet.
                   </Typography>
-                </Paper>
-              )}
-              {!historyLoading && historyReports.length > 0 && (
-                <Stack spacing={1.5}>
-                  {historyReports.slice(0, 8).map((report) => (
-                    <Paper key={report.id} variant="outlined" sx={{ p: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
-                        <Box>
-                          <Typography sx={{ fontWeight: 600 }}>{report.title || "Interview Session"}</Typography>
-                          <Typography variant="body2" sx={{ opacity: 0.65 }}>
-                            {formatInterviewTypeLabel(report.type)} • {new Date(report.date).toLocaleString()}
-                          </Typography>
-                        </Box>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            Score: {report.score}%
-                          </Typography>
-                          <Button size="small" variant="outlined" onClick={() => go(`/report/${report.id}`)}>
-                            View Report
-                          </Button>
-                        </Stack>
+                  <Typography sx={{ mt: 1, fontSize: 15, lineHeight: 1.7 }}>
+                    Start a session and the first report will appear here.
+                  </Typography>
+                </Box>
+              ) : (
+                <Stack spacing={1.25}>
+                  {recentReports.map((report) => (
+                    <Box
+                      key={report.id}
+                      sx={{
+                        px: 2.2,
+                        py: 1.8,
+                        borderRadius: 4,
+                        border: "1px solid rgba(148,163,184,.16)",
+                        backgroundColor: "rgba(255,255,255,.86)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 2,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Box>
+                        <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                          {formatInterviewTypeLabel(report.type)}
+                        </Typography>
+                        <Typography sx={{ mt: 0.3, fontSize: 13.5, color: "#64748b" }}>
+                          {formatReportDate(report.date)}
+                        </Typography>
+                      </Box>
+
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip
+                          label={`${report.score ?? "--"}%`}
+                          size="small"
+                          sx={{ borderRadius: 999, bgcolor: alpha("#0f766e", 0.08), color: "#0f766e", fontWeight: 700 }}
+                        />
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => navigate(`/report/${report.id}`)}
+                          sx={{ borderRadius: 999, borderColor: "rgba(15,23,42,.16)", color: "#0f172a" }}
+                        >
+                          Open
+                        </Button>
                       </Stack>
-                    </Paper>
+                    </Box>
                   ))}
                 </Stack>
               )}
-            </Box>
-          </Box>
-
-          <Divider sx={{ my: 8 }} />
-
-          {/* FINAL LEFT ALIGNED CTA */}
-          <Stack spacing={3} alignItems="flex-start" textAlign="left" sx={{ width: "100%" }}>
-            <Typography variant="h4" sx={{ fontWeight: 700, opacity: 0.8 }}>
-              Interviews are a skill.<br />Skills improve when you practice the real thing.
-            </Typography>
-
-            <Button variant="contained" size="large" onClick={() => nav("/interviews")} sx={{ px: 4, py: 1.4, fontSize: 16, borderRadius: 2 }}>
-              Start practicing now
-            </Button>
-
-            <Typography sx={{ fontSize: 15, opacity: 0.5 }}>
-              So when the real interview happens, it won’t feel new anymore.
-            </Typography>
-          </Stack>
-
-        </Container>
-
-
-      </div>
-    </>
+            </Stack>
+          </Paper>
+        </Box>
+      </Container>
+    </Box>
   );
 }

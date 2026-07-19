@@ -23,10 +23,11 @@ Repository context and route index for Claude-driven work.
 | `/` | `LandingLayout` | `src/pages/LandingPage.jsx` | Landing page |
 | `/presentation` | `LandingLayout` | `src/pages/PresentationPage.jsx` | Product presentation |
 | `/pricing` | `PublicLayout` | `src/pages/PricingPage.jsx` | Pricing view |
-| `/test-realtime` | `PublicLayout` | `src/pages/RealtimeTestPage.jsx` | Realtime connection checks |
+| `/checkout/:planKey` | `PublicLayout` | `src/pages/CheckoutPage.jsx` | Redirect-based checkout for plan payment methods |
 | `/login/*` | `AuthLayout` | `src/pages/LoginPage.jsx` | User login |
 | `/register/*` | `AuthLayout` | `src/pages/RegisterPage.jsx` | User signup |
 | `/forgot-password/*` | `AuthLayout` | `src/pages/ForgotPasswordPage.jsx` | Password recovery |
+| `/set-password/*` | `AuthLayout` | `src/pages/SetPasswordPage.jsx` | Secure first-time password setup |
 | `/admin` | `AuthLayout` | `src/pages/AdminEntryPage.jsx` | Admin entry routing |
 | `/admin/login/*` | `AuthLayout` | `src/pages/AdminLoginPage.jsx` | Admin login |
 | `/onboarding` | `PrivateRoute + MainLayout` | `src/pages/OnboardingPage.jsx` | First-time onboarding |
@@ -42,7 +43,7 @@ Repository context and route index for Claude-driven work.
 
 Admin subroutes under `/admin/dashboard`:
 
-- `overview`, `candidates`, `candidates/:clerkUserId`, `interviews`, `question-bank`, `trials`, `exports`, `config`
+- `overview`, `live`, `security`, `candidates`, `candidates/:clerkUserId`, `interviews`, `question-bank`, `trials`, `exports`, `config`
 
 ## 3) Backend route index
 
@@ -65,7 +66,6 @@ Admin subroutes under `/admin/dashboard`:
 | `/api/interview/reports*` | GET/POST/PUT | Report create/list/detail/feedback/download/replay |
 | `/api/interview/sessions/{session_id}*` | GET | Session detail + gaze events |
 | `/api/interview/{session_id}/next-turn` | POST | Next generated turn |
-| `/api/interview/{session_id}/adaptive-turn` | POST | Adaptive follow-up turn |
 | `/api/interview/{session_id}/capture` | POST | Capture interview artifacts/events |
 | `/api/interview/{session_id}/transcript` | POST | Transcript ingest/persistence |
 | `/api/analytics/summary`, `/trends`, `/skills` | GET | Candidate analytics aggregation |
@@ -95,10 +95,99 @@ Admin subroutes under `/admin/dashboard`:
 | Gaze capture pipeline | `src/components/WebcamToGaze.js`, `backend/services/gaze_monitor.py`, `backend/app.py` websocket gaze endpoints |
 | Admin console frontend | `src/pages/admin/*`, `src/components/AdminRoute.jsx` |
 | Candidate report UX | `src/pages/ReportPage.jsx`, `src/pages/AnalyticsPage.jsx`, `src/pages/Dashboard.jsx` |
+| Pricing and checkout UX | `src/pages/PricingPage.jsx`, `src/pages/CheckoutPage.jsx`, `src/config/pricingConfig.js` |
 
-## 5) Editing rules for this repo
+## 5) Local AI workflow skills
+
+These are local assistant skills used for repo work. They are not application runtime dependencies and should not be imported by product code.
+
+| Skill | Use in this repo |
+|---|---|
+| `use-mcp` | Product-code changes that need lean schemas, shared logic, parameterized tests, and premium light-only UI |
+| `frontend-skill` | Higher-polish React page and SaaS UI work, especially landing, pricing, checkout, and report surfaces |
+| `playwright` | Browser-level verification for routing, viewport fit, and end-to-end candidate flows |
+| `gh-fix-ci` | GitHub Actions failure inspection and CI remediation |
+| `remotion-best-practices` | Future video/replay overlay work if report playback moves into Remotion-rendered assets |
+| `frontend-ui-engineering` | Frontend implementation tasks that need production UX structure, state handling, and interaction quality |
+| `web-design-guidelines` | Visual design and layout guidance when changing public-facing or SaaS UI surfaces |
+| `vercel-react-best-practices` | React performance, rendering, async, and component-architecture decisions where applicable |
+| `shadcn` | shadcn/ui-specific component guidance only if the repo adds or touches shadcn components |
+| `accessibility` | Accessibility implementation or audit work |
+| `performance`, `core-web-vitals` | Performance and Core Web Vitals audits or targeted optimization |
+| `seo` | SEO-specific page/content/metadata review |
+| `web-quality-audit` | Broad web-quality audits across accessibility, performance, SEO, and best practices |
+
+Use these skills only when the task calls for them. Do not load every installed skill by default.
+
+## 6) Editing rules for this repo
 
 1. Keep route contracts stable unless a breaking change is explicitly requested.
 2. When changing a route, update both caller and server side in one change.
 3. Keep root clean: guides in `docs/guides/`, historical docs in `docs/archive/`.
 4. Never expose secrets to frontend bundles; keep keys server-side only.
+5. Keep checkout redirect configuration frontend-safe: use public payment URLs only, never provider secret keys.
+
+## 7) Demo mode (no API keys)
+
+The app boots cleanly with `OPENAI_API_KEY` unset or set to any `sk-dev-*` / `placeholder-*` value. In that state `DEMO_MODE=true` activates:
+
+- A synthetic LLM provider (`backend/services/llm/provider_adapter.py::_DemoClient`) returns deterministic canned scoring/orchestrator/coaching responses and emits fake `LLMUsageEvent` rows so the admin dashboard has visible activity.
+- `/api/realtime/sessions` returns `{demo_mode:true, provider:"demo"}` instead of 503 so the voice mic UI degrades gracefully.
+- Frontend shows a top banner (`src/components/DemoModeBanner.jsx`) sourced from `RuntimeModeContext` (`src/contexts/RuntimeModeContext.jsx`).
+
+### New endpoints in this PR
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/system/runtime-mode` | GET | Public unauthenticated runtime descriptor: `{ demo_mode, openai_configured, realtime_enabled, mfa_enabled, lockout_enabled, communication_practice_enabled, ... }`. Frontend reads at boot. |
+| `/api/communication-practice/history?days=30` | GET | Per-user progression rollup: `attempts_total`, `avg_score`, `score_trend_7d`, `attempts_by_day` (sparkline), `top_quality_flags`. |
+| `/api/realtime/sessions` (demo branch) | POST | Returns `{demo_mode:true, message, provider:"demo"}` when no real OpenAI key. |
+| `/admin/mfa-enroll` (frontend route) | — | TOTP QR + 6-digit confirmation flow (`src/pages/auth/AdminMfaEnrollPage.jsx`) wired into the login challenge response. |
+
+### Seeding
+
+`python backend/scripts/seed_admin_demo_data.py --wipe` seeds usage events, audit trail, a locked-out user, refresh-token sessions, and a fake MFA-enrolled user. Pass `--with-locked-user` / `--with-sessions` / `--with-mfa-user` to seed individually; default seeds everything.
+
+### Feature flags (env)
+
+- `DEMO_MODE` — enable the demo provider/realtime fallback.
+- `COMMUNICATION_PRACTICE_ENABLED` — gates the three `/api/communication-practice/*` endpoints (404 when off).
+- Existing: `ADMIN_LIVE_OPS_ENABLED`, `AUTH_MFA_ENABLED`, `AUTH_LOCKOUT_ENABLED`, `USAGE_RECORDING_ENABLED`.
+
+## 8) Production application workflow
+
+Before implementing product changes:
+
+1. Restate the user goal.
+2. Describe the shortest successful user flow.
+3. List all required UI states.
+4. Identify reusable components.
+5. Identify accessibility, security, and data risks.
+6. Ask only for information that blocks implementation.
+
+Implementation rules:
+
+1. Use only the existing design tokens and components.
+2. Do not create one-off colors, spacing values, or component variants.
+3. Use semantic HTML.
+4. Maintain keyboard navigation and visible focus.
+5. Use one clear primary action per screen.
+6. Do not add decorative gradients, glass effects, excessive cards, or animation.
+7. Do not use vague placeholder copy.
+8. Preserve user input during failures.
+9. Implement empty, loading, partial, success, and error states.
+10. Keep the UI responsive at mobile, tablet, and desktop widths.
+11. Validate external and AI-generated data before rendering.
+12. Require confirmation before consequential AI tool calls.
+13. Never expose secrets or perform authorization only in the browser.
+
+After implementation:
+
+1. Run type checking.
+2. Run linting.
+3. Run component tests.
+4. Run end-to-end tests.
+5. Run accessibility checks.
+6. Check mobile and keyboard behavior.
+7. Review loading, empty, and error states.
+8. Report any unresolved risks or assumptions.

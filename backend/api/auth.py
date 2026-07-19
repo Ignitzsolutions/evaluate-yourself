@@ -56,6 +56,7 @@ class RefreshRequest(BaseModel):
 
 class SetPasswordRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
+    setup_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
@@ -164,6 +165,46 @@ def _require_bearer_user(authorization: Optional[str], db: Session) -> models.Us
     user = db.query(models.User).filter(models.User.id == payload.get("sub")).first()
     if not user or user.is_deleted or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or deactivated.")
+    return user
+
+
+def _require_password_setup_user(
+    *,
+    authorization: Optional[str],
+    setup_token: Optional[str],
+    db: Session,
+) -> models.User:
+    if authorization and authorization.startswith("Bearer "):
+        return _require_bearer_user(authorization, db)
+
+    if not setup_token:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "MISSING_SETUP_TOKEN",
+                "message": "Use a valid password setup link to set your password.",
+            },
+        )
+
+    payload = _token_service.validate_token(setup_token)
+    if not payload or payload.get("type") != "password_setup":
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_SETUP_TOKEN",
+                "message": "This password setup link is invalid or expired.",
+            },
+        )
+
+    user = db.query(models.User).filter(models.User.id == payload.get("sub")).first()
+    if not user or user.is_deleted or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_SETUP_TOKEN",
+                "message": "This password setup link is invalid or expired.",
+            },
+        )
     return user
 
 
@@ -372,12 +413,27 @@ def set_password(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """For Clerk migrants who have no password yet. Requires a valid access token."""
+    """For migrated users who have no password yet.
+
+    Accepts either an authenticated bearer session or a short-lived setup token.
+    Login must not mint this token from email alone, because that would let
+    anyone who knows a migrated user's email claim the account.
+    """
     ip, ua = _client_meta(request)
-    user = _require_bearer_user(authorization, db)
+    user = _require_password_setup_user(
+        authorization=authorization,
+        setup_token=body.setup_token,
+        db=db,
+    )
 
     if user.password_hash:
-        raise HTTPException(status_code=409, detail="Password already set. Use forgot-password to change it.")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PASSWORD_ALREADY_SET",
+                "message": "Password already set. Use forgot-password to change it.",
+            },
+        )
 
     errors = _password_service.validate_strength(body.password)
     if errors:
@@ -385,6 +441,8 @@ def set_password(
 
     user.password_hash = _password_service.hash_password(body.password)
     db.commit()
+    if body.setup_token:
+        _token_service.revoke_token(body.setup_token)
     audit.log_event("password_set", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
     return {"ok": True}
 
@@ -494,4 +552,3 @@ def revoke_session(
     audit.log_event("session_revoke", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua,
                     detail={"jti": jti})
     return {"ok": True}
-

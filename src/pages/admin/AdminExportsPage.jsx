@@ -21,6 +21,7 @@ import {
   Typography,
 } from "@mui/material";
 import { authFetch } from "../../utils/apiClient";
+import { apiUrl } from "../../utils/apiBaseUrl";
 import { useAdminApi } from "./useAdminApi";
 import { buildSearchParams, readStringParam } from "./adminSearchParams";
 import { formatDateTime } from "./adminUtils";
@@ -28,7 +29,7 @@ import { formatDateTime } from "./adminUtils";
 const exportTypes = ["all", "candidates", "interviews", "reports", "trials"];
 
 export default function AdminExportsPage() {
-  const { requestJson, apiBase } = useAdminApi();
+  const { requestJson } = useAdminApi();
   const { getToken } = useAuth();
   const { refreshTick, setLastRefreshedAt, tableDensity, triggerRefresh } = useOutletContext();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -84,7 +85,7 @@ export default function AdminExportsPage() {
     setNotice("");
     try {
       const token = await getToken();
-      const resp = await authFetch(`${apiBase}/api/admin/exports/${encodeURIComponent(row.id)}/download`, token, {
+      const resp = await authFetch(apiUrl(`/api/admin/exports/${encodeURIComponent(row.id)}/download`), token, {
         method: "GET",
       });
       if (!resp.ok) {

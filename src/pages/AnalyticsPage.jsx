@@ -33,7 +33,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authFetch } from '../utils/apiClient';
-import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { apiUrl } from '../utils/apiBaseUrl';
 import {
   LineChart,
   Line,
@@ -47,7 +47,6 @@ import {
 export default function AnalyticsPage() {
   const navigate = useNavigate();
   const { getToken } = useAuth();
-    const API_BASE_URL = getApiBaseUrl();
     const [anchorEl, setAnchorEl] = useState(null);
     const [selectedSession, setSelectedSession] = useState(null);
     const [summary, setSummary] = useState(null);
@@ -82,10 +81,10 @@ export default function AnalyticsPage() {
         try {
           const token = await getToken();
           const [summaryResp, trendsResp, skillsResp, reportsResp] = await Promise.all([
-            authFetch(`${API_BASE_URL}/api/analytics/summary`, token),
-            authFetch(`${API_BASE_URL}/api/analytics/trends`, token),
-            authFetch(`${API_BASE_URL}/api/analytics/skills`, token),
-            authFetch(`${API_BASE_URL}/api/interview/reports`, token),
+            authFetch(apiUrl("/api/analytics/summary"), token),
+            authFetch(apiUrl("/api/analytics/trends"), token),
+            authFetch(apiUrl("/api/analytics/skills"), token),
+            authFetch(apiUrl("/api/interview/reports"), token),
           ]);
 
           if (!mounted) return;
@@ -105,7 +104,7 @@ export default function AnalyticsPage() {
       };
       load();
       return () => { mounted = false; };
-    }, [getToken, API_BASE_URL]);
+    }, [getToken]);
 
     const skillsData = useMemo(() => {
       if (!skills) return [];

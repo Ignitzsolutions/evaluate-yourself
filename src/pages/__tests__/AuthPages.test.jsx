@@ -1,54 +1,75 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 import LoginPage from "../LoginPage";
 import RegisterPage from "../RegisterPage";
 import ForgotPasswordPage from "../ForgotPasswordPage";
+import SetPasswordPage from "../SetPasswordPage";
 
-const mockSignIn = jest.fn((props) => <div data-testid="sign-in-props">{JSON.stringify(props)}</div>);
-const mockSignUp = jest.fn((props) => <div data-testid="sign-up-props">{JSON.stringify(props)}</div>);
+const mockLogin = jest.fn();
+const mockRegister = jest.fn();
+const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
 
-jest.mock("@clerk/clerk-react", () => ({
-  SignIn: (props) => mockSignIn(props),
-  SignUp: (props) => mockSignUp(props),
+jest.mock("../../context/AuthContext", () => ({
+  useAuthActions: () => ({
+    login: mockLogin,
+    register: mockRegister,
+    signOut: jest.fn(),
+    completeMfaLogin: jest.fn(),
+  }),
 }));
 
 describe("auth pages", () => {
   beforeEach(() => {
-    mockSignIn.mockClear();
-    mockSignUp.mockClear();
+    mockLogin.mockClear();
+    mockRegister.mockClear();
   });
 
-  test("register page mounts SignUp on the register path", () => {
-    render(<RegisterPage />);
+  test("register page shows the account creation flow", () => {
+    render(
+      <MemoryRouter future={routerFuture}>
+        <RegisterPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/start practicing interviews/i)).toBeInTheDocument();
-    expect(mockSignUp.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/register",
-      routing: "path",
-      signInUrl: "/login",
-    }));
+    expect(screen.getByText(/start practicing interviews with a setup that actually feels serious/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create account/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
   });
 
-  test("forgot password page mounts SignIn on the forgot-password path", () => {
-    render(<ForgotPasswordPage />);
+  test("forgot password page shows the recovery flow", () => {
+    render(
+      <MemoryRouter future={routerFuture}>
+        <ForgotPasswordPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/reset access without guessing/i)).toBeInTheDocument();
-    expect(mockSignIn.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/forgot-password",
-      routing: "path",
-      initialStep: "forgot-password",
-    }));
+    expect(screen.getByText(/reset your password/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to sign in/i })).toBeInTheDocument();
   });
 
-  test("login page keeps the dedicated sign-in route", () => {
-    render(<LoginPage />);
+  test("set password page requires a secure setup token", () => {
+    render(
+      <MemoryRouter initialEntries={["/set-password"]} future={routerFuture}>
+        <SetPasswordPage />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/build interview confidence/i)).toBeInTheDocument();
-    expect(mockSignIn.mock.calls[0][0]).toEqual(expect.objectContaining({
-      path: "/login",
-      routing: "path",
-      signUpUrl: "/register",
-    }));
+    expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs a secure setup token/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /set password/i })).toBeDisabled();
+  });
+
+  test("login page shows the sign-in flow", () => {
+    render(
+      <MemoryRouter future={routerFuture}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/build interview confidence with realtime coaching/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 });

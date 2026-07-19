@@ -8,7 +8,6 @@ Create Date: 2026-04-05
 from alembic import op
 import sqlalchemy as sa
 
-
 revision = "20260405_0011"
 down_revision = "20260318_0010"
 branch_labels = None
@@ -33,13 +32,33 @@ def upgrade() -> None:
             sa.Column("intent", sa.String(), nullable=False),
             sa.Column("status", sa.String(), nullable=False),
             sa.Column("meta_json", sa.Text(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=True,
+            ),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index("ix_launch_waitlist_signups_normalized_email", "launch_waitlist_signups", ["normalized_email"], unique=True)
-        op.create_index("ix_launch_waitlist_signups_source_page", "launch_waitlist_signups", ["source_page"], unique=False)
-        op.create_index("ix_launch_waitlist_signups_created_at", "launch_waitlist_signups", ["created_at"], unique=False)
+        op.create_index(
+            "ix_launch_waitlist_signups_normalized_email",
+            "launch_waitlist_signups",
+            ["normalized_email"],
+            unique=True,
+        )
+        op.create_index(
+            "ix_launch_waitlist_signups_source_page",
+            "launch_waitlist_signups",
+            ["source_page"],
+            unique=False,
+        )
+        op.create_index(
+            "ix_launch_waitlist_signups_created_at",
+            "launch_waitlist_signups",
+            ["created_at"],
+            unique=False,
+        )
 
     if "trial_feedback" not in tables:
         op.create_table(
@@ -52,18 +71,34 @@ def upgrade() -> None:
             sa.Column("rating", sa.Integer(), nullable=False),
             sa.Column("comment", sa.Text(), nullable=True),
             sa.Column("plan_tier", sa.String(), nullable=True),
-            sa.Column("trial_mode", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("trial_mode", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("source", sa.String(), nullable=False, server_default="post_trial_report"),
-            sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
+            sa.Column(
+                "submitted_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=True,
+            ),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index("ix_trial_feedback_report_id", "trial_feedback", ["report_id"], unique=True)
-        op.create_index("ix_trial_feedback_session_id", "trial_feedback", ["session_id"], unique=False)
+        op.create_index(
+            "ix_trial_feedback_session_id", "trial_feedback", ["session_id"], unique=False
+        )
         op.create_index("ix_trial_feedback_user_id", "trial_feedback", ["user_id"], unique=False)
-        op.create_index("ix_trial_feedback_clerk_user_id", "trial_feedback", ["clerk_user_id"], unique=False)
-        op.create_index("ix_trial_feedback_submitted_at", "trial_feedback", ["submitted_at"], unique=False)
+        op.create_index(
+            "ix_trial_feedback_clerk_user_id", "trial_feedback", ["clerk_user_id"], unique=False
+        )
+        op.create_index(
+            "ix_trial_feedback_submitted_at", "trial_feedback", ["submitted_at"], unique=False
+        )
 
 
 def downgrade() -> None:
@@ -80,6 +115,10 @@ def downgrade() -> None:
 
     if "launch_waitlist_signups" in tables:
         op.drop_index("ix_launch_waitlist_signups_created_at", table_name="launch_waitlist_signups")
-        op.drop_index("ix_launch_waitlist_signups_source_page", table_name="launch_waitlist_signups")
-        op.drop_index("ix_launch_waitlist_signups_normalized_email", table_name="launch_waitlist_signups")
+        op.drop_index(
+            "ix_launch_waitlist_signups_source_page", table_name="launch_waitlist_signups"
+        )
+        op.drop_index(
+            "ix_launch_waitlist_signups_normalized_email", table_name="launch_waitlist_signups"
+        )
         op.drop_table("launch_waitlist_signups")

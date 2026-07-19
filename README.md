@@ -1,4 +1,4 @@
-
+z
 
 <p align="center">
 	<img src="public/assets/logo.png" alt="Evaluate Yourself Logo" width="220" />
@@ -85,3 +85,8 @@ Root-level legacy setup notes were moved into [`docs/guides/`](docs/guides/READM
 ## License
 
 This project is released under the terms of the MIT License. See `LICENSE` for details.
+## Database Entity Relationship Diagram (ERD)
+
+The following diagram shows the database design of the AI Self-Evaluation Platform.
+
+![ER Diagram](docs/images/erd-diagram.png)

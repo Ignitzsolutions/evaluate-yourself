@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../utils/devAuthBypass";
 
 const AuthContext = createContext(null);
-const API_BASE = getApiBaseUrl();
 
 function decodePayload(token) {
   try {
@@ -50,7 +49,7 @@ export function AuthProvider({ children }) {
     const refreshToken = localStorage.getItem("refresh_token");
     if (!refreshToken) return false;
     try {
-      const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
+      const resp = await fetch(apiUrl("/api/auth/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -70,7 +69,7 @@ export function AuthProvider({ children }) {
 
   const fetchMe = useCallback(async (token) => {
     try {
-      const resp = await fetch(`${API_BASE}/api/me`, {
+      const resp = await fetch(apiUrl("/api/me"), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (resp.ok) {
@@ -121,10 +120,34 @@ export function AuthProvider({ children }) {
   }, [devBypass, tryRefresh]);
 
   const login = useCallback(async (email, password) => {
-    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+    const resp = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw data?.error || data;
+    // MFA challenge or admin MFA enrollment: don't persist tokens — the
+    // caller routes the user to /mfa-challenge or /admin/mfa-enroll using
+    // the short-lived mfa_token.
+    if (data?.mfa_required) {
+      return data;
+    }
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token);
+    setUser(data.user);
+    setIsSignedIn(true);
+    scheduleRefresh();
+    return data;
+  }, [scheduleRefresh]);
+
+  // Used after MFA enrollment confirms — exchanges the mfa_token for a real
+  // session by calling /api/auth/login/mfa with the verification code.
+  const completeMfaLogin = useCallback(async (mfaToken, code) => {
+    const resp = await fetch(apiUrl("/api/auth/login/mfa"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mfa_token: mfaToken, code }),
     });
     const data = await resp.json();
     if (!resp.ok) throw data?.error || data;
@@ -137,7 +160,7 @@ export function AuthProvider({ children }) {
   }, [scheduleRefresh]);
 
   const register = useCallback(async (email, password, fullName) => {
-    const resp = await fetch(`${API_BASE}/api/auth/register`, {
+    const resp = await fetch(apiUrl("/api/auth/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, full_name: fullName }),
@@ -156,7 +179,7 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem("access_token");
     const refresh = localStorage.getItem("refresh_token");
     try {
-      await fetch(`${API_BASE}/api/auth/logout`, {
+      await fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -168,7 +191,7 @@ export function AuthProvider({ children }) {
     clearAuth();
   }, [clearAuth]);
 
-  const value = { user, isLoaded, isSignedIn, getToken, login, register, signOut };
+  const value = { user, isLoaded, isSignedIn, getToken, login, completeMfaLogin, register, signOut };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -194,5 +217,5 @@ export function useClerk() {
 export function useAuthActions() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuthActions must be used within AuthProvider");
-  return { login: ctx.login, register: ctx.register, signOut: ctx.signOut };
+  return { login: ctx.login, register: ctx.register, signOut: ctx.signOut, completeMfaLogin: ctx.completeMfaLogin };
 }

@@ -7,6 +7,12 @@ export default function AuthShell({
   highlights = [],
   children,
 }) {
+  const statusItems = [
+    ["Access", "Free launch"],
+    ["Runtime", "Live workspace"],
+    ["Reports", "Saved evidence"],
+  ];
+
   return (
     <div className="clerk-shell">
       <div className="clerk-bg-orb orb-a" />
@@ -16,13 +22,20 @@ export default function AuthShell({
       <section className="clerk-panel">
         <div className="clerk-hero">
           <div className="clerk-brand-row">
-            <div className="clerk-brand-mark" />
+            <img
+              src="/assets/logo.png"
+              alt="Evaluate Yourself logo"
+              width="44"
+              height="44"
+              className="clerk-brand-mark"
+            />
             <div>
               <div className="clerk-brand-name">Evaluate Yourself</div>
-              <div className="clerk-brand-sub">{eyebrow}</div>
+              <div className="clerk-brand-sub">An Ignitz product</div>
             </div>
           </div>
 
+          <div className="clerk-eyebrow">{eyebrow}</div>
           <h1>{title}</h1>
           <p>{subtitle}</p>
 
@@ -36,6 +49,19 @@ export default function AuthShell({
               ))}
             </div>
           )}
+
+          <div className="clerk-hero-note">
+            Designed as an interview workspace, not a generic SaaS dashboard. The focus is on clarity, state, and the live coaching loop.
+          </div>
+
+          <dl className="clerk-status-strip" aria-label="Workspace status">
+            {statusItems.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <div className="clerk-form-wrap">{children}</div>

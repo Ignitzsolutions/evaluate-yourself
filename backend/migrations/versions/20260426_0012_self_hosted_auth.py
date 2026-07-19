@@ -18,8 +18,14 @@ depends_on = None
 def upgrade():
     # --- Add new columns ---
     op.add_column("users", sa.Column("password_hash", sa.String(255), nullable=True))
-    op.add_column("users", sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("0")))
-    op.add_column("users", sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column(
+        "users",
+        sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
+    op.add_column(
+        "users",
+        sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
 
     # --- Make clerk_user_id nullable ---
     with op.batch_alter_table("users") as batch_op:
@@ -29,7 +35,7 @@ def upgrade():
     conn = op.get_bind()
 
     # All existing users came through Clerk, so their emails are verified
-    conn.execute(sa.text("UPDATE users SET email_verified = 1 WHERE email IS NOT NULL"))
+    conn.execute(sa.text("UPDATE users SET email_verified = true WHERE email IS NOT NULL"))
 
     # Seed admin flag from the env-var allowlist used until now
     admin_ids_raw = os.getenv("ADMIN_CLERK_USER_IDS", "")
@@ -38,7 +44,7 @@ def upgrade():
         placeholders = ", ".join(f":id{i}" for i in range(len(admin_ids)))
         params = {f"id{i}": v for i, v in enumerate(admin_ids)}
         conn.execute(
-            sa.text(f"UPDATE users SET is_admin = 1 WHERE clerk_user_id IN ({placeholders})"),
+            sa.text(f"UPDATE users SET is_admin = true WHERE clerk_user_id IN ({placeholders})"),
             params,
         )
 

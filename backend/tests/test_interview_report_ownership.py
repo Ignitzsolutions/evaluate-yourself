@@ -154,7 +154,7 @@ def test_report_owner_check_uses_internal_user_id(monkeypatch):
 
 def test_report_user_id_backfill_converts_clerk_ids_and_leaves_unknowns():
     migration = importlib.import_module(
-        "backend.migrations.versions.20260501_0015_interview_report_user_id_backfill"
+        "backend.migrations.versions.20260719_0016_interview_report_user_id_backfill"
     )
     engine = create_engine("sqlite:///:memory:")
     with engine.begin() as conn:

@@ -21,11 +21,12 @@ export default function LoginPage() {
       await login(email, password);
       navigate("/onboarding");
     } catch (err) {
-      if (err?.code === "PASSWORD_NOT_SET") {
-        navigate("/set-password", { state: { email } });
+      const detail = err?.detail || err?.error || err;
+      if (detail?.code === "PASSWORD_NOT_SET") {
+        navigate("/set-password", { state: { email, setupToken: detail?.setup_token } });
         return;
       }
-      setError(err?.message || err?.detail || "Login failed.");
+      setError(detail?.message || err?.message || "Login failed.");
     } finally {
       setLoading(false);
     }
@@ -47,14 +48,14 @@ export default function LoginPage() {
       </Typography>
       <form onSubmit={handleSubmit}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <TextField label="Email" type="email" fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
-        <TextField label="Password" type="password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Email" name="email" type="email" autoComplete="email" spellCheck={false} fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Password" name="password" type="password" autoComplete="current-password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
         <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ mb: 1.5, py: 1.2 }}>
           {loading ? <CircularProgress size={20} color="inherit" /> : "Sign In"}
         </Button>
         <Box sx={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-          <Link to="/forgot-password" style={{ color: "#2563eb" }}>Forgot password?</Link>
-          <Link to="/register" style={{ color: "#2563eb" }}>Create account</Link>
+          <Link to="/forgot-password" style={{ color: "#0f766e" }}>Forgot password?</Link>
+          <Link to="/register" style={{ color: "#0f766e" }}>Create account</Link>
         </Box>
       </form>
     </AuthShell>

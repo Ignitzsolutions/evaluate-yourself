@@ -1,10 +1,8 @@
 import { useCallback } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { authFetch, throwForResponse } from "../../utils/apiClient";
-import { getApiBaseUrl } from "../../utils/apiBaseUrl";
+import { apiUrl } from "../../utils/apiBaseUrl";
 import { isDevAuthBypassEnabled } from "../../utils/devAuthBypass";
-
-const API_BASE = getApiBaseUrl();
 
 export function useAdminApi() {
   const { getToken } = useAuth();
@@ -16,7 +14,7 @@ export function useAdminApi() {
       if (!token && !devBypass) {
         throw new Error("Authentication required.");
       }
-      const resp = await authFetch(`${API_BASE}${path}`, token, options);
+      const resp = await authFetch(apiUrl(path), token, options);
       await throwForResponse(resp, {
         defaultMessage: `Request failed: ${resp.status}`,
       });
@@ -25,5 +23,5 @@ export function useAdminApi() {
     [devBypass, getToken],
   );
 
-  return { requestJson, apiBase: API_BASE };
+  return { requestJson };
 }

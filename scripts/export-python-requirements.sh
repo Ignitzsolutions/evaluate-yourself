@@ -17,7 +17,6 @@ uv export \
   --no-dev \
   --no-group test \
   --no-editable \
-  --no-emit-project \
   --no-hashes \
   --output-file requirements.txt
 

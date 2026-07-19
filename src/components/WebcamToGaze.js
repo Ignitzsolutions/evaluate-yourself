@@ -3,12 +3,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { useGazeSocket } from "../hooks/useGazeSocket";
 import { Box, Button, Typography, Paper } from "@mui/material";
 import { Videocam, VideocamOff, Wifi, WifiOff } from "@mui/icons-material";
+import { wsUrl } from "../utils/apiBaseUrl";
 
 export default function WebcamToGaze() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [running, setRunning] = useState(false);
-  const { connected, connect, disconnect, sendFrame, metrics } = useGazeSocket("ws://localhost:8000/ws");
+  const { connected, connect, disconnect, sendFrame, metrics } = useGazeSocket(wsUrl("/ws"));
 
   useEffect(() => {
     (async () => {

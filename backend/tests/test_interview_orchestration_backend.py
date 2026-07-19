@@ -105,6 +105,16 @@ def test_free_access_mode_resolves_to_free_plan_without_entitlement():
     assert app_module._effective_duration_minutes(90, plan_tier, entitlement) == 90
 
 
+def test_openai_native_realtime_guard_rejects_unimplemented_provider(monkeypatch):
+    monkeypatch.setattr(app_module, "AI_PROVIDER", "sarvam_hybrid")
+
+    with pytest.raises(app_module.HTTPException) as exc_info:
+        app_module._require_openai_native_realtime()
+
+    assert exc_info.value.status_code == 501
+    assert "AI_PROVIDER" in str(exc_info.value.detail)
+
+
 def test_persistence_module_supports_backend_script_import_path():
     repo_root = Path(__file__).resolve().parents[2]
     backend_dir = repo_root / "backend"

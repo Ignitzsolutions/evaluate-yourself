@@ -1,0 +1,14 @@
+---
+description: Testing rules
+globs:
+  - "src/**/*.test.jsx"
+  - "src/**/*.test.js"
+  - "tests/**/*"
+alwaysApply: false
+---
+
+Prefer focused regression tests over broad snapshots.
+
+Cover loading, empty, error, and success states when the route can reach them.
+
+Tests should assert user-visible behavior, not implementation details.

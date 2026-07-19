@@ -1,7 +1,7 @@
 const VALID_ACCESS_MODES = new Set(["free", "trial"]);
 export const INTERVIEW_CONFIG_STORAGE_KEY = "interviewConfig";
 const VALID_INTERVIEW_TYPES = new Set(["behavioral", "technical", "mixed"]);
-const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
+export const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
 const DEFAULT_DURATION = 10;
 const VALID_DURATIONS = new Set([10, 15, 20, 30, 45, 60]);
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard"]);

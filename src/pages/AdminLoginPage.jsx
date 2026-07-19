@@ -4,10 +4,8 @@ import { TextField, Button, Alert, CircularProgress, Box } from "@mui/material";
 import AuthShell from "../components/AuthShell";
 import { useAuth, useAuthActions } from "../context/AuthContext";
 import { authFetch } from "../utils/apiClient";
-import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { apiUrl } from "../utils/apiBaseUrl";
 import "../ui.css";
-
-const API_BASE = getApiBaseUrl();
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -28,7 +26,7 @@ export default function AdminLoginPage() {
       try {
         const token = await getToken();
         if (!token) { setCheckingAdmin(false); return; }
-        const resp = await authFetch(`${API_BASE}/api/me`, token, { method: "GET" });
+        const resp = await authFetch(apiUrl("/api/me"), token, { method: "GET" });
         if (resp.ok) {
           const data = await resp.json();
           if (!cancelled) {
@@ -51,6 +49,21 @@ export default function AdminLoginPage() {
     setLoading(true);
     try {
       const data = await login(email, password);
+      // MFA path: backend tells us if the admin needs to enrol or just respond.
+      if (data?.mfa_required) {
+        // Stash the short-lived mfa_token where the next step can pick it up.
+        sessionStorage.setItem("ey.mfaToken", data.mfa_token || "");
+        if (data.mfa_enroll_required) {
+          // First-time admin: route through the enrollment flow.
+          navigate("/admin/mfa-enroll");
+        } else {
+          // Existing MFA user: drop into the challenge page (or admin login
+          // surface, which can render the 6-digit prompt inline). For now
+          // we reuse the enrollment page UI which handles the same shape.
+          navigate("/admin/mfa-enroll");
+        }
+        return;
+      }
       if (data.user?.is_admin) {
         navigate("/admin/dashboard");
       } else {
@@ -88,8 +101,8 @@ export default function AdminLoginPage() {
     <AuthShell eyebrow="Admin Portal" title="Admin Sign In" subtitle="Sign in with your admin credentials.">
       <form onSubmit={handleSubmit}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <TextField label="Email" type="email" fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
-        <TextField label="Password" type="password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Email" name="email" type="email" autoComplete="email" spellCheck={false} fullWidth required value={email} onChange={(e) => setEmail(e.target.value)} sx={{ mb: 2 }} size="small" />
+        <TextField label="Password" name="password" type="password" autoComplete="current-password" fullWidth required value={password} onChange={(e) => setPassword(e.target.value)} sx={{ mb: 2 }} size="small" />
         <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ py: 1.2 }}>
           {loading ? <CircularProgress size={20} color="inherit" /> : "Sign In as Admin"}
         </Button>
