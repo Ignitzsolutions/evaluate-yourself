@@ -128,8 +128,6 @@ from reportlab.graphics.shapes import Drawing, Rect, String
 from db.database import DATABASE_URL, SessionLocal, engine
 from db import models
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import OperationalError
 from db.models import User
 from fastapi import Depends
 
@@ -143,9 +141,6 @@ from db.users import (
 )
 
 import logging
-
-if os.getenv("ENV", "development").strip().lower() not in {"production", "prod"}:
-    models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI Interview Backend", version="1.0.0")
 
@@ -240,8 +235,15 @@ def _parse_admin_allowlist(raw: Optional[str]) -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def _resolve_env_value() -> str:
+    return os.getenv(
+        "ENV",
+        os.getenv("APP_ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))),
+    ).strip().lower()
+
+
 # Resolve environment mode once and reuse.
-_env_value = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("PYTHON_ENV", ""))).strip().lower()
+_env_value = _resolve_env_value()
 is_production = _env_value == "production"
 
 ADMIN_CLERK_USER_IDS = _parse_admin_allowlist(os.getenv("ADMIN_CLERK_USER_IDS", ""))
@@ -413,75 +415,10 @@ def validate_production_requirements(
         )
 
 
-def run_startup_migrations_if_enabled() -> None:
-    """Apply Alembic migrations during production boot when explicitly enabled."""
-    enabled = os.getenv("RUN_DB_MIGRATIONS_ON_STARTUP", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not enabled or not is_production:
-        return
-    if not os.getenv("DATABASE_URL"):
-        logging.warning("Skipping startup migrations because DATABASE_URL is not set")
-        return
-
-    try:
-        with engine.begin() as connection:
-            inspector = inspect(connection)
-            if inspector.has_table("users"):
-                user_columns = {column["name"] for column in inspector.get_columns("users")}
-                if "password_hash" not in user_columns:
-                    connection.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)"
-                        )
-                    )
-                if "is_admin" not in user_columns:
-                    connection.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
-                        )
-                    )
-                if "email_verified" not in user_columns:
-                    connection.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE"
-                        )
-                    )
-                if "clerk_user_id" in user_columns:
-                    connection.execute(
-                        text("ALTER TABLE users ALTER COLUMN clerk_user_id DROP NOT NULL")
-                    )
-                connection.execute(
-                    text("UPDATE users SET email_verified = TRUE WHERE email IS NOT NULL")
-                )
-
-            if not inspector.has_table("alembic_version"):
-                logging.warning(
-                    "Skipping full Alembic upgrade because alembic_version is absent on an existing database"
-                )
-                return
-
-        from alembic import command
-        from alembic.config import Config
-
-        backend_dir = Path(__file__).resolve().parent
-        config = Config(str(backend_dir / "alembic.ini"))
-        logging.info("Applying database migrations at startup")
-        command.upgrade(config, "head")
-        logging.info("Database migrations are at Alembic head")
-    except Exception:
-        logging.exception("Database migration failed during startup")
-        raise
-
-
 # Run validation on startup
 @app.on_event("startup")
 async def startup_event():
     validate_production_requirements()
-    run_startup_migrations_if_enabled()
     # Keep auth/profile/report routes online even when the realtime provider is not
     # configured. Realtime endpoints still fail explicitly at request time.
     validate_environment(strict=False)
@@ -4721,7 +4658,7 @@ async def list_interview_reports(
     """List interview reports for the authenticated user only."""
     try:
         current_user = get_current_user(authorization=authorization, db=db)
-        user_id = current_user.clerk_user_id
+        user_id = current_user.id
     except HTTPException:
         raise
     except Exception:
@@ -5298,7 +5235,7 @@ async def upsert_report_feedback(
 ):
     """Persist post-interview user feedback into report metrics."""
     current_user = get_current_user(authorization=authorization, db=db)
-    user_id = current_user.clerk_user_id
+    user_id = current_user.id
 
     report = db.query(models.InterviewReport).filter(models.InterviewReport.id == report_id).first()
     if not report:
@@ -5401,9 +5338,8 @@ async def analytics_summary(
     authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
 ):
     """Return summary analytics for the current user."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
     reports = (
         db.query(models.InterviewReport)
@@ -5443,9 +5379,8 @@ async def analytics_trends(
     authorization: Optional[str] = Header(None), range: str = "30d", db: Session = Depends(get_db)
 ):
     """Return trend data for charts."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
     # Simple: return last 20 sessions ordered by date
     reports = (
@@ -5481,9 +5416,8 @@ async def analytics_skills(
     authorization: Optional[str] = Header(None), range: str = "30d", db: Session = Depends(get_db)
 ):
     """Return skill breakdown averages."""
-    user_id = get_user_id_from_auth(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = get_current_user(authorization=authorization, db=db)
+    user_id = current_user.id
 
     reports = (
         db.query(models.InterviewReport)
@@ -5549,7 +5483,9 @@ async def get_interview_report(
     report_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
 ):
     try:
-        user_id = get_user_id_from_auth(authorization)
+        user_id = None
+        if authorization or DEV_AUTH_BYPASS:
+            user_id = get_current_user(authorization=authorization, db=db).id
 
         # Try to find report by ID first, then by session_id
         report = (
@@ -5956,7 +5892,7 @@ async def create_interview_report(
         if not current_user:
             raise HTTPException(status_code=401, detail="Authentication required")
 
-        user_id = current_user.clerk_user_id
+        user_id = current_user.id
 
         report = models.InterviewReport(
             id=str(uuid.uuid4()),
@@ -5968,8 +5904,10 @@ async def create_interview_report(
             mode=request.mode,
             duration=request.duration,
             overall_score=request.overall_score,
-            scores=json.dumps(request.scores),
-            transcript=json.dumps(request.transcript),
+            scores=json.dumps(request.scores.model_dump()),
+            transcript=json.dumps(
+                [entry.model_dump(mode="json") for entry in request.transcript]
+            ),
             recommendations=json.dumps(request.recommendations),
             questions=json.dumps(request.questions),
             is_sample=False,
@@ -6876,6 +6814,7 @@ async def save_interview_transcript(
         # Resolve report owner from authenticated caller only.
         current_user = get_current_user(authorization=authorization, db=db)
         user_id = current_user.clerk_user_id
+        report_user_id = current_user.id
 
         session_row = (
             db.query(models.InterviewSession)
@@ -7233,7 +7172,7 @@ async def save_interview_transcript(
                 db_report = models.InterviewReport(
                     id=str(uuid.uuid4()),
                     session_id=session_id,
-                    user_id=user_id,
+                    user_id=report_user_id,
                     title=report_data.title,
                     date=datetime.now(),
                     type=report_data.type,
@@ -7300,12 +7239,12 @@ async def save_interview_transcript(
                 existing_report.metrics = json.dumps(merged_existing_metrics)
                 existing_report.transcript = json.dumps(ordered_messages)
                 existing_report.overall_score = final_overall
-                if existing_report.user_id in (None, "", "guest") and user_id not in (
+                if existing_report.user_id in (None, "", "guest") and report_user_id not in (
                     None,
                     "",
                     "guest",
                 ):
-                    existing_report.user_id = user_id
+                    existing_report.user_id = report_user_id
 
                 if final_overall <= 0:
                     existing_report.scores = json.dumps(_zero_score_breakdown())
@@ -7574,6 +7513,18 @@ async def gaze_websocket_for_session(websocket: WebSocket, session_id: str):
 async def legacy_gaze_websocket(websocket: WebSocket):
     """Legacy unauthenticated gaze websocket kept for local utility tooling."""
     await websocket.accept()
+    if is_production:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "error": "Legacy unauthenticated gaze websocket is disabled in production. Use /ws/gaze/{session_id}.",
+                }
+            )
+        )
+        await websocket.close(code=1008, reason="Legacy websocket disabled in production")
+        return
+
     tracker = GazeSessionTracker()
     try:
         while True:
