@@ -37,6 +37,11 @@ import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import {
   LineChart,
   Line,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -54,6 +59,7 @@ export default function AnalyticsPage() {
     const [trends, setTrends] = useState([]);
     const [skills, setSkills] = useState(null);
     const [recent, setRecent] = useState([]);
+    const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
   
     const handleMenuClick = (event, session) => {
@@ -81,11 +87,12 @@ export default function AnalyticsPage() {
       const load = async () => {
         try {
           const token = await getToken();
-          const [summaryResp, trendsResp, skillsResp, reportsResp] = await Promise.all([
+          const [summaryResp, trendsResp, skillsResp, reportsResp, profileResp] = await Promise.all([
             authFetch(`${API_BASE_URL}/api/analytics/summary`, token),
             authFetch(`${API_BASE_URL}/api/analytics/trends`, token),
             authFetch(`${API_BASE_URL}/api/analytics/skills`, token),
             authFetch(`${API_BASE_URL}/api/interview/reports`, token),
+            authFetch(`${API_BASE_URL}/api/profile`, token),
           ]);
 
           if (!mounted) return;
@@ -96,6 +103,10 @@ export default function AnalyticsPage() {
           if (reportsResp.ok) {
             const reportList = await reportsResp.json();
             setRecent(reportList.slice(0, 5));
+          }
+          if (profileResp.ok) {
+            const profilePayload = await profileResp.json();
+            setProfile(profilePayload.profile || null);
           }
         } catch (e) {
           console.error('Analytics load failed:', e);
@@ -118,6 +129,21 @@ export default function AnalyticsPage() {
     }, [skills]);
 
     const userStats = summary || { total_sessions: 0, avg_score: 0, improvement_pct: 0, practice_hours: 0 };
+
+    const skillGapData = useMemo(() => {
+      const claimed = Array.isArray(profile?.skillsSelfReported) ? profile.skillsSelfReported : [];
+      return claimed
+        .filter((item) => item && typeof item === 'object' && item.label)
+        .slice(0, 8)
+        .map((item) => {
+          const measured = skills?.[item.key] ?? skills?.technical ?? recent[0]?.confidenceScore ?? 0;
+          return {
+            skill: item.label,
+            claimed: Math.round((Number(item.rating || 0) / 5) * 100),
+            measured: Number(measured || 0),
+          };
+        });
+    }, [profile, skills, recent]);
   if (loading) {
     return (
       <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -338,6 +364,32 @@ export default function AnalyticsPage() {
           </Card>
         </Grid>
 
+        <Grid item xs={12}>
+          <Card sx={{ height: 420 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Claimed vs Measured Skill Gaps
+              </Typography>
+              {skillGapData.length ? (
+                <ResponsiveContainer width="100%" height={340}>
+                  <RadarChart data={skillGapData}>
+                    <PolarGrid />
+                    <PolarAngleAxis dataKey="skill" tick={{ fontSize: 12 }} />
+                    <PolarRadiusAxis angle={90} domain={[0, 100]} />
+                    <Radar name="Claimed" dataKey="claimed" stroke="#1976d2" fill="#1976d2" fillOpacity={0.18} />
+                    <Radar name="Measured" dataKey="measured" stroke="#2e7d32" fill="#2e7d32" fillOpacity={0.18} />
+                    <Tooltip />
+                  </RadarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 300 }}>
+                  <Typography color="text.secondary">Add skill self-ratings and complete interviews to compare claimed and measured performance.</Typography>
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Recent Sessions */}
         <Grid item xs={12}>
           <Card>
@@ -360,16 +412,21 @@ export default function AnalyticsPage() {
                     <TableRow>
                       <TableCell>Date</TableCell>
                       <TableCell>Type</TableCell>
-                      <TableCell>Duration</TableCell>
+                      <TableCell>Track</TableCell>
+                      <TableCell>Difficulty</TableCell>
+                      <TableCell>Gap</TableCell>
                       <TableCell>Score</TableCell>
-                      <TableCell>Status</TableCell>
+                      <TableCell>Delta</TableCell>
+                      <TableCell>Retake</TableCell>
+                      <TableCell>Fillers</TableCell>
+                      <TableCell>Confidence</TableCell>
                       <TableCell>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {recent.map((session) => (
                       <TableRow key={session.id} hover>
-                        <TableCell>{session.date}</TableCell>
+                        <TableCell>{new Date(session.date).toLocaleDateString()}</TableCell>
                         <TableCell>
                           <Chip
                             label={session.type}
@@ -378,7 +435,9 @@ export default function AnalyticsPage() {
                               session.type === 'Behavioral' ? 'secondary' : 'default'}
                           />
                         </TableCell>
-                        <TableCell>{session.duration || session.mode || '-'}</TableCell>
+                        <TableCell>{session.track || '-'}</TableCell>
+                        <TableCell>{session.difficulty || '-'}</TableCell>
+                        <TableCell>{session.topGap || '-'}</TableCell>
                         <TableCell>
                           <Chip
                             label={`${session.score}%`}
@@ -386,14 +445,14 @@ export default function AnalyticsPage() {
                             size="small"
                           />
                         </TableCell>
+                        <TableCell>{session.improvementDelta == null ? '-' : `${session.improvementDelta > 0 ? '+' : ''}${session.improvementDelta}%`}</TableCell>
                         <TableCell>
-                          <Chip
-                            label={session.status || 'completed'}
-                            color="success"
-                            size="small"
-                            variant="outlined"
-                          />
+                          {(session.retakeDeltas || []).some((item) => item.improvementPct != null)
+                            ? `${session.retakeDeltas.find((item) => item.improvementPct != null).improvementPct > 0 ? '+' : ''}${session.retakeDeltas.find((item) => item.improvementPct != null).improvementPct}%`
+                            : '-'}
                         </TableCell>
+                        <TableCell>{session.fillerWordRate == null ? '-' : `${session.fillerWordRate}/100`}</TableCell>
+                        <TableCell>{session.confidenceScore == null ? '-' : `${session.confidenceScore}%`}</TableCell>
                         <TableCell>
                           <IconButton
                             onClick={(e) => handleMenuClick(e, session)}

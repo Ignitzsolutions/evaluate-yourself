@@ -19,6 +19,7 @@ import {
   Grid,
   InputLabel,
   MenuItem,
+  Paper,
   Rating,
   Select,
   Stack,
@@ -127,6 +128,14 @@ const initialForm = {
   careerTransitionIntent: "",
   noticePeriodBand: "",
   interviewFormat: "",
+  targetJobDescription: "",
+  targetJobUrl: "",
+  linkedinUrl: "",
+  githubUrl: "",
+  portfolioUrl: "",
+  resumeText: "",
+  resumeDraft: null,
+  baselineCapture: null,
 };
 
 const extrasStorageKey = "onboardingProfileExtras";
@@ -148,6 +157,14 @@ function writeExtras(form) {
       seniorityLevel: form.seniorityLevel,
       interviewFormat: form.interviewFormat,
       skillRatings: form.skillRatings,
+      targetJobDescription: form.targetJobDescription,
+      targetJobUrl: form.targetJobUrl,
+      linkedinUrl: form.linkedinUrl,
+      githubUrl: form.githubUrl,
+      portfolioUrl: form.portfolioUrl,
+      resumeText: form.resumeText,
+      resumeDraft: form.resumeDraft,
+      baselineCapture: form.baselineCapture,
     }),
   );
 }
@@ -282,6 +299,11 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [resumeParsing, setResumeParsing] = useState(false);
+  const [resumeDraft, setResumeDraft] = useState(null);
+  const [resumeGap, setResumeGap] = useState(null);
+  const [baselineStatus, setBaselineStatus] = useState("idle");
+  const [baselineRecorder, setBaselineRecorder] = useState(null);
   const [form, setForm] = useState(() => ({ ...initialForm, ...readExtras() }));
 
   useEffect(() => {
@@ -339,6 +361,14 @@ export default function OnboardingPage() {
           seniorityLevel: profile.seniority || profile.careerCompBand || extras.seniorityLevel || "",
           yearsOfExperience: profile.yearsOfExperience != null ? String(profile.yearsOfExperience) : (extras.yearsOfExperience || (Number.isFinite(parsedYears) ? String(parsedYears) : "")),
           interviewFormat: profile.targetInterviewFormat || extras.interviewFormat || "",
+          targetJobDescription: profile.targetJobDescription || profile.candidateProfileV2?.targetJobDescription || extras.targetJobDescription || "",
+          targetJobUrl: profile.targetJobUrl || profile.candidateProfileV2?.targetJobUrl || extras.targetJobUrl || "",
+          linkedinUrl: profile.linkedinUrl || profile.candidateProfileV2?.linkedinUrl || extras.linkedinUrl || "",
+          githubUrl: profile.githubUrl || profile.candidateProfileV2?.githubUrl || extras.githubUrl || "",
+          portfolioUrl: profile.portfolioUrl || profile.candidateProfileV2?.portfolioUrl || extras.portfolioUrl || "",
+          resumeText: profile.resumeText || profile.candidateProfileV2?.resumeText || extras.resumeText || "",
+          resumeDraft: profile.resumeDraft || profile.candidateProfileV2?.resumeDraft || extras.resumeDraft || null,
+          baselineCapture: profile.baselineCapture || profile.candidateProfileV2?.baselineCapture || extras.baselineCapture || null,
           skillRatings: Array.isArray(profile.skillsSelfReported)
             ? profile.skillsSelfReported.reduce((acc, item) => {
                 if (item && typeof item === "object" && item.key && item.rating) acc[item.key] = item.rating;
@@ -395,6 +425,110 @@ export default function OnboardingPage() {
         primaryStream: topSkill,
       };
     });
+  };
+
+  const applyResumeDraft = (draft) => {
+    const fields = draft?.fields || {};
+    const fieldValue = (name) => fields[name]?.value;
+    const parsedSkills = Array.isArray(fieldValue("skillsSelfReported")) ? fieldValue("skillsSelfReported") : [];
+    const parsedRatings = parsedSkills.reduce((acc, skill) => {
+      if (skill?.key && skill.rating) acc[skill.key] = skill.rating;
+      return acc;
+    }, {});
+    setForm((prev) => ({
+      ...prev,
+      universityName: fieldValue("universityName") || prev.universityName,
+      degreeName: fieldValue("degreeName") || prev.degreeName,
+      graduationYear: fieldValue("graduationYear") ? String(fieldValue("graduationYear")) : prev.graduationYear,
+      currentRole: fieldValue("currentTitle") || prev.currentRole,
+      yearsOfExperience: fieldValue("yearsOfExperience") != null ? String(fieldValue("yearsOfExperience")) : prev.yearsOfExperience,
+      linkedinUrl: fieldValue("linkedinUrl") || prev.linkedinUrl,
+      githubUrl: fieldValue("githubUrl") || prev.githubUrl,
+      portfolioUrl: fieldValue("portfolioUrl") || prev.portfolioUrl,
+      skillRatings: Object.keys(parsedRatings).length ? { ...prev.skillRatings, ...parsedRatings } : prev.skillRatings,
+      primaryStream: Object.keys(parsedRatings)[0] || prev.primaryStream,
+      resumeText: draft?.rawText || prev.resumeText,
+      resumeDraft: draft || prev.resumeDraft,
+    }));
+  };
+
+  const parseResume = async ({ file } = {}) => {
+    setResumeParsing(true);
+    setError("");
+    try {
+      const token = await getToken();
+      let contentBase64 = null;
+      if (file) {
+        contentBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+      const resp = await authFetch(`${API_BASE_URL}/api/profile/resume-draft`, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file?.name || null,
+          contentBase64,
+          resumeText: file ? null : form.resumeText,
+          targetJobDescription: form.targetJobDescription || null,
+        }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || "Failed to parse resume.");
+      }
+      const data = await resp.json();
+      setResumeDraft(data.draft);
+      setResumeGap(data.gapAnalysis || null);
+    } catch (parseErr) {
+      setError(parseErr.message || "Failed to parse resume.");
+    } finally {
+      setResumeParsing(false);
+    }
+  };
+
+  const startBaselineCapture = async () => {
+    setError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setBaselineStatus("unsupported");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      const recorder = new MediaRecorder(stream);
+      const startedAt = new Date();
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const durationSeconds = Math.max(1, Math.round((Date.now() - startedAt.getTime()) / 1000));
+        const baselineCapture = {
+          status: "captured",
+          capturedAt: startedAt.toISOString(),
+          durationSeconds: Math.min(durationSeconds, 60),
+          audio: true,
+          video: true,
+        };
+        setForm((prev) => ({ ...prev, baselineCapture }));
+        setBaselineStatus("captured");
+        setBaselineRecorder(null);
+      };
+      recorder.start();
+      setBaselineRecorder(recorder);
+      setBaselineStatus("recording");
+      window.setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, 60000);
+    } catch (_err) {
+      setBaselineStatus("error");
+    }
+  };
+
+  const stopBaselineCapture = () => {
+    if (baselineRecorder?.state === "recording") {
+      baselineRecorder.stop();
+    }
   };
 
   const validateStep = (step) => {
@@ -474,6 +608,14 @@ export default function OnboardingPage() {
         yearsOfExperience: form.yearsOfExperience ? Number(form.yearsOfExperience) : null,
         currentTitle: form.currentRole || null,
         targetInterviewFormat: form.interviewFormat || null,
+        targetJobDescription: form.targetJobDescription || null,
+        targetJobUrl: form.targetJobUrl || null,
+        linkedinUrl: form.linkedinUrl || null,
+        githubUrl: form.githubUrl || null,
+        portfolioUrl: form.portfolioUrl || null,
+        resumeText: form.resumeText || null,
+        resumeDraft: form.resumeDraft || null,
+        baselineCapture: form.baselineCapture || null,
         educationLevel: form.educationLevel || null,
         graduationTimeline: form.graduationTimeline || null,
         majorDomain: form.majorDomain || null,
@@ -713,6 +855,123 @@ export default function OnboardingPage() {
                     </Grid>
                   </Grid>
 
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={8}>
+                      <TextField
+                        fullWidth
+                        multiline
+                        minRows={4}
+                        label="Target job description"
+                        value={form.targetJobDescription}
+                        onChange={(e) => setForm((prev) => ({ ...prev, targetJobDescription: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <Stack spacing={2}>
+                        <TextField
+                          fullWidth
+                          label="Job URL"
+                          value={form.targetJobUrl}
+                          onChange={(e) => setForm((prev) => ({ ...prev, targetJobUrl: e.target.value }))}
+                        />
+                        <TextField
+                          fullWidth
+                          label="LinkedIn URL"
+                          value={form.linkedinUrl}
+                          onChange={(e) => setForm((prev) => ({ ...prev, linkedinUrl: e.target.value }))}
+                        />
+                        <TextField
+                          fullWidth
+                          label="GitHub URL"
+                          value={form.githubUrl}
+                          onChange={(e) => setForm((prev) => ({ ...prev, githubUrl: e.target.value }))}
+                        />
+                        <TextField
+                          fullWidth
+                          label="Portfolio URL"
+                          value={form.portfolioUrl}
+                          onChange={(e) => setForm((prev) => ({ ...prev, portfolioUrl: e.target.value }))}
+                        />
+                      </Stack>
+                    </Grid>
+                  </Grid>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                            Resume import
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Parsed fields are reviewed here before they are saved to your profile.
+                          </Typography>
+                        </Box>
+                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }}>
+                          <Button variant="outlined" component="label" disabled={resumeParsing}>
+                            Upload PDF/DOCX
+                            <input
+                              hidden
+                              type="file"
+                              accept=".pdf,.docx,text/plain"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) parseResume({ file });
+                              }}
+                            />
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            disabled={resumeParsing || !form.resumeText.trim()}
+                            onClick={() => parseResume()}
+                          >
+                            {resumeParsing ? "Parsing..." : "Parse pasted resume"}
+                          </Button>
+                        </Stack>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={4}
+                          label="Paste resume text"
+                          value={form.resumeText}
+                          onChange={(e) => setForm((prev) => ({ ...prev, resumeText: e.target.value }))}
+                        />
+                        {resumeDraft && (
+                          <Paper variant="outlined" sx={{ p: 2 }}>
+                            <Stack spacing={1.5}>
+                              <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
+                                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                                  Parsed profile draft
+                                </Typography>
+                                <Button size="small" variant="contained" onClick={() => applyResumeDraft(resumeDraft)}>
+                                  Apply Draft
+                                </Button>
+                              </Stack>
+                              <Grid container spacing={1}>
+                                {Object.entries(resumeDraft.fields || {})
+                                  .filter(([, meta]) => meta?.value && !Array.isArray(meta.value))
+                                  .map(([name, meta]) => (
+                                    <Grid item xs={12} md={6} key={name}>
+                                      <Stack direction="row" spacing={1} alignItems="center">
+                                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{name}</Typography>
+                                        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>{String(meta.value)}</Typography>
+                                        <Chip size="small" label={`${Math.round((meta.confidence || 0) * 100)}%`} />
+                                      </Stack>
+                                    </Grid>
+                                  ))}
+                              </Grid>
+                            </Stack>
+                          </Paper>
+                        )}
+                        {resumeGap && (
+                          <Alert severity={resumeGap.gaps?.length ? "warning" : "success"}>
+                            Readiness {resumeGap.readinessScore}%. Focus: {(resumeGap.suggestedFocusAreas || []).join(", ") || "No major gaps detected."}
+                          </Alert>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+
                   {form.userCategory === "student" ? (
                     <Grid container spacing={2}>
                       <Grid item xs={12} md={6}>
@@ -793,6 +1052,44 @@ export default function OnboardingPage() {
                     }
                     label="Optional: I agree to be contacted for interview support, updates, and follow-up guidance."
                   />
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Stack spacing={1.5}>
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          Optional baseline capture
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Record up to 60 seconds so pace, filler, and confidence scoring can calibrate to your normal intro style.
+                        </Typography>
+                      </Box>
+                      {form.baselineCapture?.status === "captured" && (
+                        <Alert severity="success">
+                          Baseline captured for {form.baselineCapture.durationSeconds}s.
+                        </Alert>
+                      )}
+                      {baselineStatus === "unsupported" && <Alert severity="warning">Baseline capture is not supported in this browser.</Alert>}
+                      {baselineStatus === "error" && <Alert severity="warning">Baseline capture could not start. You can still complete setup.</Alert>}
+                      <Stack direction="row" spacing={1}>
+                        {baselineStatus === "recording" ? (
+                          <Button variant="contained" color="secondary" onClick={stopBaselineCapture}>
+                            Stop Recording
+                          </Button>
+                        ) : (
+                          <Button variant="outlined" onClick={startBaselineCapture}>
+                            Start Baseline
+                          </Button>
+                        )}
+                        <Button
+                          onClick={() => {
+                            setForm((prev) => ({ ...prev, baselineCapture: { status: "skipped", skippedAt: new Date().toISOString() } }));
+                            setBaselineStatus("skipped");
+                          }}
+                        >
+                          Skip
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  </Paper>
                 </Stack>
               )}
 

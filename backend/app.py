@@ -18,6 +18,9 @@ import base64
 import traceback
 import time
 import re
+import zipfile
+import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
 
 import math
 from pathlib import Path
@@ -834,6 +837,12 @@ class UserProfileUpsertRequest(BaseModel):
     targetInterviewFormat: Optional[str] = None
     targetJobDescription: Optional[str] = None
     targetJobUrl: Optional[str] = None
+    linkedinUrl: Optional[str] = None
+    githubUrl: Optional[str] = None
+    portfolioUrl: Optional[str] = None
+    resumeText: Optional[str] = None
+    resumeDraft: Optional[Dict[str, Any]] = None
+    baselineCapture: Optional[Dict[str, Any]] = None
 
     # Student fields
     educationLevel: Optional[str] = None
@@ -870,6 +879,10 @@ class UserProfileUpsertRequest(BaseModel):
         "targetInterviewFormat",
         "targetJobDescription",
         "targetJobUrl",
+        "linkedinUrl",
+        "githubUrl",
+        "portfolioUrl",
+        "resumeText",
         "educationLevel",
         "graduationTimeline",
         "majorDomain",
@@ -921,6 +934,10 @@ class CandidateProfileUpsertRequest(BaseModel):
     resumeUrl: Optional[str] = None
     linkedinUrl: Optional[str] = None
     githubUrl: Optional[str] = None
+    portfolioUrl: Optional[str] = None
+    resumeText: Optional[str] = None
+    resumeDraft: Optional[Dict[str, Any]] = None
+    baselineCapture: Optional[Dict[str, Any]] = None
     consentDataUse: bool
     consentContact: bool = False
 
@@ -946,6 +963,8 @@ class CandidateProfileUpsertRequest(BaseModel):
         "resumeUrl",
         "linkedinUrl",
         "githubUrl",
+        "portfolioUrl",
+        "resumeText",
         mode="before",
     )
     @classmethod
@@ -953,6 +972,24 @@ class CandidateProfileUpsertRequest(BaseModel):
         if isinstance(value, str):
             return _sanitize_profile_text(value)
         return value
+
+
+class ResumeDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fileName: Optional[str] = None
+    contentBase64: Optional[str] = None
+    resumeText: Optional[str] = None
+    targetJobDescription: Optional[str] = None
+
+
+class ResumeJdGapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resumeText: Optional[str] = None
+    resumeDraft: Optional[Dict[str, Any]] = None
+    targetJobDescription: str
+    targetRole: Optional[str] = None
 
 
 class TrialCodeRedeemRequest(BaseModel):
@@ -1043,20 +1080,182 @@ def _validate_graduation_year(value: Optional[int]) -> None:
         )
 
 
+def _validate_optional_url(value: Optional[str], field_name: str) -> None:
+    text = _strip_or_none(value)
+    if not text:
+        return
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a valid http(s) URL")
+
+
 def _validate_candidate_profile_payload(payload: CandidateProfileUpsertRequest) -> None:
     if not payload.consentDataUse:
         raise HTTPException(status_code=400, detail="consentDataUse is required")
     _validate_graduation_year(payload.graduationYear)
+    for field_name, value in [
+        ("targetJobUrl", payload.targetJobUrl),
+        ("resumeUrl", payload.resumeUrl),
+        ("linkedinUrl", payload.linkedinUrl),
+        ("githubUrl", payload.githubUrl),
+        ("portfolioUrl", payload.portfolioUrl),
+    ]:
+        _validate_optional_url(value, field_name)
     if not _normalize_profile_string_list(payload.targetRoles):
         raise HTTPException(status_code=400, detail="At least one target role is required")
     if payload.yearsOfExperience is not None and payload.yearsOfExperience < 0:
         raise HTTPException(status_code=400, detail="yearsOfExperience cannot be negative")
 
 
+_RESUME_SKILL_KEYWORDS: List[tuple[str, str, List[str]]] = [
+    ("python_fundamentals", "Python fundamentals", ["python", "django", "fastapi", "flask"]),
+    ("java_full_stack", "Java full stack", ["java", "spring", "hibernate"]),
+    ("machine_learning_python", "Machine learning with Python", ["machine learning", "scikit", "tensorflow", "pytorch"]),
+    ("genai_python_cloud", "GenAI, Python, and cloud", ["llm", "genai", "openai", "rag", "langchain"]),
+    ("frontend_engineering", "Frontend engineering", ["react", "typescript", "javascript", "css", "html"]),
+    ("data_analytics_sql_python", "Data analytics with SQL and Python", ["sql", "analytics", "tableau", "power bi", "pandas"]),
+    ("devops_cloud_basics", "DevOps and cloud basics", ["aws", "azure", "gcp", "docker", "kubernetes", "terraform"]),
+    ("testing_qa_automation", "Testing and QA automation", ["testing", "selenium", "playwright", "pytest", "jest"]),
+    ("cybersecurity_basics", "Cybersecurity basics", ["security", "owasp", "iam", "vulnerability"]),
+    ("product_analyst_basics", "Product analyst basics", ["product", "roadmap", "experimentation", "a/b"]),
+]
+
+
+def _confidence_field(value: Any, confidence: float) -> Dict[str, Any]:
+    return {"value": value, "confidence": round(float(confidence), 2)}
+
+
+def _extract_docx_text(content: bytes) -> str:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            xml_payload = archive.read("word/document.xml")
+        root = ET.fromstring(xml_payload)
+        namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        return "\n".join(node.text or "" for node in root.iter(f"{namespace}t"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unable to read DOCX resume text") from exc
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        reader = PdfReader(BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail="PDF parsing is not available in this runtime") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unable to read PDF resume text") from exc
+
+
+def _extract_resume_text(payload: ResumeDraftRequest) -> str:
+    if _strip_or_none(payload.resumeText):
+        return _strip_or_none(payload.resumeText) or ""
+    if not payload.contentBase64:
+        raise HTTPException(status_code=400, detail="resumeText or contentBase64 is required")
+    try:
+        content = base64.b64decode(payload.contentBase64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="contentBase64 must be valid base64") from exc
+    filename = (payload.fileName or "").lower()
+    if filename.endswith(".docx"):
+        return _extract_docx_text(content)
+    if filename.endswith(".pdf"):
+        return _extract_pdf_text(content)
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported resume file type") from exc
+
+
+def _first_match(pattern: str, text: str, flags: int = re.IGNORECASE) -> Optional[str]:
+    match = re.search(pattern, text, flags)
+    return _strip_or_none(match.group(1)) if match else None
+
+
+def _parse_resume_draft(text: str) -> Dict[str, Any]:
+    cleaned = re.sub(r"\n{3,}", "\n\n", _sanitize_profile_text(text) or "")
+    lower = cleaned.lower()
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    name = lines[0] if lines and len(lines[0].split()) <= 5 and "@" not in lines[0] else None
+    years = _first_match(r"(\d{1,2})\+?\s*(?:years|yrs)\b", cleaned)
+    grad_year = _first_match(r"\b(19[5-9]\d|20[0-4]\d)\b", cleaned)
+    university = _first_match(r"([A-Z][A-Za-z .&-]*(?:University|College|Institute|School)[A-Za-z .&-]*)", cleaned, 0)
+    degree = _first_match(r"\b(B\.?Tech|M\.?Tech|B\.?E\.?|M\.?S\.?|MBA|Bachelor[^,\n]*|Master[^,\n]*)", cleaned)
+    linkedin = _first_match(r"(https?://(?:www\.)?linkedin\.com/[^\s)]+)", cleaned)
+    github = _first_match(r"(https?://(?:www\.)?github\.com/[^\s)]+)", cleaned)
+    portfolio = _first_match(r"(https?://(?![^/\s]*linkedin\.com|[^/\s]*github\.com)[^\s)]+)", cleaned)
+    current_title = next(
+        (
+            line
+            for line in lines[:8]
+            if re.search(r"\b(engineer|developer|manager|analyst|designer|consultant|architect|lead)\b", line, re.I)
+        ),
+        None,
+    )
+    skills = []
+    for key, label, keywords in _RESUME_SKILL_KEYWORDS:
+        hits = sum(1 for word in keywords if word in lower)
+        if hits:
+            skills.append({"key": key, "label": label, "rating": min(5, 2 + hits), "confidence": min(0.95, 0.55 + hits * 0.1)})
+
+    return {
+        "rawText": cleaned,
+        "fields": {
+            "fullNameOverride": _confidence_field(name, 0.58 if name else 0),
+            "universityName": _confidence_field(university, 0.72 if university else 0),
+            "degreeName": _confidence_field(degree, 0.68 if degree else 0),
+            "graduationYear": _confidence_field(int(grad_year) if grad_year else None, 0.62 if grad_year else 0),
+            "currentTitle": _confidence_field(current_title, 0.6 if current_title else 0),
+            "yearsOfExperience": _confidence_field(int(years) if years else None, 0.7 if years else 0),
+            "linkedinUrl": _confidence_field(linkedin, 0.9 if linkedin else 0),
+            "githubUrl": _confidence_field(github, 0.9 if github else 0),
+            "portfolioUrl": _confidence_field(portfolio, 0.7 if portfolio else 0),
+            "skillsSelfReported": _confidence_field(skills, 0.72 if skills else 0),
+        },
+    }
+
+
+def _resume_jd_gap_analysis(resume_text: str, jd_text: str, resume_draft: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    resume_lower = (resume_text or "").lower()
+    jd_lower = (jd_text or "").lower()
+    focus_areas = []
+    gaps = []
+    matched = []
+    for key, label, keywords in _RESUME_SKILL_KEYWORDS:
+        jd_hit = any(word in jd_lower for word in keywords)
+        resume_hit = any(word in resume_lower for word in keywords)
+        if jd_hit and resume_hit:
+            matched.append(label)
+        elif jd_hit:
+            gaps.append({"skill": label, "reason": "Mentioned in the job description but weak or absent in the resume."})
+            focus_areas.append(label)
+    if not focus_areas and resume_draft:
+        fields = resume_draft.get("fields") if isinstance(resume_draft, dict) else {}
+        skills_field = fields.get("skillsSelfReported") if isinstance(fields, dict) else {}
+        for skill in (skills_field.get("value") if isinstance(skills_field, dict) else []) or []:
+            if isinstance(skill, dict) and skill.get("label"):
+                focus_areas.append(skill["label"])
+    readiness = 100 if not gaps and matched else max(25, min(95, int((len(matched) / max(1, len(matched) + len(gaps))) * 100)))
+    return {
+        "readinessScore": readiness,
+        "matchedStrengths": matched[:8],
+        "gaps": gaps[:8],
+        "suggestedFocusAreas": focus_areas[:6],
+    }
+
+
 def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
     if not payload.consentDataUse:
         raise HTTPException(status_code=400, detail="Explicit consent is required to continue.")
     _validate_graduation_year(payload.graduationYear)
+    for field_name, value in [
+        ("targetJobUrl", payload.targetJobUrl),
+        ("linkedinUrl", payload.linkedinUrl),
+        ("githubUrl", payload.githubUrl),
+        ("portfolioUrl", payload.portfolioUrl),
+    ]:
+        _validate_optional_url(value, field_name)
 
     if not payload.targetRoles:
         raise HTTPException(status_code=400, detail="At least one target role is required.")
@@ -4060,6 +4259,10 @@ def _candidate_profile_v2_to_api(profile: models.CandidateProfileV2) -> Dict[str
         "resumeUrl": profile.resume_url,
         "linkedinUrl": profile.linkedin_url,
         "githubUrl": profile.github_url,
+        "portfolioUrl": profile.portfolio_url,
+        "resumeText": profile.resume_text,
+        "resumeDraft": _safe_json_obj(profile.resume_draft_json, {}) if profile.resume_draft_json else None,
+        "baselineCapture": _safe_json_obj(profile.baseline_capture_json, {}) if profile.baseline_capture_json else None,
         "consentDataUse": bool(profile.consent_data_use),
         "consentContact": bool(profile.consent_contact),
         "profileCompletionScore": int(profile.profile_completion_score or 0),
@@ -4117,6 +4320,10 @@ def _candidate_profile_v2_from_legacy_profile(
         "resumeUrl": None,
         "linkedinUrl": None,
         "githubUrl": None,
+        "portfolioUrl": None,
+        "resumeText": None,
+        "resumeDraft": None,
+        "baselineCapture": None,
         "consentDataUse": bool(legacy.consent_data_use),
         "consentContact": False,
         "profileCompletionScore": 0,
@@ -4211,6 +4418,12 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
         "targetInterviewFormat": _strip_or_none(payload.targetInterviewFormat),
         "targetJobDescription": _strip_or_none(payload.targetJobDescription),
         "targetJobUrl": _strip_or_none(payload.targetJobUrl),
+        "linkedinUrl": _strip_or_none(payload.linkedinUrl),
+        "githubUrl": _strip_or_none(payload.githubUrl),
+        "portfolioUrl": _strip_or_none(payload.portfolioUrl),
+        "resumeText": _strip_or_none(payload.resumeText),
+        "resumeDraft": payload.resumeDraft if isinstance(payload.resumeDraft, dict) else None,
+        "baselineCapture": payload.baselineCapture if isinstance(payload.baselineCapture, dict) else None,
         "consentDataUse": bool(payload.consentDataUse),
         "consentContact": bool(payload.consentContact),
     }
@@ -4249,6 +4462,12 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
     row.target_interview_format = v2_payload["targetInterviewFormat"]
     row.target_job_description = v2_payload["targetJobDescription"]
     row.target_job_url = v2_payload["targetJobUrl"]
+    row.linkedin_url = v2_payload["linkedinUrl"]
+    row.github_url = v2_payload["githubUrl"]
+    row.portfolio_url = v2_payload["portfolioUrl"]
+    row.resume_text = v2_payload["resumeText"]
+    row.resume_draft_json = json.dumps(v2_payload["resumeDraft"], ensure_ascii=False) if isinstance(v2_payload["resumeDraft"], dict) else None
+    row.baseline_capture_json = json.dumps(v2_payload["baselineCapture"], ensure_ascii=False) if isinstance(v2_payload["baselineCapture"], dict) else None
     row.consent_data_use = bool(v2_payload["consentDataUse"])
     row.consent_contact = bool(v2_payload["consentContact"])
     row.profile_completion_score = completion_score
@@ -4312,6 +4531,10 @@ def _upsert_candidate_profile_v2(
     row.resume_url = _strip_or_none(payload.resumeUrl)
     row.linkedin_url = _strip_or_none(payload.linkedinUrl)
     row.github_url = _strip_or_none(payload.githubUrl)
+    row.portfolio_url = _strip_or_none(payload.portfolioUrl)
+    row.resume_text = _strip_or_none(payload.resumeText)
+    row.resume_draft_json = json.dumps(payload.resumeDraft, ensure_ascii=False) if isinstance(payload.resumeDraft, dict) else None
+    row.baseline_capture_json = json.dumps(payload.baselineCapture, ensure_ascii=False) if isinstance(payload.baselineCapture, dict) else None
     row.consent_data_use = bool(payload.consentDataUse)
     row.consent_contact = bool(payload.consentContact)
     row.profile_completion_score = completion_score
@@ -4578,6 +4801,42 @@ def upsert_profile_canonical(
         db.rollback()
         raise HTTPException(status_code=503, detail=f"candidate_profiles write failed: {e}")
     return {"ok": True, "profile": _candidate_profile_v2_to_api(row)}
+
+
+@app.post("/api/profile/resume-draft")
+def create_resume_profile_draft(
+    payload: ResumeDraftRequest,
+    current_user: User = Depends(get_current_user),
+):
+    resume_text = _extract_resume_text(payload)
+    if len(resume_text.strip()) < 40:
+        raise HTTPException(status_code=400, detail="Resume text is too short to parse")
+    draft = _parse_resume_draft(resume_text)
+    result: Dict[str, Any] = {
+        "draft": draft,
+        "reviewRequired": True,
+        "message": "Parsed fields must be confirmed or edited before save.",
+    }
+    jd_text = _strip_or_none(payload.targetJobDescription)
+    if jd_text:
+        result["gapAnalysis"] = _resume_jd_gap_analysis(resume_text, jd_text, draft)
+    return result
+
+
+@app.post("/api/profile/resume-jd-gap")
+def create_resume_jd_gap_analysis(
+    payload: ResumeJdGapRequest,
+    current_user: User = Depends(get_current_user),
+):
+    resume_text = _strip_or_none(payload.resumeText)
+    if not resume_text and isinstance(payload.resumeDraft, dict):
+        resume_text = _strip_or_none(payload.resumeDraft.get("rawText"))
+    if not resume_text:
+        raise HTTPException(status_code=400, detail="resumeText or resumeDraft.rawText is required")
+    jd_text = _strip_or_none(payload.targetJobDescription)
+    if not jd_text:
+        raise HTTPException(status_code=400, detail="targetJobDescription is required")
+    return _resume_jd_gap_analysis(resume_text, jd_text, payload.resumeDraft)
 
 
 @app.post("/api/trial-codes/redeem")
@@ -4970,6 +5229,85 @@ async def get_report_pdf(report_id: str, authorization: Optional[str] = Header(N
 
 
 # Revised list_interview_reports to use current_user dependency
+def _coaching_label_from_metrics(metrics: Dict[str, Any], *, strongest: bool) -> Optional[str]:
+    scores = metrics.get("competency_scores") or metrics.get("scores")
+    if not isinstance(scores, dict):
+        return None
+    numeric = [(str(name).replace("_", " ").title(), float(value)) for name, value in scores.items() if isinstance(value, (int, float))]
+    if not numeric:
+        return None
+    return (max if strongest else min)(numeric, key=lambda item: item[1])[0]
+
+
+def _report_score_ledger(report: models.InterviewReport) -> List[Dict[str, Any]]:
+    metrics = _safe_json_obj(report.metrics)
+    ledger = metrics.get("score_ledger")
+    if not isinstance(ledger, list):
+        return []
+    return [row for row in ledger if isinstance(row, dict) and row.get("question_id")]
+
+
+def _build_retake_deltas(
+    report: models.InterviewReport,
+    prior_scores_by_question: Dict[str, List[float]],
+) -> List[Dict[str, Any]]:
+    deltas: List[Dict[str, Any]] = []
+    for row in _report_score_ledger(report):
+        question_id = str(row.get("question_id") or "")
+        score = row.get("overall_score", row.get("score"))
+        if not question_id or not isinstance(score, (int, float)):
+            continue
+        prior_scores = prior_scores_by_question.get(question_id, [])
+        previous = prior_scores[-1] if prior_scores else None
+        deltas.append(
+            {
+                "questionId": question_id,
+                "currentScore": round(float(score), 1),
+                "previousScore": round(float(previous), 1) if previous is not None else None,
+                "improvementPct": round(float(score) - float(previous), 1) if previous is not None else None,
+            }
+        )
+        prior_scores_by_question.setdefault(question_id, []).append(float(score))
+    return deltas
+
+
+def _build_report_summary_extras(
+    report: models.InterviewReport,
+    *,
+    previous_report: Optional[models.InterviewReport],
+    prior_scores_by_question: Dict[str, List[float]],
+    db: Session,
+) -> Dict[str, Any]:
+    metrics = _safe_json_obj(report.metrics)
+    session_meta: Dict[str, Any] = {}
+    if report.session_id:
+        session = (
+            db.query(models.InterviewSession)
+            .filter(models.InterviewSession.session_id == report.session_id)
+            .first()
+        )
+        if session:
+            session_meta = _safe_json_obj(session.session_meta_json)
+    question_count = report.questions or metrics.get("questions_answered") or metrics.get("question_count")
+    return {
+        "track": session_meta.get("track") or session_meta.get("primary_stream") or metrics.get("track"),
+        "difficulty": session_meta.get("difficulty") or metrics.get("difficulty"),
+        "topStrength": metrics.get("top_strength") or _coaching_label_from_metrics(metrics, strongest=True),
+        "topGap": metrics.get("top_gap") or _coaching_label_from_metrics(metrics, strongest=False),
+        "improvementDelta": (
+            int(report.overall_score - previous_report.overall_score)
+            if previous_report and isinstance(previous_report.overall_score, int)
+            else None
+        ),
+        "questionCount": int(question_count) if isinstance(question_count, (int, float)) else report.questions,
+        "fillerWordRate": metrics.get("filler_words_per_100"),
+        "responseLatency": metrics.get("avg_response_latency_ms") or metrics.get("average_response_latency_ms"),
+        "confidenceScore": metrics.get("confidence_score"),
+        "reportLink": f"/report/{report.id}",
+        "retakeDeltas": _build_retake_deltas(report, prior_scores_by_question),
+    }
+
+
 @app.get("/api/interview/reports")
 async def list_interview_reports(
     authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
@@ -4994,6 +5332,19 @@ async def list_interview_reports(
     )
 
     summaries = []
+    prior_scores_by_question: Dict[str, List[float]] = {}
+    chronological_reports = list(reversed(user_reports))
+    extras_by_id: Dict[str, Dict[str, Any]] = {}
+    previous: Optional[models.InterviewReport] = None
+    for report in chronological_reports:
+        extras_by_id[report.id] = _build_report_summary_extras(
+            report,
+            previous_report=previous,
+            prior_scores_by_question=prior_scores_by_question,
+            db=db,
+        )
+        previous = report
+
     for report in user_reports:
         summaries.append(
             InterviewReportSummary(
@@ -5005,6 +5356,7 @@ async def list_interview_reports(
                 score=report.overall_score,
                 questions=report.questions,
                 is_sample=report.is_sample,
+                **extras_by_id.get(report.id, {}),
             )
         )
 

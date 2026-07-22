@@ -82,6 +82,17 @@ class InterviewReportSummary(BaseModel):
     questions: int
     is_sample: bool = False
     hiring_signal: Optional[str] = None
+    track: Optional[str] = None
+    difficulty: Optional[str] = None
+    topStrength: Optional[str] = None
+    topGap: Optional[str] = None
+    improvementDelta: Optional[int] = None
+    questionCount: Optional[int] = None
+    fillerWordRate: Optional[float] = None
+    responseLatency: Optional[float] = None
+    confidenceScore: Optional[int] = None
+    reportLink: Optional[str] = None
+    retakeDeltas: Optional[List[dict]] = None
 
 class CreateInterviewReportRequest(BaseModel):
     session_id: Optional[str] = None
@@ -94,4 +105,3 @@ class CreateInterviewReportRequest(BaseModel):
     transcript: List[TranscriptMessage]
     recommendations: List[str]
     questions: int
-

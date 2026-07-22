@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper, Alert, CircularProgress } from "@mui/material";
+import { Container, Typography, Grid, Card, Box, CardContent, Button, Stack, Divider, Paper, Alert, CircularProgress, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { PlayArrow, Speed, Psychology, Assessment, TrendingUp } from "@mui/icons-material";
 import { useUser, useAuth } from "../context/AuthContext";
@@ -352,28 +352,57 @@ export default function Dashboard() {
                 </Paper>
               )}
               {!historyLoading && historyReports.length > 0 && (
-                <Stack spacing={1.5}>
-                  {historyReports.slice(0, 8).map((report) => (
-                    <Paper key={report.id} variant="outlined" sx={{ p: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
-                        <Box>
-                          <Typography sx={{ fontWeight: 600 }}>{report.title || "Interview Session"}</Typography>
-                          <Typography variant="body2" sx={{ opacity: 0.65 }}>
-                            {formatInterviewTypeLabel(report.type)} • {new Date(report.date).toLocaleString()}
-                          </Typography>
-                        </Box>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            Score: {report.score}%
-                          </Typography>
-                          <Button size="small" variant="outlined" onClick={() => go(`/report/${report.id}`)}>
-                            View Report
-                          </Button>
-                        </Stack>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small" aria-label="Recent coaching sessions">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Session</TableCell>
+                        <TableCell>Track</TableCell>
+                        <TableCell>Difficulty</TableCell>
+                        <TableCell>Strength</TableCell>
+                        <TableCell>Gap</TableCell>
+                        <TableCell align="right">Score</TableCell>
+                        <TableCell align="right">Delta</TableCell>
+                        <TableCell align="right">Questions</TableCell>
+                        <TableCell align="right">Fillers</TableCell>
+                        <TableCell align="right">Latency</TableCell>
+                        <TableCell align="right">Confidence</TableCell>
+                        <TableCell align="right">Report</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {historyReports.slice(0, 8).map((report) => (
+                        <TableRow key={report.id} hover>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>{report.title || "Interview Session"}</Typography>
+                            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                              {formatInterviewTypeLabel(report.type)} • {new Date(report.date).toLocaleString()}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>{report.track || "--"}</TableCell>
+                          <TableCell>{report.difficulty || "--"}</TableCell>
+                          <TableCell>{report.topStrength || "--"}</TableCell>
+                          <TableCell>{report.topGap || "--"}</TableCell>
+                          <TableCell align="right">
+                            <Chip size="small" label={`${report.score ?? "--"}%`} />
+                          </TableCell>
+                          <TableCell align="right">
+                            {report.improvementDelta == null ? "--" : `${report.improvementDelta > 0 ? "+" : ""}${report.improvementDelta}%`}
+                          </TableCell>
+                          <TableCell align="right">{report.questionCount ?? report.questions ?? "--"}</TableCell>
+                          <TableCell align="right">{report.fillerWordRate == null ? "--" : `${report.fillerWordRate}/100`}</TableCell>
+                          <TableCell align="right">{report.responseLatency == null ? "--" : `${Math.round(report.responseLatency)}ms`}</TableCell>
+                          <TableCell align="right">{report.confidenceScore == null ? "--" : `${report.confidenceScore}%`}</TableCell>
+                          <TableCell align="right">
+                            <Button size="small" variant="outlined" onClick={() => go(report.reportLink || `/report/${report.id}`)}>
+                              View
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               )}
             </Box>
           </Box>
