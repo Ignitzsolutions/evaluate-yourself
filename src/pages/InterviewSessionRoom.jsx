@@ -367,9 +367,14 @@ export default function InterviewSessionRoom() {
   const [interviewType, setInterviewType] = useState(typeFromUrl || 'behavioral');
   const [durationMinutes, setDurationMinutes] = useState(15);
   const [effectiveDurationMinutes, setEffectiveDurationMinutes] = useState(15);
-  const [difficulty, setDifficulty] = useState('easy');
+  const [difficulty, setDifficulty] = useState('auto');
   const [targetRole, setTargetRole] = useState('');
   const [targetCompany, setTargetCompany] = useState('');
+  const [jobLevel, setJobLevel] = useState('mid');
+  const [yearsExperience, setYearsExperience] = useState(undefined);
+  const [targetInterviewFormat, setTargetInterviewFormat] = useState('technical');
+  const [targetJobDescription, setTargetJobDescription] = useState('');
+  const [targetJobUrl, setTargetJobUrl] = useState('');
   const [questionMix, setQuestionMix] = useState('balanced');
   const [interviewStyle, setInterviewStyle] = useState('neutral');
   const [selectedSkills, setSelectedSkills] = useState([]);
@@ -395,9 +400,14 @@ export default function InterviewSessionRoom() {
     const configuredDuration = parsed.duration ? parseInt(parsed.duration, 10) : 15;
     setDurationMinutes(configuredDuration);
     setEffectiveDurationMinutes(configuredDuration);
-    setDifficulty(parsed.difficulty || 'easy');
+    setDifficulty(parsed.difficulty || 'auto');
     setTargetRole(parsed.role || '');
     setTargetCompany(parsed.company || '');
+    setJobLevel(parsed.jobLevel || 'mid');
+    setYearsExperience(parsed.yearsExperience);
+    setTargetInterviewFormat(parsed.targetInterviewFormat || 'technical');
+    setTargetJobDescription(parsed.targetJobDescription || '');
+    setTargetJobUrl(parsed.targetJobUrl || '');
     setQuestionMix(parsed.questionMix || 'balanced');
     setInterviewStyle(parsed.interviewStyle || 'neutral');
     setSelectedSkills(Array.isArray(parsed.selectedSkills) ? parsed.selectedSkills : []);
@@ -2013,10 +2023,10 @@ export default function InterviewSessionRoom() {
             }
             tryStartOpeningTurn();
           } else if (msgType === 'error') {
-            const errMsg = msg.error?.message || 'Azure API error';
+            const errMsg = msg.error?.message || 'Realtime provider error';
             if (errMsg.includes("response.modalities")) {
-              console.warn('Ignored Azure warning:', errMsg);
-              incrementDroppedEvent('azure_unknown_response_modalities');
+              console.warn('Ignored realtime provider warning:', errMsg);
+              incrementDroppedEvent('provider_unknown_response_modalities');
             } else {
               setError(errMsg);
               addTranscript('system', `Error: ${errMsg}`);
@@ -2186,6 +2196,11 @@ export default function InterviewSessionRoom() {
           difficulty: difficulty || 'medium',
           role: targetRole || undefined,
           company: targetCompany || undefined,
+          jobLevel: jobLevel || undefined,
+          yearsExperience,
+          targetInterviewFormat: targetInterviewFormat || undefined,
+          targetJobDescription: targetJobDescription || undefined,
+          targetJobUrl: targetJobUrl || undefined,
           questionMix: questionMix || 'balanced',
           interviewStyle: interviewStyle || 'neutral',
           durationMinutes: durationMinutes || 15,
@@ -2227,6 +2242,9 @@ export default function InterviewSessionRoom() {
       }
       if (Array.isArray(data.selectedSkills)) {
         setSelectedSkills(data.selectedSkills);
+      }
+      if (data.difficulty) {
+        setDifficulty(data.difficulty);
       }
       if (
         data.openingQuestionId &&
@@ -2324,6 +2342,11 @@ export default function InterviewSessionRoom() {
     difficulty,
     targetRole,
     targetCompany,
+    jobLevel,
+    yearsExperience,
+    targetInterviewFormat,
+    targetJobDescription,
+    targetJobUrl,
     questionMix,
     interviewStyle,
     durationMinutes,

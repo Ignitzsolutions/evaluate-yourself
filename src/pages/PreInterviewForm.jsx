@@ -42,9 +42,14 @@ export default function PreInterviewForm() {
 
   const durationOptions = useMemo(() => [10, 15, 20, 30, 45, 60], []);
   const [duration, setDuration] = useState(durationOptions[0]);
-  const [difficulty, setDifficulty] = useState("easy");
+  const [difficulty, setDifficulty] = useState("auto");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
+  const [jobLevel, setJobLevel] = useState("mid");
+  const [yearsExperience, setYearsExperience] = useState("");
+  const [targetInterviewFormat, setTargetInterviewFormat] = useState("technical");
+  const [targetJobDescription, setTargetJobDescription] = useState("");
+  const [targetJobUrl, setTargetJobUrl] = useState("");
   const [questionMix, setQuestionMix] = useState("balanced");
   const [interviewStyle, setInterviewStyle] = useState("neutral");
   const [transcriptConsent, setTranscriptConsent] = useState(false);
@@ -74,9 +79,14 @@ export default function PreInterviewForm() {
     const parsed = savedConfig.config;
     setSelectedType(locationType || parsed.type || "technical");
     setDuration(Number(parsed.duration) || durationOptions[0]);
-    setDifficulty(parsed.difficulty || "easy");
+    setDifficulty(parsed.difficulty || "auto");
     setRole(parsed.role || "");
     setCompany(parsed.company || "");
+    setJobLevel(parsed.jobLevel || "mid");
+    setYearsExperience(parsed.yearsExperience ?? "");
+    setTargetInterviewFormat(parsed.targetInterviewFormat || "technical");
+    setTargetJobDescription(parsed.targetJobDescription || "");
+    setTargetJobUrl(parsed.targetJobUrl || "");
     setQuestionMix(parsed.questionMix || "balanced");
     setInterviewStyle(parsed.interviewStyle || "neutral");
     setTranscriptConsent(Boolean(parsed.transcriptConsent));
@@ -175,6 +185,11 @@ export default function PreInterviewForm() {
       difficulty,
       role: role.trim() || undefined,
       company: company.trim() || undefined,
+      jobLevel,
+      yearsExperience: yearsExperience === "" ? undefined : Number(yearsExperience),
+      targetInterviewFormat,
+      targetJobDescription: targetJobDescription.trim() || undefined,
+      targetJobUrl: targetJobUrl.trim() || undefined,
       questionMix,
       interviewStyle,
       transcriptConsent,
@@ -250,6 +265,7 @@ export default function PreInterviewForm() {
                 <FormControl fullWidth>
                   <InputLabel id="difficulty-label">Difficulty</InputLabel>
                   <Select labelId="difficulty-label" label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
+                    <MenuItem value="auto">Auto from role/JD</MenuItem>
                     <MenuItem value="easy">Easy</MenuItem>
                     <MenuItem value="medium">Medium</MenuItem>
                     <MenuItem value="hard">Hard</MenuItem>
@@ -279,11 +295,49 @@ export default function PreInterviewForm() {
 
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
+                  <InputLabel id="job-level-label">Seniority</InputLabel>
+                  <Select labelId="job-level-label" label="Seniority" value={jobLevel} onChange={(e) => setJobLevel(e.target.value)}>
+                    <MenuItem value="intern">Intern</MenuItem>
+                    <MenuItem value="junior">Junior</MenuItem>
+                    <MenuItem value="mid">Mid-level</MenuItem>
+                    <MenuItem value="senior">Senior</MenuItem>
+                    <MenuItem value="lead">Lead / Staff</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Years of Experience"
+                  inputProps={{ min: 0, step: 0.5 }}
+                  value={yearsExperience}
+                  onChange={(e) => setYearsExperience(e.target.value)}
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
                   <InputLabel id="focus-label">Question Focus</InputLabel>
                   <Select labelId="focus-label" label="Question Focus" value={questionMix} onChange={(e) => setQuestionMix(e.target.value)}>
                     <MenuItem value="technical">Technical</MenuItem>
                     <MenuItem value="balanced">Balanced</MenuItem>
                     <MenuItem value="behavioral">Behavioral</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel id="format-label">Interview Format</InputLabel>
+                  <Select labelId="format-label" label="Interview Format" value={targetInterviewFormat} onChange={(e) => setTargetInterviewFormat(e.target.value)}>
+                    <MenuItem value="phone_screen">Phone screen</MenuItem>
+                    <MenuItem value="technical">Technical</MenuItem>
+                    <MenuItem value="system_design">System design</MenuItem>
+                    <MenuItem value="behavioral">Behavioral</MenuItem>
+                    <MenuItem value="case">Case</MenuItem>
+                    <MenuItem value="take_home">Take-home</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -297,6 +351,28 @@ export default function PreInterviewForm() {
                     <MenuItem value="strict">Strict</MenuItem>
                   </Select>
                 </FormControl>
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Target Job URL"
+                  placeholder="https://company.com/jobs/backend-engineer"
+                  value={targetJobUrl}
+                  onChange={(e) => setTargetJobUrl(e.target.value)}
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={5}
+                  label="Target Job Description"
+                  placeholder="Paste the role description, required skills, and seniority signals."
+                  value={targetJobDescription}
+                  onChange={(e) => setTargetJobDescription(e.target.value)}
+                />
               </Grid>
 
               {requiresSkillCatalog && (

@@ -26,6 +26,11 @@ except Exception:  # pragma: no cover
     from backend.services.interview.policy_guard import detect_interviewer_control_attempt
 
 try:
+    from services.interview.jd_parser import filter_questions_by_jd
+except Exception:  # pragma: no cover
+    from backend.services.interview.jd_parser import filter_questions_by_jd
+
+try:
     from services.interview.skill_tracks import (
         filter_questions_for_track_ids,
         is_behavioral_track,
@@ -82,6 +87,37 @@ def normalize_difficulty(value: Optional[str]) -> str:
         "advanced": "senior",
     }
     return mapping.get(raw, "mid")
+
+
+def derive_default_difficulty(
+    *,
+    seniority: Optional[str] = None,
+    years_of_experience: Optional[float] = None,
+    target_role: Optional[str] = None,
+) -> str:
+    """Derive a stable default interview difficulty from profile/setup signals."""
+    seniority_text = (seniority or "").strip().lower()
+    role_text = (target_role or "").strip().lower()
+    years = None
+    if years_of_experience is not None:
+        try:
+            years = float(years_of_experience)
+        except (TypeError, ValueError):
+            years = None
+
+    if any(token in seniority_text for token in ("lead", "staff", "principal", "senior", "manager", "architect")):
+        return "senior"
+    if any(token in seniority_text for token in ("intern", "student", "graduate", "junior", "entry", "associate")):
+        return "junior"
+    if years is not None:
+        if years >= 6:
+            return "senior"
+        if years <= 2:
+            return "junior"
+        return "mid"
+    if any(token in role_text for token in ("lead", "staff", "principal", "architect", "manager")):
+        return "senior"
+    return "mid"
 
 
 def _difficulty_delta(current: str, delta: int) -> str:
@@ -189,6 +225,7 @@ def _select_next_bank_question(
     asked_question_ids: List[str],
     role: Optional[str],
     selected_skills: Optional[List[str]] = None,
+    jd_signals: Optional[Dict[str, Any]] = None,
     db: Any = None,
 ) -> Tuple[Optional[str], Optional[str], str]:
     if db is not None:
@@ -220,6 +257,7 @@ def _select_next_bank_question(
             constrained = filter_questions_for_track_ids(questions, selected)
             questions = constrained or _family_fallback_questions(questions, interview_type)
 
+    questions = filter_questions_by_jd(questions, jd_signals)
     unseen = [q for q in questions if q.get("id") not in asked_question_ids]
     pool = unseen if unseen else questions
     if not pool:
@@ -283,6 +321,7 @@ def choose_opening_question(
     role: Optional[str],
     question_mix: str,
     selected_skills: Optional[List[str]] = None,
+    jd_signals: Optional[Dict[str, Any]] = None,
     db: Any = None,
 ) -> Dict[str, Any]:
     selected = normalize_track_ids(selected_skills)
@@ -319,6 +358,7 @@ def choose_opening_question(
         asked_question_ids=[],
         role=role,
         selected_skills=selected,
+        jd_signals=jd_signals,
         db=db,
     )
 
@@ -348,6 +388,7 @@ def build_recoverable_fallback_turn(
     duration_minutes: Optional[int],
     asked_question_ids: List[str],
     selected_skills: Optional[List[str]] = None,
+    jd_signals: Optional[Dict[str, Any]] = None,
     db: Any = None,
     error_message: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -365,6 +406,7 @@ def build_recoverable_fallback_turn(
         asked_question_ids=asked_question_ids,
         role=role,
         selected_skills=normalized_selected_skills,
+        jd_signals=jd_signals,
         db=db,
     )
     if not next_question:
@@ -414,6 +456,7 @@ def decide_next_turn(
     duration_minutes: Optional[int],
     asked_question_ids: List[str],
     selected_skills: Optional[List[str]] = None,
+    jd_signals: Optional[Dict[str, Any]] = None,
     db: Any = None,
 ) -> Dict[str, Any]:
     """Return next question and turn evaluation for adaptive interview control."""
@@ -434,6 +477,7 @@ def decide_next_turn(
             asked_question_ids=asked_question_ids,
             role=role,
             selected_skills=normalized_selected_skills,
+            jd_signals=jd_signals,
             db=db,
         )
         if not next_question:
@@ -533,6 +577,7 @@ def decide_next_turn(
                 asked_question_ids=asked_question_ids,
                 role=role,
                 selected_skills=normalized_selected_skills,
+                jd_signals=jd_signals,
                 db=db,
             )
 

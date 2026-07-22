@@ -13,8 +13,14 @@ import {
   Chip,
   CircularProgress,
   Container,
+  FormControl,
   FormControlLabel,
+  FormHelperText,
   Grid,
+  InputLabel,
+  MenuItem,
+  Rating,
+  Select,
   Stack,
   Step,
   StepLabel,
@@ -25,7 +31,7 @@ import {
 
 const API_BASE_URL = getApiBaseUrl();
 
-const steps = ["Profile Type", "Goals", "Background", "Consent"];
+const steps = ["Fast Start", "Profile Details", "Consent"];
 
 const commonOptions = {
   primaryGoal: ["Mock interviews", "Placement prep", "Job switch", "Leadership prep", "Consulting readiness"],
@@ -44,67 +50,109 @@ const studentOptions = {
 };
 
 const professionalOptions = {
-  experienceBand: ["0-2 years", "3-5 years", "6-9 years", "10+ years"],
+  seniorityLevel: ["Foundation", "Growth", "Advanced", "Leadership"],
   managementScope: ["Individual contributor", "Mentoring", "Team lead", "Org lead"],
   targetCompanyType: ["Startup", "Mid-size", "Enterprise", "Global MNC"],
   careerTransitionIntent: ["Same role growth", "Role switch", "Industry switch", "Leadership track"],
   noticePeriodBand: ["Immediate", "Within 30 days", "31-60 days", "60+ days"],
-  careerCompBand: ["Foundation", "Growth", "Advanced", "Leadership"],
-  interviewUrgency: ["Actively interviewing", "Preparing now", "Exploring opportunities"],
-  domainExpertise: ["Backend", "Frontend", "Data", "Cloud", "Product", "Sales", "Operations", "HR"],
 };
 
-const stateOptions = [
-  "AP","AR","AS","BR","CG","GA","GJ","HR","HP","JH","KA","KL","MP","MH","MN","ML","MZ","NL",
-  "OD","PB","RJ","SK","TN","TS","TR","UP","UK","WB","AN","CH","DN","DD","DL","JK","LA","LD","PY",
+const countryOptions = [
+  { code: "IN", label: "India" },
+  { code: "US", label: "United States" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "CA", label: "Canada" },
+  { code: "AU", label: "Australia" },
+  { code: "SG", label: "Singapore" },
+  { code: "AE", label: "United Arab Emirates" },
+  { code: "OTHER", label: "Other" },
 ];
 
-const streamOptions = [
-  "python_fundamentals",
-  "java_full_stack",
-  "machine_learning_python",
-  "genai_python_cloud",
-  "frontend_engineering",
-  "data_analytics_sql_python",
-  "devops_cloud_basics",
-  "testing_qa_automation",
-  "cybersecurity_basics",
-  "product_analyst_basics",
+const timezoneOptions = [
+  "Asia/Kolkata",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Helsinki",
+  "Asia/Singapore",
+  "Asia/Dubai",
+  "Australia/Sydney",
+];
+
+const interviewFormats = ["Phone screen", "Technical", "System design", "Behavioral", "Case", "Take-home"];
+
+const skillOptions = [
+  { key: "python_fundamentals", label: "Python fundamentals" },
+  { key: "java_full_stack", label: "Java full stack" },
+  { key: "machine_learning_python", label: "Machine learning with Python" },
+  { key: "genai_python_cloud", label: "GenAI, Python, and cloud" },
+  { key: "frontend_engineering", label: "Frontend engineering" },
+  { key: "data_analytics_sql_python", label: "Data analytics with SQL and Python" },
+  { key: "devops_cloud_basics", label: "DevOps and cloud basics" },
+  { key: "testing_qa_automation", label: "Testing and QA automation" },
+  { key: "cybersecurity_basics", label: "Cybersecurity basics" },
+  { key: "product_analyst_basics", label: "Product analyst basics" },
 ];
 
 const initialForm = {
-  userCategory: "",
+  userCategory: "professional",
   primaryGoal: "",
   targetRoles: [],
   industries: [],
   interviewTimeline: "",
-  prepIntensity: "",
-  learningStyle: "",
+  prepIntensity: "Moderate",
+  learningStyle: "Balanced",
   consentDataUse: false,
   consentContact: false,
   stateCode: "",
   city: "",
   countryCode: "IN",
+  timezone: "Asia/Kolkata",
   universityName: "",
   degreeName: "",
   graduationYear: "",
   primaryStream: "",
+  skillRatings: {},
   educationLevel: "",
   graduationTimeline: "",
   majorDomain: "",
   placementReadiness: "",
   currentRole: "",
-  experienceBand: "",
+  yearsOfExperience: "",
+  seniorityLevel: "",
   managementScope: "",
-  domainExpertise: [],
   targetCompanyType: "",
   careerTransitionIntent: "",
   noticePeriodBand: "",
-  careerCompBand: "",
-  interviewUrgency: "",
+  interviewFormat: "",
 };
 
-function SelectChips({ title, options, value, onChange }) {
+const extrasStorageKey = "onboardingProfileExtras";
+
+function readExtras() {
+  try {
+    return JSON.parse(localStorage.getItem(extrasStorageKey) || "{}");
+  } catch (_err) {
+    return {};
+  }
+}
+
+function writeExtras(form) {
+  localStorage.setItem(
+    extrasStorageKey,
+    JSON.stringify({
+      timezone: form.timezone,
+      yearsOfExperience: form.yearsOfExperience,
+      seniorityLevel: form.seniorityLevel,
+      interviewFormat: form.interviewFormat,
+      skillRatings: form.skillRatings,
+    }),
+  );
+}
+
+function SelectChips({ title, options, value, onChange, helperText }) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
@@ -123,6 +171,11 @@ function SelectChips({ title, options, value, onChange }) {
           />
         ))}
       </Stack>
+      {helperText && (
+        <Typography variant="caption" color="text.secondary">
+          {helperText}
+        </Typography>
+      )}
     </Stack>
   );
 }
@@ -153,6 +206,74 @@ function MultiSelectChips({ title, options, value, onChange }) {
   );
 }
 
+function ProfileTypeButton({ selected, title, description, onClick }) {
+  return (
+    <Button
+      fullWidth
+      variant={selected ? "contained" : "outlined"}
+      onClick={onClick}
+      sx={{
+        alignItems: "flex-start",
+        borderRadius: 2,
+        justifyContent: "flex-start",
+        minHeight: 112,
+        p: 2,
+        textAlign: "left",
+        textTransform: "none",
+      }}
+    >
+      <Stack spacing={0.5}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+          {title}
+        </Typography>
+        <Typography variant="body2" sx={{ color: selected ? "primary.contrastText" : "text.secondary" }}>
+          {description}
+        </Typography>
+      </Stack>
+    </Button>
+  );
+}
+
+function SkillRatingGrid({ ratings, onChange }) {
+  return (
+    <Stack spacing={1.25}>
+      <Box>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+          Skill self-ratings
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Rate skills from 1 to 5. The strongest rated skill becomes the primary stream for interview calibration.
+        </Typography>
+      </Box>
+      <Grid container spacing={1.5}>
+        {skillOptions.map((skill) => (
+          <Grid item xs={12} sm={6} md={4} key={skill.key}>
+            <Box
+              sx={{
+                border: "1px solid",
+                borderColor: ratings[skill.key] ? "primary.main" : "divider",
+                borderRadius: 2,
+                p: 1.5,
+              }}
+            >
+              <Typography id={`${skill.key}-label`} variant="body2" sx={{ fontWeight: 700 }}>
+                {skill.label}
+              </Typography>
+              <Rating
+                aria-labelledby={`${skill.key}-label`}
+                name={`rating-${skill.key}`}
+                value={ratings[skill.key] || 0}
+                onChange={(_event, nextValue) => onChange(skill.key, nextValue || 0)}
+                max={5}
+              />
+            </Box>
+          </Grid>
+        ))}
+      </Grid>
+    </Stack>
+  );
+}
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -161,11 +282,14 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(() => ({ ...initialForm, ...readExtras() }));
 
   useEffect(() => {
     if (!isLoaded) return;
-    if (!isSignedIn) { setLoading(false); return; }
+    if (!isSignedIn) {
+      setLoading(false);
+      return;
+    }
     let mounted = true;
     async function loadProfile() {
       try {
@@ -181,20 +305,24 @@ export default function OnboardingPage() {
           throw new Error(text || "Failed to load profile");
         }
         const profile = await resp.json();
+        const extras = readExtras();
+        const parsedYears = parseInt(profile.experienceBand, 10);
         setForm((prev) => ({
           ...prev,
-          userCategory: profile.userCategory || "",
+          ...extras,
+          userCategory: profile.userCategory || "professional",
           primaryGoal: profile.primaryGoal || "",
           targetRoles: Array.isArray(profile.targetRoles) ? profile.targetRoles : [],
           industries: Array.isArray(profile.industries) ? profile.industries : [],
           interviewTimeline: profile.interviewTimeline || "",
-          prepIntensity: profile.prepIntensity || "",
-          learningStyle: profile.learningStyle || "",
+          prepIntensity: profile.prepIntensity || "Moderate",
+          learningStyle: profile.learningStyle || "Balanced",
           consentDataUse: Boolean(profile.consentDataUse),
           consentContact: Boolean(profile.consentContact),
           stateCode: profile.stateCode || "",
           city: profile.city || "",
           countryCode: profile.countryCode || "IN",
+          timezone: profile.timezone || extras.timezone || "Asia/Kolkata",
           universityName: profile.universityName || "",
           degreeName: profile.degreeName || "",
           graduationYear: profile.graduationYear ? String(profile.graduationYear) : "",
@@ -204,14 +332,19 @@ export default function OnboardingPage() {
           majorDomain: profile.majorDomain || "",
           placementReadiness: profile.placementReadiness || "",
           currentRole: profile.currentRole || "",
-          experienceBand: profile.experienceBand || "",
           managementScope: profile.managementScope || "",
-          domainExpertise: Array.isArray(profile.domainExpertise) ? profile.domainExpertise : [],
           targetCompanyType: profile.targetCompanyType || "",
           careerTransitionIntent: profile.careerTransitionIntent || "",
           noticePeriodBand: profile.noticePeriodBand || "",
-          careerCompBand: profile.careerCompBand || "",
-          interviewUrgency: profile.interviewUrgency || "",
+          seniorityLevel: profile.seniority || profile.careerCompBand || extras.seniorityLevel || "",
+          yearsOfExperience: profile.yearsOfExperience != null ? String(profile.yearsOfExperience) : (extras.yearsOfExperience || (Number.isFinite(parsedYears) ? String(parsedYears) : "")),
+          interviewFormat: profile.targetInterviewFormat || extras.interviewFormat || "",
+          skillRatings: Array.isArray(profile.skillsSelfReported)
+            ? profile.skillsSelfReported.reduce((acc, item) => {
+                if (item && typeof item === "object" && item.key && item.rating) acc[item.key] = item.rating;
+                return acc;
+              }, extras.skillRatings || {})
+            : extras.skillRatings || {},
         }));
       } catch (loadErr) {
         setError(loadErr.message || "Failed to load profile.");
@@ -227,11 +360,15 @@ export default function OnboardingPage() {
     };
   }, [isLoaded, isSignedIn, getToken]);
 
-  const categoryLabel = useMemo(() => {
-    if (form.userCategory === "student") return "Student";
-    if (form.userCategory === "professional") return "Working Professional";
-    return "Not selected";
-  }, [form.userCategory]);
+  const selectedSkills = useMemo(
+    () =>
+      Object.entries(form.skillRatings || {})
+        .filter(([, rating]) => rating > 0)
+        .sort((a, b) => b[1] - a[1]),
+    [form.skillRatings],
+  );
+
+  const categoryLabel = form.userCategory === "student" ? "Student" : "Working Professional";
 
   const toggleMulti = (field, option) => {
     setForm((prev) => {
@@ -245,59 +382,42 @@ export default function OnboardingPage() {
     });
   };
 
+  const setSkillRating = (skillKey, rating) => {
+    setForm((prev) => {
+      const nextRatings = { ...(prev.skillRatings || {}), [skillKey]: rating };
+      if (!rating) {
+        delete nextRatings[skillKey];
+      }
+      const topSkill = Object.entries(nextRatings).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+      return {
+        ...prev,
+        skillRatings: nextRatings,
+        primaryStream: topSkill,
+      };
+    });
+  };
+
   const validateStep = (step) => {
     if (step === 0) {
-      return Boolean(form.userCategory);
-    }
-    if (step === 1) {
       return Boolean(
         form.primaryGoal &&
           form.targetRoles.length > 0 &&
-          form.industries.length > 0 &&
-          form.interviewTimeline &&
-          form.prepIntensity &&
-          form.learningStyle
+          form.seniorityLevel &&
+          form.interviewFormat
       );
     }
-    if (step === 2) {
-      if (form.userCategory === "student") {
-        return Boolean(
-          form.educationLevel &&
-            form.graduationTimeline &&
-            form.majorDomain &&
-            form.placementReadiness &&
-            form.stateCode &&
-            form.universityName &&
-            form.primaryStream
-        );
-      }
-      if (form.userCategory === "professional") {
-        return Boolean(
-          form.currentRole &&
-            form.experienceBand &&
-            form.managementScope &&
-            form.domainExpertise.length > 0 &&
-            form.targetCompanyType &&
-            form.careerTransitionIntent &&
-            form.noticePeriodBand &&
-            form.careerCompBand &&
-            form.interviewUrgency &&
-            form.stateCode &&
-            form.universityName &&
-            form.primaryStream
-        );
-      }
-      return false;
+    if (step === 1) {
+      return Boolean(form.countryCode && form.stateCode && form.timezone && form.primaryStream);
     }
-    if (step === 3) {
-      return Boolean(form.consentDataUse && form.consentContact);
+    if (step === 2) {
+      return Boolean(form.consentDataUse);
     }
     return true;
   };
 
   const handleNext = () => {
     if (!validateStep(activeStep)) {
-      setError("Please complete all required selections for this step.");
+      setError("Please complete the required fields before continuing.");
       return;
     }
     setError("");
@@ -310,44 +430,63 @@ export default function OnboardingPage() {
   };
 
   const handleSubmit = async () => {
-    if (!validateStep(3)) {
-      setError("Consent is required to continue.");
+    if (!validateStep(2)) {
+      setError("Data-use consent is required to continue. Contact consent is optional.");
       return;
     }
     setSaving(true);
     setError("");
     try {
       const token = await getToken();
+      const selectedSkillLabels = selectedSkills.map(([key, rating]) => {
+        const skill = skillOptions.find((item) => item.key === key);
+        return `${skill?.label || key} (${rating}/5)`;
+      });
+      const selectedSkillRatings = selectedSkills.map(([key, rating]) => {
+        const skill = skillOptions.find((item) => item.key === key);
+        return {
+          key,
+          label: skill?.label || key,
+          rating,
+        };
+      });
       const payload = {
         userCategory: form.userCategory,
         primaryGoal: form.primaryGoal,
         targetRoles: form.targetRoles,
-        industries: form.industries,
-        interviewTimeline: form.interviewTimeline,
-        prepIntensity: form.prepIntensity,
-        learningStyle: form.learningStyle,
+        industries: form.industries.length ? form.industries : ["Software"],
+        interviewTimeline: form.interviewTimeline || "Within 1 month",
+        prepIntensity: form.prepIntensity || "Moderate",
+        learningStyle: form.learningStyle || "Balanced",
         consentDataUse: form.consentDataUse,
         consentContact: form.consentContact,
         stateCode: form.stateCode || null,
+        region: form.stateCode || null,
         city: form.city || null,
         countryCode: form.countryCode || "IN",
+        timezone: form.timezone || null,
         universityName: form.universityName || null,
         degreeName: form.degreeName || null,
         graduationYear: form.graduationYear ? Number(form.graduationYear) : null,
         primaryStream: form.primaryStream || null,
+        skillsSelfReported: selectedSkillRatings,
+        seniority: form.seniorityLevel || null,
+        yearsOfExperience: form.yearsOfExperience ? Number(form.yearsOfExperience) : null,
+        currentTitle: form.currentRole || null,
+        targetInterviewFormat: form.interviewFormat || null,
         educationLevel: form.educationLevel || null,
         graduationTimeline: form.graduationTimeline || null,
         majorDomain: form.majorDomain || null,
         placementReadiness: form.placementReadiness || null,
         currentRole: form.currentRole || null,
-        experienceBand: form.experienceBand || null,
+        experienceBand: form.yearsOfExperience ? `${form.yearsOfExperience} years` : null,
         managementScope: form.managementScope || null,
-        domainExpertise: form.domainExpertise,
+        domainExpertise: selectedSkillLabels,
         targetCompanyType: form.targetCompanyType || null,
         careerTransitionIntent: form.careerTransitionIntent || null,
         noticePeriodBand: form.noticePeriodBand || null,
-        careerCompBand: form.careerCompBand || null,
-        interviewUrgency: form.interviewUrgency || null,
+        careerCompBand: form.seniorityLevel || null,
+        interviewUrgency: form.interviewTimeline || null,
       };
       const resp = await authFetch(`${API_BASE_URL}/api/profile/me`, token, {
         method: "PUT",
@@ -358,6 +497,7 @@ export default function OnboardingPage() {
         const text = await resp.text();
         throw new Error(text || "Failed to save onboarding profile.");
       }
+      writeExtras(form);
       navigate("/dashboard");
     } catch (submitErr) {
       setError(submitErr.message || "Failed to save onboarding profile.");
@@ -375,14 +515,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        py: { xs: 3, md: 5 },
-        background:
-          "radial-gradient(900px 360px at 0% 0%, rgba(37,99,235,0.14), transparent 60%), radial-gradient(800px 320px at 100% 0%, rgba(14,116,144,0.12), transparent 60%), #f8fafc",
-      }}
-    >
+    <Box sx={{ minHeight: "100vh", py: { xs: 3, md: 5 }, bgcolor: "#f8fafc" }}>
       <Container maxWidth="lg">
         <Card
           sx={{
@@ -399,7 +532,7 @@ export default function OnboardingPage() {
                   Build Your Interview Intelligence Profile
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  This powers personalized interview simulations, analytics, and consulting insights.
+                  Start with the essentials now. You can enrich the profile as coaching data grows.
                 </Typography>
               </Box>
 
@@ -414,55 +547,30 @@ export default function OnboardingPage() {
               {error && <Alert severity="error">{error}</Alert>}
 
               {activeStep === 0 && (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      onClick={() => setForm((prev) => ({ ...prev, userCategory: "student" }))}
-                      sx={{
-                        cursor: "pointer",
-                        border: "1px solid",
-                        borderColor: form.userCategory === "student" ? "primary.main" : "divider",
-                        bgcolor: form.userCategory === "student" ? "rgba(37,99,235,0.06)" : "background.paper",
-                      }}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                          Student Track
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Campus placements, internships, and first-job interview prep.
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Card
-                      onClick={() => setForm((prev) => ({ ...prev, userCategory: "professional" }))}
-                      sx={{
-                        cursor: "pointer",
-                        border: "1px solid",
-                        borderColor: form.userCategory === "professional" ? "primary.main" : "divider",
-                        bgcolor: form.userCategory === "professional" ? "rgba(37,99,235,0.06)" : "background.paper",
-                      }}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                          Working Professional Track
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Growth, transitions, and high-stakes interview coaching.
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              )}
-
-              {activeStep === 1 && (
                 <Stack spacing={2.5}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={6}>
+                      <ProfileTypeButton
+                        selected={form.userCategory === "student"}
+                        title="Student"
+                        description="Campus placements, internships, and first-job interview prep."
+                        onClick={() => setForm((prev) => ({ ...prev, userCategory: "student" }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <ProfileTypeButton
+                        selected={form.userCategory === "professional"}
+                        title="Working Professional"
+                        description="Growth, transitions, and high-stakes interview coaching."
+                        onClick={() => setForm((prev) => ({ ...prev, userCategory: "professional" }))}
+                      />
+                    </Grid>
+                  </Grid>
+
                   <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                     Profile Type: {categoryLabel}
                   </Typography>
+
                   <SelectChips
                     title="Primary interview goal"
                     options={commonOptions.primaryGoal}
@@ -470,61 +578,101 @@ export default function OnboardingPage() {
                     onChange={(option) => setForm((prev) => ({ ...prev, primaryGoal: option }))}
                   />
                   <MultiSelectChips
-                    title="Target roles"
+                    title="Target role"
                     options={commonOptions.targetRoles}
                     value={form.targetRoles}
                     onChange={(option) => toggleMulti("targetRoles", option)}
                   />
-                  <MultiSelectChips
-                    title="Preferred industries"
-                    options={commonOptions.industries}
-                    value={form.industries}
-                    onChange={(option) => toggleMulti("industries", option)}
-                  />
-                  <SelectChips
-                    title="Interview timeline"
-                    options={commonOptions.interviewTimeline}
-                    value={form.interviewTimeline}
-                    onChange={(option) => setForm((prev) => ({ ...prev, interviewTimeline: option }))}
-                  />
                   <Grid container spacing={2}>
                     <Grid item xs={12} md={6}>
                       <SelectChips
-                        title="Preparation intensity"
-                        options={commonOptions.prepIntensity}
-                        value={form.prepIntensity}
-                        onChange={(option) => setForm((prev) => ({ ...prev, prepIntensity: option }))}
+                        title="Seniority"
+                        options={professionalOptions.seniorityLevel}
+                        value={form.seniorityLevel}
+                        onChange={(option) => setForm((prev) => ({ ...prev, seniorityLevel: option }))}
                       />
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <SelectChips
-                        title="Learning style"
-                        options={commonOptions.learningStyle}
-                        value={form.learningStyle}
-                        onChange={(option) => setForm((prev) => ({ ...prev, learningStyle: option }))}
+                        title="Target interview format"
+                        options={interviewFormats}
+                        value={form.interviewFormat}
+                        onChange={(option) => setForm((prev) => ({ ...prev, interviewFormat: option }))}
                       />
                     </Grid>
                   </Grid>
                 </Stack>
               )}
 
-              {activeStep === 2 && form.userCategory === "student" && (
+              {activeStep === 1 && (
                 <Stack spacing={2.5}>
                   <Grid container spacing={2}>
                     <Grid item xs={12} md={4}>
-                      <SelectChips
-                        title="State (required)"
-                        options={stateOptions}
+                      <FormControl fullWidth required>
+                        <InputLabel id="country-label">Country</InputLabel>
+                        <Select
+                          labelId="country-label"
+                          label="Country"
+                          value={form.countryCode}
+                          onChange={(e) => setForm((prev) => ({ ...prev, countryCode: e.target.value }))}
+                        >
+                          {countryOptions.map((country) => (
+                            <MenuItem key={country.code} value={country.code}>
+                              {country.label}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        required
+                        label="Region / State"
                         value={form.stateCode}
-                        onChange={(option) => setForm((prev) => ({ ...prev, stateCode: option }))}
+                        onChange={(e) => setForm((prev) => ({ ...prev, stateCode: e.target.value }))}
+                        helperText="Use a state, province, emirate, or region name."
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <FormControl fullWidth required>
+                        <InputLabel id="timezone-label">Timezone</InputLabel>
+                        <Select
+                          labelId="timezone-label"
+                          label="Timezone"
+                          value={form.timezone}
+                          onChange={(e) => setForm((prev) => ({ ...prev, timezone: e.target.value }))}
+                        >
+                          {timezoneOptions.map((timezone) => (
+                            <MenuItem key={timezone} value={timezone}>
+                              {timezone}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                        <FormHelperText>Used for reminders and interview scheduling context.</FormHelperText>
+                      </FormControl>
+                    </Grid>
+                  </Grid>
+
+                  <SkillRatingGrid ratings={form.skillRatings} onChange={setSkillRating} />
+
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Current title"
+                        value={form.currentRole}
+                        onChange={(e) => setForm((prev) => ({ ...prev, currentRole: e.target.value }))}
                       />
                     </Grid>
                     <Grid item xs={12} md={4}>
                       <TextField
                         fullWidth
-                        label="University / College (required)"
-                        value={form.universityName}
-                        onChange={(e) => setForm((prev) => ({ ...prev, universityName: e.target.value }))}
+                        type="number"
+                        label="Years of experience"
+                        inputProps={{ min: 0, max: 60, step: 1 }}
+                        value={form.yearsOfExperience}
+                        onChange={(e) => setForm((prev) => ({ ...prev, yearsOfExperience: e.target.value }))}
                       />
                     </Grid>
                     <Grid item xs={12} md={4}>
@@ -536,16 +684,17 @@ export default function OnboardingPage() {
                       />
                     </Grid>
                   </Grid>
+
                   <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
-                      <SelectChips
-                        title="Primary stream (required)"
-                        options={streamOptions}
-                        value={form.primaryStream}
-                        onChange={(option) => setForm((prev) => ({ ...prev, primaryStream: option }))}
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="University / College"
+                        value={form.universityName}
+                        onChange={(e) => setForm((prev) => ({ ...prev, universityName: e.target.value }))}
                       />
                     </Grid>
-                    <Grid item xs={12} md={3}>
+                    <Grid item xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Degree Name"
@@ -553,7 +702,7 @@ export default function OnboardingPage() {
                         onChange={(e) => setForm((prev) => ({ ...prev, degreeName: e.target.value }))}
                       />
                     </Grid>
-                    <Grid item xs={12} md={3}>
+                    <Grid item xs={12} md={4}>
                       <TextField
                         fullWidth
                         type="number"
@@ -563,161 +712,68 @@ export default function OnboardingPage() {
                       />
                     </Grid>
                   </Grid>
-                  <SelectChips
-                    title="Education level"
-                    options={studentOptions.educationLevel}
-                    value={form.educationLevel}
-                    onChange={(option) => setForm((prev) => ({ ...prev, educationLevel: option }))}
-                  />
-                  <SelectChips
-                    title="Graduation timeline"
-                    options={studentOptions.graduationTimeline}
-                    value={form.graduationTimeline}
-                    onChange={(option) => setForm((prev) => ({ ...prev, graduationTimeline: option }))}
-                  />
-                  <SelectChips
-                    title="Major / domain"
-                    options={studentOptions.majorDomain}
-                    value={form.majorDomain}
-                    onChange={(option) => setForm((prev) => ({ ...prev, majorDomain: option }))}
-                  />
-                  <SelectChips
-                    title="Placement readiness"
-                    options={studentOptions.placementReadiness}
-                    value={form.placementReadiness}
-                    onChange={(option) => setForm((prev) => ({ ...prev, placementReadiness: option }))}
-                  />
-                </Stack>
-              )}
 
-              {activeStep === 2 && form.userCategory === "professional" && (
-                <Stack spacing={2.5}>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={4}>
-                      <SelectChips
-                        title="State (required)"
-                        options={stateOptions}
-                        value={form.stateCode}
-                        onChange={(option) => setForm((prev) => ({ ...prev, stateCode: option }))}
-                      />
+                  {form.userCategory === "student" ? (
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} md={6}>
+                        <SelectChips
+                          title="Education level"
+                          options={studentOptions.educationLevel}
+                          value={form.educationLevel}
+                          onChange={(option) => setForm((prev) => ({ ...prev, educationLevel: option }))}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <SelectChips
+                          title="Placement readiness"
+                          options={studentOptions.placementReadiness}
+                          value={form.placementReadiness}
+                          onChange={(option) => setForm((prev) => ({ ...prev, placementReadiness: option }))}
+                        />
+                      </Grid>
                     </Grid>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="University / College (required)"
-                        value={form.universityName}
-                        onChange={(e) => setForm((prev) => ({ ...prev, universityName: e.target.value }))}
-                      />
+                  ) : (
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} md={4}>
+                        <SelectChips
+                          title="Management scope"
+                          options={professionalOptions.managementScope}
+                          value={form.managementScope}
+                          onChange={(option) => setForm((prev) => ({ ...prev, managementScope: option }))}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={4}>
+                        <SelectChips
+                          title="Target company type"
+                          options={professionalOptions.targetCompanyType}
+                          value={form.targetCompanyType}
+                          onChange={(option) => setForm((prev) => ({ ...prev, targetCompanyType: option }))}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={4}>
+                        <SelectChips
+                          title="Transition intent"
+                          options={professionalOptions.careerTransitionIntent}
+                          value={form.careerTransitionIntent}
+                          onChange={(option) => setForm((prev) => ({ ...prev, careerTransitionIntent: option }))}
+                        />
+                      </Grid>
                     </Grid>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="City"
-                        value={form.city}
-                        onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-                      />
-                    </Grid>
-                  </Grid>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={8}>
-                      <SelectChips
-                        title="Primary stream (required)"
-                        options={streamOptions}
-                        value={form.primaryStream}
-                        onChange={(option) => setForm((prev) => ({ ...prev, primaryStream: option }))}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="Degree Name"
-                        value={form.degreeName}
-                        onChange={(e) => setForm((prev) => ({ ...prev, degreeName: e.target.value }))}
-                      />
-                    </Grid>
-                  </Grid>
-                  <SelectChips
-                    title="Current role"
-                    options={["Engineer", "Analyst", "Manager", "Consultant", "Product", "Sales", "Operations"]}
-                    value={form.currentRole}
-                    onChange={(option) => setForm((prev) => ({ ...prev, currentRole: option }))}
-                  />
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
-                      <SelectChips
-                        title="Experience band"
-                        options={professionalOptions.experienceBand}
-                        value={form.experienceBand}
-                        onChange={(option) => setForm((prev) => ({ ...prev, experienceBand: option }))}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <SelectChips
-                        title="Management scope"
-                        options={professionalOptions.managementScope}
-                        value={form.managementScope}
-                        onChange={(option) => setForm((prev) => ({ ...prev, managementScope: option }))}
-                      />
-                    </Grid>
-                  </Grid>
+                  )}
+
                   <MultiSelectChips
-                    title="Domain expertise"
-                    options={professionalOptions.domainExpertise}
-                    value={form.domainExpertise}
-                    onChange={(option) => toggleMulti("domainExpertise", option)}
+                    title="Preferred industries"
+                    options={commonOptions.industries}
+                    value={form.industries}
+                    onChange={(option) => toggleMulti("industries", option)}
                   />
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
-                      <SelectChips
-                        title="Target company type"
-                        options={professionalOptions.targetCompanyType}
-                        value={form.targetCompanyType}
-                        onChange={(option) => setForm((prev) => ({ ...prev, targetCompanyType: option }))}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <SelectChips
-                        title="Transition intent"
-                        options={professionalOptions.careerTransitionIntent}
-                        value={form.careerTransitionIntent}
-                        onChange={(option) => setForm((prev) => ({ ...prev, careerTransitionIntent: option }))}
-                      />
-                    </Grid>
-                  </Grid>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={4}>
-                      <SelectChips
-                        title="Notice period band"
-                        options={professionalOptions.noticePeriodBand}
-                        value={form.noticePeriodBand}
-                        onChange={(option) => setForm((prev) => ({ ...prev, noticePeriodBand: option }))}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <SelectChips
-                        title="Career compensation band"
-                        options={professionalOptions.careerCompBand}
-                        value={form.careerCompBand}
-                        onChange={(option) => setForm((prev) => ({ ...prev, careerCompBand: option }))}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <SelectChips
-                        title="Interview urgency"
-                        options={professionalOptions.interviewUrgency}
-                        value={form.interviewUrgency}
-                        onChange={(option) => setForm((prev) => ({ ...prev, interviewUrgency: option }))}
-                      />
-                    </Grid>
-                  </Grid>
                 </Stack>
               )}
 
-              {activeStep === 3 && (
+              {activeStep === 2 && (
                 <Stack spacing={2}>
                   <Alert severity="info">
-                    We will use this profile and interview performance data to personalize coaching and
-                    consulting-grade analytics.
+                    Data-use consent is required for personalized coaching. Contact consent is optional.
                   </Alert>
                   <FormControlLabel
                     control={
@@ -726,7 +782,7 @@ export default function OnboardingPage() {
                         onChange={(e) => setForm((prev) => ({ ...prev, consentDataUse: e.target.checked }))}
                       />
                     }
-                    label="I explicitly consent to profile and interview data usage for analytics, consulting insights, and service improvement."
+                    label="I consent to profile and interview data usage for personalized coaching, analytics, and service improvement."
                   />
                   <FormControlLabel
                     control={
@@ -735,7 +791,7 @@ export default function OnboardingPage() {
                         onChange={(e) => setForm((prev) => ({ ...prev, consentContact: e.target.checked }))}
                       />
                     }
-                    label="I agree to be contacted via email/phone for interview support, updates, and follow-up guidance."
+                    label="Optional: I agree to be contacted for interview support, updates, and follow-up guidance."
                   />
                 </Stack>
               )}

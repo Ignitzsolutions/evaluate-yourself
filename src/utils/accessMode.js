@@ -4,9 +4,10 @@ const VALID_INTERVIEW_TYPES = new Set(["behavioral", "technical", "mixed"]);
 const INTERVIEW_TYPES_REQUIRING_SKILLS = new Set(["technical", "mixed"]);
 const DEFAULT_DURATION = 10;
 const VALID_DURATIONS = new Set([10, 15, 20, 30, 45, 60]);
-const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard"]);
+const VALID_DIFFICULTIES = new Set(["auto", "easy", "medium", "hard"]);
 const VALID_QUESTION_MIX = new Set(["technical", "balanced", "behavioral"]);
 const VALID_INTERVIEW_STYLES = new Set(["friendly", "neutral", "strict"]);
+const VALID_INTERVIEW_FORMATS = new Set(["phone_screen", "technical", "system_design", "behavioral", "case", "take_home"]);
 
 export function getInterviewAccessMode() {
   const raw = String(process.env.REACT_APP_INTERVIEW_ACCESS_MODE || "free").trim().toLowerCase();
@@ -37,13 +38,16 @@ export function buildInterviewConfig(input = {}) {
   const duration = VALID_DURATIONS.has(rawDuration) ? rawDuration : DEFAULT_DURATION;
   const difficulty = VALID_DIFFICULTIES.has(String(input.difficulty || "").trim().toLowerCase())
     ? String(input.difficulty).trim().toLowerCase()
-    : "easy";
+    : "auto";
   const questionMix = VALID_QUESTION_MIX.has(String(input.questionMix || "").trim().toLowerCase())
     ? String(input.questionMix).trim().toLowerCase()
     : "balanced";
   const interviewStyle = VALID_INTERVIEW_STYLES.has(String(input.interviewStyle || "").trim().toLowerCase())
     ? String(input.interviewStyle).trim().toLowerCase()
     : "neutral";
+  const targetInterviewFormat = VALID_INTERVIEW_FORMATS.has(String(input.targetInterviewFormat || "").trim().toLowerCase())
+    ? String(input.targetInterviewFormat).trim().toLowerCase()
+    : undefined;
   const selectedSkills = normalizeSelectedSkills(input.selectedSkills);
   const accessMode = VALID_ACCESS_MODES.has(String(input.accessMode || "").trim().toLowerCase())
     ? String(input.accessMode).trim().toLowerCase()
@@ -55,6 +59,11 @@ export function buildInterviewConfig(input = {}) {
     difficulty,
     role: normalizeString(input.role),
     company: normalizeString(input.company),
+    jobLevel: normalizeString(input.jobLevel),
+    yearsExperience: Number.isFinite(Number(input.yearsExperience)) ? Number(input.yearsExperience) : undefined,
+    targetJobDescription: normalizeString(input.targetJobDescription),
+    targetJobUrl: normalizeString(input.targetJobUrl),
+    targetInterviewFormat,
     questionMix,
     interviewStyle,
     transcriptConsent: Boolean(input.transcriptConsent),

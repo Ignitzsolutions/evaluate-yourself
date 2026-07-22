@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, List, Any, Literal, Mapping
 import os
 import uuid
@@ -58,6 +58,7 @@ from services.interview.adaptive_engine import (
     decide_next_turn,
     normalize_difficulty,
 )
+from services.interview.setup_planner import build_jd_question_plan, resolve_default_difficulty
 from services.interview.conversation_planner import (
     build_bootstrap_conversation_plan,
     plan_next_turn as plan_next_turn_graph,
@@ -820,10 +821,19 @@ class UserProfileUpsertRequest(BaseModel):
     stateCode: Optional[str] = None
     city: Optional[str] = None
     countryCode: Optional[str] = "IN"
+    region: Optional[str] = None
+    timezone: Optional[str] = None
     universityName: Optional[str] = None
     degreeName: Optional[str] = None
     graduationYear: Optional[int] = None
     primaryStream: Optional[str] = None
+    skillsSelfReported: Optional[List[Any]] = None
+    seniority: Optional[str] = None
+    yearsOfExperience: Optional[int] = None
+    currentTitle: Optional[str] = None
+    targetInterviewFormat: Optional[str] = None
+    targetJobDescription: Optional[str] = None
+    targetJobUrl: Optional[str] = None
 
     # Student fields
     educationLevel: Optional[str] = None
@@ -842,31 +852,107 @@ class UserProfileUpsertRequest(BaseModel):
     careerCompBand: Optional[Literal["Foundation", "Growth", "Advanced", "Leadership"]] = None
     interviewUrgency: Optional[str] = None
 
+    @field_validator(
+        "primaryGoal",
+        "interviewTimeline",
+        "prepIntensity",
+        "learningStyle",
+        "stateCode",
+        "city",
+        "countryCode",
+        "region",
+        "timezone",
+        "universityName",
+        "degreeName",
+        "primaryStream",
+        "seniority",
+        "currentTitle",
+        "targetInterviewFormat",
+        "targetJobDescription",
+        "targetJobUrl",
+        "educationLevel",
+        "graduationTimeline",
+        "majorDomain",
+        "placementReadiness",
+        "currentRole",
+        "experienceBand",
+        "managementScope",
+        "targetCompanyType",
+        "careerTransitionIntent",
+        "noticePeriodBand",
+        "careerCompBand",
+        "interviewUrgency",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_profile_string(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return _sanitize_profile_text(value)
+        return value
+
 
 class CandidateProfileUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidateType: Literal["student", "early_career", "professional"]
-    stateCode: str
+    stateCode: Optional[str] = None
     city: Optional[str] = None
-    countryCode: str = "IN"
-    universityName: str
+    countryCode: Optional[str] = "IN"
+    region: Optional[str] = None
+    timezone: Optional[str] = None
+    universityName: Optional[str] = None
     universityNormalized: Optional[str] = None
     degreeLevel: Optional[str] = None
     degreeName: Optional[str] = None
     branchSpecialization: Optional[str] = None
     graduationYear: Optional[int] = None
     currentYearOfStudy: Optional[str] = None
-    experienceLevel: str
-    primaryStream: str
+    experienceLevel: Optional[str] = None
+    primaryStream: Optional[str] = None
     targetRoles: List[str] = Field(default_factory=list)
     targetCompanies: List[str] = Field(default_factory=list)
-    skillsSelfReported: List[str] = Field(default_factory=list)
+    skillsSelfReported: List[Any] = Field(default_factory=list)
+    seniority: Optional[str] = None
+    yearsOfExperience: Optional[int] = None
+    currentTitle: Optional[str] = None
+    targetInterviewFormat: Optional[str] = None
+    targetJobDescription: Optional[str] = None
+    targetJobUrl: Optional[str] = None
     resumeUrl: Optional[str] = None
     linkedinUrl: Optional[str] = None
     githubUrl: Optional[str] = None
     consentDataUse: bool
     consentContact: bool = False
+
+    @field_validator(
+        "stateCode",
+        "city",
+        "countryCode",
+        "region",
+        "timezone",
+        "universityName",
+        "universityNormalized",
+        "degreeLevel",
+        "degreeName",
+        "branchSpecialization",
+        "currentYearOfStudy",
+        "experienceLevel",
+        "primaryStream",
+        "seniority",
+        "currentTitle",
+        "targetInterviewFormat",
+        "targetJobDescription",
+        "targetJobUrl",
+        "resumeUrl",
+        "linkedinUrl",
+        "githubUrl",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_profile_string(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return _sanitize_profile_text(value)
+        return value
 
 
 class TrialCodeRedeemRequest(BaseModel):
@@ -881,8 +967,58 @@ class WaitlistSignupRequest(BaseModel):
     intent: str = Field(min_length=1, max_length=64)
 
 
+_PROFILE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_profile_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = _PROFILE_CONTROL_CHARS_RE.sub(" ", str(value))
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return text or None
+
+
+def _strip_or_none(value: Any) -> Optional[str]:
+    return _sanitize_profile_text(value)
+
+
+def _normalize_code(value: Any, default: str = "IN") -> str:
+    text = _strip_or_none(value)
+    return (text or default).upper()
+
+
+def _normalize_university_name(value: Any) -> Optional[str]:
+    text = _sanitize_profile_text(value)
+    if not text:
+        return None
+    return re.sub(r"\s+", " ", text).casefold()
+
+
+def _normalize_profile_json_list(value: Any) -> List[Any]:
+    if not isinstance(value, list):
+        return []
+    out: List[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            clean = {
+                key: (_sanitize_profile_text(entry) if isinstance(entry, str) else entry)
+                for key, entry in item.items()
+            }
+            if any(v not in (None, "", [], {}) for v in clean.values()):
+                out.append(clean)
+            continue
+        text = _sanitize_profile_text(item)
+        if text:
+            out.append(text)
+    return out
+
+
+def _normalize_profile_string_list(value: Any) -> List[str]:
+    return [str(v) for v in _normalize_profile_json_list(value) if isinstance(v, str)]
+
+
 def _json_dumps_safe(value: Any) -> str:
-    return json.dumps(value if value is not None else [])
+    return json.dumps(_normalize_profile_json_list(value), ensure_ascii=False)
 
 
 def _json_loads_safe_list(value: Optional[str]) -> List[str]:
@@ -890,28 +1026,44 @@ def _json_loads_safe_list(value: Optional[str]) -> List[str]:
         return []
     try:
         parsed = json.loads(value)
-        if isinstance(parsed, list):
-            return [str(v) for v in parsed]
+        return _normalize_profile_string_list(parsed)
     except Exception:
         pass
     return []
 
 
+def _validate_graduation_year(value: Optional[int]) -> None:
+    if value is None:
+        return
+    max_year = datetime.utcnow().year + 6
+    if value < 1950 or value > max_year:
+        raise HTTPException(
+            status_code=400,
+            detail=f"graduationYear must be between 1950 and {max_year}.",
+        )
+
+
+def _validate_candidate_profile_payload(payload: CandidateProfileUpsertRequest) -> None:
+    if not payload.consentDataUse:
+        raise HTTPException(status_code=400, detail="consentDataUse is required")
+    _validate_graduation_year(payload.graduationYear)
+    if not _normalize_profile_string_list(payload.targetRoles):
+        raise HTTPException(status_code=400, detail="At least one target role is required")
+    if payload.yearsOfExperience is not None and payload.yearsOfExperience < 0:
+        raise HTTPException(status_code=400, detail="yearsOfExperience cannot be negative")
+
+
 def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
     if not payload.consentDataUse:
         raise HTTPException(status_code=400, detail="Explicit consent is required to continue.")
+    _validate_graduation_year(payload.graduationYear)
 
     if not payload.targetRoles:
         raise HTTPException(status_code=400, detail="At least one target role is required.")
-    if not payload.industries:
-        raise HTTPException(status_code=400, detail="At least one industry selection is required.")
 
     if payload.userCategory == "student":
         required_student = [
-            ("educationLevel", payload.educationLevel),
-            ("graduationTimeline", payload.graduationTimeline),
-            ("majorDomain", payload.majorDomain),
-            ("placementReadiness", payload.placementReadiness),
+            ("experienceLevel", payload.seniority or payload.educationLevel or payload.graduationTimeline),
         ]
         missing = [name for name, value in required_student if not value]
         if missing:
@@ -920,24 +1072,14 @@ def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
             )
     elif payload.userCategory == "professional":
         required_prof = [
-            ("currentRole", payload.currentRole),
-            ("experienceBand", payload.experienceBand),
-            ("managementScope", payload.managementScope),
-            ("targetCompanyType", payload.targetCompanyType),
-            ("careerTransitionIntent", payload.careerTransitionIntent),
-            ("noticePeriodBand", payload.noticePeriodBand),
-            ("careerCompBand", payload.careerCompBand),
-            ("interviewUrgency", payload.interviewUrgency),
+            ("currentRole", payload.currentRole or payload.currentTitle),
+            ("experienceBand", payload.experienceBand or payload.seniority),
         ]
         missing = [name for name, value in required_prof if not value]
         if missing:
             raise HTTPException(
                 status_code=400,
                 detail=f"Missing required professional fields: {', '.join(missing)}",
-            )
-        if not payload.domainExpertise:
-            raise HTTPException(
-                status_code=400, detail="domainExpertise is required for professional profile."
             )
 
 
@@ -1017,6 +1159,14 @@ def _sanitize_interview_context(value: Optional[str]) -> Optional[str]:
     if not INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED:
         return value.strip() if isinstance(value, str) and value.strip() else None
     return sanitize_context_text(value, max_length=80)
+
+
+def _sanitize_job_description(value: Optional[str]) -> Optional[str]:
+    if not value or not str(value).strip():
+        return None
+    if not INTERVIEW_PROMPT_INJECTION_GUARD_ENABLED:
+        return str(value).strip()[:4000]
+    return sanitize_context_text(value, max_length=4000)
 
 
 def _validate_selected_skills_or_422(
@@ -1500,11 +1650,14 @@ class WebRTCRequest(BaseModel):
     sdpOffer: str
     sessionId: Optional[str] = None
     interviewType: Optional[str] = "mixed"
-    difficulty: Optional[str] = "easy"
+    difficulty: Optional[str] = "auto"
     durationMinutes: Optional[int] = None
     role: Optional[str] = None
     company: Optional[str] = None
     jobLevel: Optional[str] = "mid"
+    yearsExperience: Optional[float] = None
+    targetJobDescription: Optional[str] = None
+    targetJobUrl: Optional[str] = None
     questionMix: Optional[str] = "balanced"
     questionMixRatio: Optional[float] = None
     interviewStyle: Optional[str] = "neutral"
@@ -1527,6 +1680,20 @@ class AdaptiveTurnRequest(BaseModel):
 
 class NextTurnRequest(AdaptiveTurnRequest):
     model_config = ConfigDict(extra="forbid")
+
+
+class JdQuestionPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    targetJobDescription: Optional[str] = None
+    targetJobUrl: Optional[str] = None
+    targetRole: Optional[str] = None
+    seniority: Optional[str] = None
+    yearsExperience: Optional[float] = None
+    interviewType: Optional[str] = "mixed"
+    difficulty: Optional[str] = "auto"
+    selectedSkills: Optional[List[str]] = None
+    questionCount: Optional[int] = 6
 
 
 class TrustedCaptureRequest(BaseModel):
@@ -1603,6 +1770,44 @@ async def interview_skill_catalog(
     }
 
 
+@app.post("/api/interview/jd-question-plan")
+async def interview_jd_question_plan(
+    request: JdQuestionPlanRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    current_user = get_current_user(authorization=authorization, db=db)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Invalid user session.")
+
+    interview_type_value = (request.interviewType or "mixed").strip().lower()
+    selected_skills: List[str] = []
+    if INTERVIEW_SKILL_TRACKS_ENABLED and request.selectedSkills is not None:
+        selected_skills = _validate_selected_skills_or_422(
+            db=db,
+            interview_type=interview_type_value,
+            selected_skills=request.selectedSkills,
+        )
+
+    target_jd = _sanitize_job_description(request.targetJobDescription)
+    target_role = _sanitize_interview_context(request.targetRole)
+    plan = build_jd_question_plan(
+        target_jd=target_jd,
+        target_role=target_role,
+        seniority=request.seniority,
+        years_experience=request.yearsExperience,
+        interview_type=interview_type_value,
+        requested_difficulty=request.difficulty,
+        selected_skills=selected_skills,
+        question_count=request.questionCount or 6,
+    )
+    return {
+        "ok": True,
+        "targetJobUrl": _sanitize_interview_context(request.targetJobUrl),
+        "questionPlan": plan,
+    }
+
+
 def _realtime_session_log_config(
     session_payload: Mapping[str, Any], *, include_inline_instructions: bool
 ) -> Dict[str, Any]:
@@ -1665,10 +1870,11 @@ async def webrtc_proxy(
                     "redeem_path": "/interview-config",
                 },
             )
-        normalized_difficulty = normalize_difficulty(request.difficulty or "mid")
         interview_type_value = (request.interviewType or "mixed").strip().lower()
         sanitized_role = _sanitize_interview_context(request.role)
         sanitized_company = _sanitize_interview_context(request.company)
+        sanitized_target_jd = _sanitize_job_description(request.targetJobDescription)
+        sanitized_target_job_url = _sanitize_interview_context(request.targetJobUrl)
         selected_skills: List[str] = []
         if INTERVIEW_SKILL_TRACKS_ENABLED:
             selected_skills = _validate_selected_skills_or_422(
@@ -1676,6 +1882,23 @@ async def webrtc_proxy(
                 interview_type=interview_type_value,
                 selected_skills=request.selectedSkills,
             )
+        question_plan = build_jd_question_plan(
+            target_jd=sanitized_target_jd,
+            target_role=sanitized_role,
+            seniority=request.jobLevel,
+            years_experience=request.yearsExperience,
+            interview_type=interview_type_value,
+            requested_difficulty=request.difficulty,
+            selected_skills=selected_skills,
+            question_count=6,
+        )
+        normalized_difficulty = resolve_default_difficulty(
+            target_role=sanitized_role,
+            seniority=request.jobLevel,
+            years_experience=request.yearsExperience,
+            jd_signals=question_plan.get("jd_signals"),
+            requested_difficulty=request.difficulty,
+        )
         requested_minutes = (
             request.durationMinutes
             if request.durationMinutes and request.durationMinutes > 0
@@ -1697,6 +1920,17 @@ async def webrtc_proxy(
             question_mix=request.questionMix,
             interview_style=request.interviewStyle,
             selected_skills=selected_skills,
+            extra_payload={
+                "target_job_description": sanitized_target_jd,
+                "target_job_url": sanitized_target_job_url,
+                "years_experience": request.yearsExperience,
+                "job_level": request.jobLevel,
+                "jd_question_plan": question_plan,
+                "jd_signals": question_plan.get("jd_signals", {}),
+                "difficulty_source": "auto_profile_jd"
+                if str(request.difficulty or "auto").strip().lower() == "auto"
+                else "user_selected",
+            },
         )
         _upsert_interview_session_row(
             db=db,
@@ -1730,6 +1964,15 @@ async def webrtc_proxy(
             selected_skills=selected_skills,
             db=db,
         )
+        planned_questions = question_plan.get("questions") if isinstance(question_plan, dict) else []
+        if planned_questions:
+            first_planned = planned_questions[0]
+            opening_decision = {
+                **opening_decision,
+                "next_question": first_planned.get("text") or opening_decision.get("next_question"),
+                "question_id": first_planned.get("id") or opening_decision.get("question_id"),
+                "source": question_plan.get("source") or "deterministic_jd_planner",
+            }
         resume_token = _ensure_resume_token(runtime_payload)
         bootstrap_plan = _build_orchestrator_artifacts(
             session_id=session_id,
@@ -1757,6 +2000,12 @@ async def webrtc_proxy(
                 "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
                 "agent_owner": bootstrap_plan.get("agent_owner"),
                 "round_index": 0,
+                "target_job_description": sanitized_target_jd,
+                "target_job_url": sanitized_target_job_url,
+                "years_experience": request.yearsExperience,
+                "job_level": request.jobLevel,
+                "jd_question_plan": question_plan,
+                "jd_signals": question_plan.get("jd_signals", {}),
             }
         )
         runtime_payload = _save_runtime_session(
@@ -1780,6 +2029,15 @@ async def webrtc_proxy(
                 "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
                 "agent_owner": bootstrap_plan.get("agent_owner"),
                 "round_index": 0,
+                "target_job_description": sanitized_target_jd,
+                "target_job_url": sanitized_target_job_url,
+                "years_experience": request.yearsExperience,
+                "job_level": request.jobLevel,
+                "jd_question_plan": question_plan,
+                "jd_signals": question_plan.get("jd_signals", {}),
+                "difficulty_source": "auto_profile_jd"
+                if str(request.difficulty or "auto").strip().lower() == "auto"
+                else "user_selected",
             },
         )
         persist_interview_round(
@@ -1804,6 +2062,8 @@ async def webrtc_proxy(
                 "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
                 "evaluation_channels": bootstrap_plan.get("evaluation_channels", {}),
                 "selected_skills": selected_skills,
+                "jd_question_plan": question_plan,
+                "jd_signals": question_plan.get("jd_signals", {}),
             },
             resume_token=resume_token,
         )
@@ -2120,8 +2380,10 @@ async def webrtc_proxy(
             "voice": REALTIME_VOICE,
             "transcriptionAvailable": transcription_available,
             "selectedSkills": selected_skills,
+            "difficulty": normalized_difficulty,
             "openingQuestion": opening_decision.get("next_question"),
             "openingQuestionId": opening_decision.get("question_id"),
+            "questionPlan": question_plan,
             "conversation_plan": bootstrap_plan.get("conversation_plan", {}),
             "filler_pack_version": bootstrap_plan.get("filler_pack_version"),
             "resume_token": resume_token,
@@ -3749,19 +4011,19 @@ def _slugify_stream_label(value: Optional[str]) -> Optional[str]:
 
 def _safe_json_list_text(value: Any) -> str:
     try:
-        return json.dumps(value if isinstance(value, list) else [], ensure_ascii=False)
+        return json.dumps(_normalize_profile_json_list(value), ensure_ascii=False)
     except Exception:
         return "[]"
 
 
 def _candidate_profile_v2_to_api(profile: models.CandidateProfileV2) -> Dict[str, Any]:
-    def _load_list(raw: Optional[str]) -> List[str]:
+    def _load_list(raw: Optional[str]) -> List[Any]:
         if not raw:
             return []
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
-                return [str(v) for v in parsed if str(v or "").strip()]
+                return _normalize_profile_json_list(parsed)
         except Exception:
             pass
         return []
@@ -3774,6 +4036,8 @@ def _candidate_profile_v2_to_api(profile: models.CandidateProfileV2) -> Dict[str
         "stateCode": profile.state_code,
         "city": profile.city,
         "countryCode": profile.country_code or "IN",
+        "region": profile.region,
+        "timezone": profile.timezone,
         "universityName": profile.university_name,
         "universityNormalized": profile.university_normalized,
         "universityId": profile.university_id,
@@ -3783,6 +4047,12 @@ def _candidate_profile_v2_to_api(profile: models.CandidateProfileV2) -> Dict[str
         "graduationYear": profile.graduation_year,
         "currentYearOfStudy": profile.current_year_of_study,
         "experienceLevel": profile.experience_level,
+        "seniority": profile.seniority,
+        "yearsOfExperience": profile.years_of_experience,
+        "currentTitle": profile.current_title,
+        "targetInterviewFormat": profile.target_interview_format,
+        "targetJobDescription": profile.target_job_description,
+        "targetJobUrl": profile.target_job_url,
         "primaryStream": profile.primary_stream,
         "targetRoles": _load_list(profile.target_roles_json),
         "targetCompanies": _load_list(profile.target_companies_json),
@@ -3820,6 +4090,8 @@ def _candidate_profile_v2_from_legacy_profile(
         "stateCode": None,
         "city": None,
         "countryCode": "IN",
+        "region": None,
+        "timezone": None,
         "universityName": None,
         "universityNormalized": None,
         "universityId": None,
@@ -3831,6 +4103,12 @@ def _candidate_profile_v2_from_legacy_profile(
             legacy.graduation_timeline if legacy.user_category == "student" else None
         ),
         "experienceLevel": experience_level,
+        "seniority": legacy.experience_band if legacy.user_category == "professional" else None,
+        "yearsOfExperience": None,
+        "currentTitle": legacy.current_role,
+        "targetInterviewFormat": None,
+        "targetJobDescription": None,
+        "targetJobUrl": None,
         "primaryStream": primary_stream,
         "targetRoles": target_roles,
         "targetCompanies": [legacy.target_company_type] if legacy.target_company_type else [],
@@ -3850,10 +4128,10 @@ def _candidate_profile_v2_from_legacy_profile(
 
 def _compute_candidate_profile_completion_score(data: Dict[str, Any]) -> int:
     checks = [
-        bool(str(data.get("stateCode") or "").strip()),
-        bool(str(data.get("universityName") or "").strip()),
-        bool(str(data.get("primaryStream") or "").strip()),
-        bool(str(data.get("experienceLevel") or "").strip()),
+        bool(str(data.get("countryCode") or "").strip()),
+        bool(str(data.get("timezone") or data.get("region") or data.get("stateCode") or "").strip()),
+        bool(str(data.get("primaryStream") or data.get("targetJobDescription") or "").strip()),
+        bool(str(data.get("seniority") or data.get("experienceLevel") or "").strip()),
         bool(data.get("targetRoles")),
         bool(data.get("consentDataUse")),
     ]
@@ -3877,37 +4155,62 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
         return None
 
     candidate_type = "student" if payload.userCategory == "student" else "professional"
-    target_roles = [str(v) for v in (payload.targetRoles or []) if str(v or "").strip()]
-    domain_expertise = [
-        str(v)
-        for v in ((payload.domainExpertise or []) if payload.userCategory == "professional" else [])
-        if str(v or "").strip()
-    ]
-    derived_skills = domain_expertise or ([payload.majorDomain] if payload.majorDomain else [])
+    target_roles = _normalize_profile_string_list(payload.targetRoles)
+    domain_expertise = _normalize_profile_string_list(
+        (payload.domainExpertise or []) if payload.userCategory == "professional" else []
+    )
+    derived_skills = (
+        _normalize_profile_json_list(payload.skillsSelfReported)
+        or domain_expertise
+        or _normalize_profile_string_list([payload.majorDomain])
+    )
+    primary_stream_source = next(
+        (
+            skill.get("skill") or skill.get("name") or skill.get("label")
+            for skill in derived_skills
+            if isinstance(skill, dict)
+        ),
+        None,
+    )
+    if not primary_stream_source:
+        primary_stream_source = derived_skills[0] if derived_skills else payload.currentRole or payload.majorDomain
     primary_stream = payload.primaryStream or _slugify_stream_label(
-        (derived_skills[0] if derived_skills else payload.currentRole or payload.majorDomain)
+        primary_stream_source
     )
     experience_level = (
-        "student" if payload.userCategory == "student" else (payload.experienceBand or "")
+        (payload.seniority or "student")
+        if payload.userCategory == "student"
+        else (payload.seniority or payload.experienceBand or "")
     )
+    years_of_experience = int(payload.yearsOfExperience) if payload.yearsOfExperience is not None else None
+    if years_of_experience is not None and years_of_experience < 0:
+        raise HTTPException(status_code=400, detail="yearsOfExperience cannot be negative")
     v2_payload = {
         "candidateType": candidate_type,
-        "stateCode": (payload.stateCode or "").strip() or None,
-        "city": (payload.city or "").strip() or None,
-        "countryCode": (payload.countryCode or "IN").strip() or "IN",
-        "universityName": (payload.universityName or "").strip() or None,
-        "degreeLevel": payload.educationLevel if payload.userCategory == "student" else None,
-        "degreeName": (payload.degreeName or "").strip() or None,
-        "branchSpecialization": payload.majorDomain if payload.userCategory == "student" else None,
+        "stateCode": _strip_or_none(payload.stateCode),
+        "city": _strip_or_none(payload.city),
+        "countryCode": _normalize_code(payload.countryCode),
+        "region": _strip_or_none(payload.region) or _strip_or_none(payload.stateCode),
+        "timezone": _strip_or_none(payload.timezone),
+        "universityName": _strip_or_none(payload.universityName),
+        "degreeLevel": _strip_or_none(payload.educationLevel) if payload.userCategory == "student" else None,
+        "degreeName": _strip_or_none(payload.degreeName),
+        "branchSpecialization": _strip_or_none(payload.majorDomain) if payload.userCategory == "student" else None,
         "graduationYear": payload.graduationYear,
         "currentYearOfStudy": (
-            payload.graduationTimeline if payload.userCategory == "student" else None
+            _strip_or_none(payload.graduationTimeline) if payload.userCategory == "student" else None
         ),
         "experienceLevel": experience_level,
         "primaryStream": primary_stream,
         "targetRoles": target_roles,
-        "targetCompanies": [payload.targetCompanyType] if payload.targetCompanyType else [],
+        "targetCompanies": _normalize_profile_string_list([payload.targetCompanyType]),
         "skillsSelfReported": derived_skills,
+        "seniority": _strip_or_none(payload.seniority) or experience_level,
+        "yearsOfExperience": years_of_experience,
+        "currentTitle": _strip_or_none(payload.currentTitle) or _strip_or_none(payload.currentRole),
+        "targetInterviewFormat": _strip_or_none(payload.targetInterviewFormat),
+        "targetJobDescription": _strip_or_none(payload.targetJobDescription),
+        "targetJobUrl": _strip_or_none(payload.targetJobUrl),
         "consentDataUse": bool(payload.consentDataUse),
         "consentContact": bool(payload.consentContact),
     }
@@ -3926,7 +4229,10 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
     row.state_code = v2_payload["stateCode"]
     row.city = v2_payload["city"]
     row.country_code = v2_payload["countryCode"]
+    row.region = v2_payload["region"]
+    row.timezone = v2_payload["timezone"]
     row.university_name = v2_payload["universityName"]
+    row.university_normalized = _normalize_university_name(v2_payload["universityName"])
     row.degree_level = v2_payload["degreeLevel"]
     row.degree_name = v2_payload["degreeName"]
     row.branch_specialization = v2_payload["branchSpecialization"]
@@ -3937,6 +4243,12 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
     row.target_roles_json = _safe_json_list_text(v2_payload["targetRoles"])
     row.target_companies_json = _safe_json_list_text(v2_payload["targetCompanies"])
     row.skills_self_reported_json = _safe_json_list_text(v2_payload["skillsSelfReported"])
+    row.seniority = v2_payload["seniority"]
+    row.years_of_experience = v2_payload["yearsOfExperience"]
+    row.current_title = v2_payload["currentTitle"]
+    row.target_interview_format = v2_payload["targetInterviewFormat"]
+    row.target_job_description = v2_payload["targetJobDescription"]
+    row.target_job_url = v2_payload["targetJobUrl"]
     row.consent_data_use = bool(v2_payload["consentDataUse"])
     row.consent_contact = bool(v2_payload["consentContact"])
     row.profile_completion_score = completion_score
@@ -3966,29 +4278,40 @@ def _upsert_candidate_profile_v2(
         row = models.CandidateProfileV2(user_id=current_user.id)
         db.add(row)
 
-    completion_score = _compute_candidate_profile_completion_score(payload.model_dump())
+    _validate_candidate_profile_payload(payload)
+    normalized_payload = payload.model_dump()
+    normalized_payload["targetRoles"] = _normalize_profile_string_list(payload.targetRoles)
+    completion_score = _compute_candidate_profile_completion_score(normalized_payload)
     completed = completion_score >= 100
     now_dt = datetime.utcnow()
 
     row.candidate_type = payload.candidateType
-    row.state_code = payload.stateCode
-    row.city = payload.city
-    row.country_code = payload.countryCode or "IN"
-    row.university_name = payload.universityName
-    row.university_normalized = payload.universityNormalized
-    row.degree_level = payload.degreeLevel
-    row.degree_name = payload.degreeName
-    row.branch_specialization = payload.branchSpecialization
+    row.state_code = _strip_or_none(payload.stateCode)
+    row.city = _strip_or_none(payload.city)
+    row.country_code = _normalize_code(payload.countryCode)
+    row.region = _strip_or_none(payload.region) or _strip_or_none(payload.stateCode)
+    row.timezone = _strip_or_none(payload.timezone)
+    row.university_name = _strip_or_none(payload.universityName)
+    row.university_normalized = _strip_or_none(payload.universityNormalized) or _normalize_university_name(payload.universityName)
+    row.degree_level = _strip_or_none(payload.degreeLevel)
+    row.degree_name = _strip_or_none(payload.degreeName)
+    row.branch_specialization = _strip_or_none(payload.branchSpecialization)
     row.graduation_year = payload.graduationYear
-    row.current_year_of_study = payload.currentYearOfStudy
-    row.experience_level = payload.experienceLevel
-    row.primary_stream = payload.primaryStream
-    row.target_roles_json = _safe_json_list_text(payload.targetRoles)
-    row.target_companies_json = _safe_json_list_text(payload.targetCompanies)
-    row.skills_self_reported_json = _safe_json_list_text(payload.skillsSelfReported)
-    row.resume_url = payload.resumeUrl
-    row.linkedin_url = payload.linkedinUrl
-    row.github_url = payload.githubUrl
+    row.current_year_of_study = _strip_or_none(payload.currentYearOfStudy)
+    row.experience_level = _strip_or_none(payload.experienceLevel)
+    row.primary_stream = _strip_or_none(payload.primaryStream)
+    row.target_roles_json = _safe_json_list_text(_normalize_profile_string_list(payload.targetRoles))
+    row.target_companies_json = _safe_json_list_text(_normalize_profile_string_list(payload.targetCompanies))
+    row.skills_self_reported_json = _safe_json_list_text(_normalize_profile_json_list(payload.skillsSelfReported))
+    row.seniority = _strip_or_none(payload.seniority) or _strip_or_none(payload.experienceLevel)
+    row.years_of_experience = int(payload.yearsOfExperience) if payload.yearsOfExperience is not None else None
+    row.current_title = _strip_or_none(payload.currentTitle)
+    row.target_interview_format = _strip_or_none(payload.targetInterviewFormat)
+    row.target_job_description = _strip_or_none(payload.targetJobDescription)
+    row.target_job_url = _strip_or_none(payload.targetJobUrl)
+    row.resume_url = _strip_or_none(payload.resumeUrl)
+    row.linkedin_url = _strip_or_none(payload.linkedinUrl)
+    row.github_url = _strip_or_none(payload.githubUrl)
     row.consent_data_use = bool(payload.consentDataUse)
     row.consent_contact = bool(payload.consentContact)
     row.profile_completion_score = completion_score
@@ -4059,9 +4382,17 @@ def get_profile_me(
                     "stateCode": candidate_profile.state_code,
                     "city": candidate_profile.city,
                     "countryCode": candidate_profile.country_code,
+                    "region": candidate_profile.region,
+                    "timezone": candidate_profile.timezone,
                     "universityName": candidate_profile.university_name,
                     "degreeName": candidate_profile.degree_name,
                     "graduationYear": candidate_profile.graduation_year,
+                    "seniority": candidate_profile.seniority,
+                    "yearsOfExperience": candidate_profile.years_of_experience,
+                    "currentTitle": candidate_profile.current_title,
+                    "targetInterviewFormat": candidate_profile.target_interview_format,
+                    "targetJobDescription": candidate_profile.target_job_description,
+                    "targetJobUrl": candidate_profile.target_job_url,
                     "primaryStream": candidate_profile.primary_stream,
                     "targetRoles": _json_loads_safe_list(candidate_profile.target_roles_json),
                 },
@@ -4082,9 +4413,17 @@ def get_profile_me(
                 "stateCode": candidate_profile.state_code,
                 "city": candidate_profile.city,
                 "countryCode": candidate_profile.country_code,
+                "region": candidate_profile.region,
+                "timezone": candidate_profile.timezone,
                 "universityName": candidate_profile.university_name,
                 "degreeName": candidate_profile.degree_name,
                 "graduationYear": candidate_profile.graduation_year,
+                "seniority": candidate_profile.seniority,
+                "yearsOfExperience": candidate_profile.years_of_experience,
+                "currentTitle": candidate_profile.current_title,
+                "targetInterviewFormat": candidate_profile.target_interview_format,
+                "targetJobDescription": candidate_profile.target_job_description,
+                "targetJobUrl": candidate_profile.target_job_url,
                 "primaryStream": candidate_profile.primary_stream,
                 "consentContact": bool(candidate_profile.consent_contact),
                 "candidateProfileV2": _candidate_profile_v2_to_api(candidate_profile),
@@ -4227,14 +4566,14 @@ def upsert_profile_canonical(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not payload.consentDataUse:
-        raise HTTPException(status_code=400, detail="consentDataUse is required")
-    if not payload.targetRoles:
-        raise HTTPException(status_code=400, detail="At least one target role is required")
+    _validate_candidate_profile_payload(payload)
     try:
         row = _upsert_candidate_profile_v2(db, current_user=current_user, payload=payload)
         db.commit()
         db.refresh(row)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=503, detail=f"candidate_profiles write failed: {e}")

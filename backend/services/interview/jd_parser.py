@@ -158,7 +158,7 @@ def _keyword_parse_jd(jd: str) -> Dict:
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def parse_jd(job_description: Optional[str]) -> Optional[Dict]:
+def parse_jd(job_description: Optional[str], *, use_llm: bool = True) -> Optional[Dict]:
     """Parse a job description into structured signals.
 
     Returns None if no JD provided.
@@ -169,19 +169,20 @@ def parse_jd(job_description: Optional[str]) -> Optional[Dict]:
 
     jd = job_description.strip()
 
-    cached = cache_get("jd_parse", jd[:500])
+    cache_namespace = "jd_parse" if use_llm else "jd_parse_keyword"
+    cached = cache_get(cache_namespace, jd[:500])
     if cached is not None:
         return cached
 
-    client, model = _get_llm_client()
+    client, model = _get_llm_client() if use_llm else (None, None)
     if client and model:
         result = _llm_parse_jd(jd, client, model)
         if result:
-            cache_put("jd_parse", result, jd[:500])
+            cache_put(cache_namespace, result, jd[:500])
             return result
 
     result = _keyword_parse_jd(jd)
-    cache_put("jd_parse", result, jd[:500])
+    cache_put(cache_namespace, result, jd[:500])
     return result
 
 
