@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -51,7 +53,8 @@ class MFALoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
+    csrf_token: Optional[str] = None
 
 
 class SetPasswordRequest(BaseModel):
@@ -60,6 +63,7 @@ class SetPasswordRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
+    csrf_token: Optional[str] = None
 
 
 class MFAEnrollResponse(BaseModel):
@@ -78,10 +82,11 @@ class MFAConfirmResponse(BaseModel):
 
 class AuthTokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     expires_in: int
     user: dict
+    csrf_token: Optional[str] = None
 
 
 class MFARequiredResponse(BaseModel):
@@ -100,6 +105,52 @@ class SessionInfo(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
+REFRESH_COOKIE_NAME = "ey_refresh_token"
+CSRF_COOKIE_NAME = "ey_csrf_token"
+
+
+def _cookie_secure() -> bool:
+    env = os.getenv("ENV", os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development"))).strip().lower()
+    return env == "production"
+
+
+def _set_refresh_cookies(response: Response, refresh_token: str, csrf_token: Optional[str] = None) -> str:
+    csrf = csrf_token or secrets.token_urlsafe(24)
+    secure = _cookie_secure()
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        max_age=30 * 24 * 60 * 60,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/api/auth",
+    )
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        csrf,
+        max_age=30 * 24 * 60 * 60,
+        httponly=False,
+        secure=secure,
+        samesite="lax",
+        path="/api/auth",
+    )
+    return csrf
+
+
+def _clear_refresh_cookies(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/auth")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/api/auth")
+
+
+def _require_cookie_csrf(request: Request, body_token: Optional[str], header_token: Optional[str]) -> None:
+    if not request.cookies.get(REFRESH_COOKIE_NAME):
+        return
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+    presented = header_token or body_token
+    if not cookie_token or not presented or not secrets.compare_digest(cookie_token, presented):
+        raise HTTPException(status_code=403, detail={"code": "CSRF_REQUIRED", "message": "Valid CSRF token required."})
 
 def _user_dict(user: models.User) -> dict:
     return {
@@ -125,6 +176,7 @@ def _client_meta(request: Optional[Request]) -> tuple[Optional[str], Optional[st
 def _issue_tokens(
     user: models.User,
     db: Session,
+    response: Optional[Response] = None,
     *,
     device_label: Optional[str] = None,
     ip_address: Optional[str] = None,
@@ -147,11 +199,13 @@ def _issue_tokens(
         user_agent=user_agent,
     )
     refresh = _token_service.create_user_refresh_token(user_id=user.id, jti=refresh_rec.jti)
+    csrf = _set_refresh_cookies(response, refresh) if response is not None else None
     return AuthTokenResponse(
         access_token=access,
-        refresh_token=refresh,
+        refresh_token=None if response is not None else refresh,
         expires_in=_token_service.token_lifetime_seconds,
         user=_user_dict(user),
+        csrf_token=csrf,
     )
 
 
@@ -170,7 +224,7 @@ def _require_bearer_user(authorization: Optional[str], db: Session) -> models.Us
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthTokenResponse)
-def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     ip, ua = _client_meta(request)
     errors = _password_service.validate_strength(body.password)
     if errors:
@@ -200,11 +254,11 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
 
     audit.log_event("register_success", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
     logger.info("Registered user %s (%s)", user.id, user.email)
-    return _issue_tokens(user, db, ip_address=ip, user_agent=ua)
+    return _issue_tokens(user, db, response, ip_address=ip, user_agent=ua)
 
 
 @router.post("/login")
-def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     ip, ua = _client_meta(request)
     email_norm = body.email.lower()
 
@@ -272,11 +326,11 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
     audit.log_event("login_success", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
-    return _issue_tokens(user, db, device_label=body.device_label, ip_address=ip, user_agent=ua)
+    return _issue_tokens(user, db, response, device_label=body.device_label, ip_address=ip, user_agent=ua)
 
 
 @router.post("/login/mfa", response_model=AuthTokenResponse)
-def login_mfa(body: MFALoginRequest, request: Request, db: Session = Depends(get_db)):
+def login_mfa(body: MFALoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     ip, ua = _client_meta(request)
     payload = _token_service.validate_token(body.mfa_token)
     if not payload or payload.get("type") != "access":
@@ -298,17 +352,20 @@ def login_mfa(body: MFALoginRequest, request: Request, db: Session = Depends(get
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
     audit.log_event("mfa_pass", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua)
-    return _issue_tokens(user, db, ip_address=ip, user_agent=ua)
+    return _issue_tokens(user, db, response, ip_address=ip, user_agent=ua)
 
 
 @router.post("/logout")
 def logout(
     request: Request,
+    response: Response,
     body: LogoutRequest = LogoutRequest(),
+    x_csrf_token: Optional[str] = Header(None, alias="X-CSRF-Token"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     ip, ua = _client_meta(request)
+    _require_cookie_csrf(request, body.csrf_token if hasattr(body, "csrf_token") else None, x_csrf_token)
     user_id: Optional[str] = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
@@ -317,20 +374,32 @@ def logout(
             user_id = payload.get("sub")
         _token_service.revoke_token(token)
 
-    if body.refresh_token:
-        rpayload = _token_service.validate_token(body.refresh_token)
+    refresh_token = body.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if refresh_token:
+        rpayload = _token_service.validate_token(refresh_token)
         if rpayload and rpayload.get("jti"):
             refresh_token_store.revoke(db, rpayload["jti"], reason="logout")
-        _token_service.revoke_token(body.refresh_token)
+        _token_service.revoke_token(refresh_token)
 
+    _clear_refresh_cookies(response)
     audit.log_event("logout", user_id=user_id, ip_address=ip, user_agent=ua)
     return {"ok": True}
 
 
 @router.post("/refresh", response_model=AuthTokenResponse)
-def refresh(body: RefreshRequest, request: Request, db: Session = Depends(get_db)):
+def refresh(
+    body: RefreshRequest,
+    request: Request,
+    response: Response,
+    x_csrf_token: Optional[str] = Header(None, alias="X-CSRF-Token"),
+    db: Session = Depends(get_db),
+):
     ip, ua = _client_meta(request)
-    payload = _token_service.validate_token(body.refresh_token)
+    _require_cookie_csrf(request, body.csrf_token, x_csrf_token)
+    presented_refresh = body.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if not presented_refresh:
+        raise HTTPException(status_code=401, detail={"code": "INVALID_REFRESH", "message": "Missing refresh token."})
+    payload = _token_service.validate_token(presented_refresh)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail={"code": "INVALID_REFRESH", "message": "Invalid or expired refresh token."})
 
@@ -348,20 +417,22 @@ def refresh(body: RefreshRequest, request: Request, db: Session = Depends(get_db
         audit.log_event("refresh_failure", outcome="failure", user_id=user_id,
                         ip_address=ip, user_agent=ua, detail={"reason": err})
         # Always revoke the presented JWT regardless of reason.
-        _token_service.revoke_token(body.refresh_token)
+        _token_service.revoke_token(presented_refresh)
         raise HTTPException(status_code=401, detail={"code": "INVALID_REFRESH", "message": "Refresh rejected."})
 
     # Old JWT is now revoked DB-side; also blocklist it in the token service.
-    _token_service.revoke_token(body.refresh_token)
+    _token_service.revoke_token(presented_refresh)
 
     access = _token_service.create_user_token(user_id=user.id, email=user.email or "", is_admin=bool(user.is_admin))
     refresh_jwt = _token_service.create_user_refresh_token(user_id=user.id, jti=new_rec.jti)
+    csrf = _set_refresh_cookies(response, refresh_jwt)
     audit.log_event("refresh_success", user_id=user.id, ip_address=ip, user_agent=ua)
     return AuthTokenResponse(
         access_token=access,
-        refresh_token=refresh_jwt,
+        refresh_token=None,
         expires_in=_token_service.token_lifetime_seconds,
         user=_user_dict(user),
+        csrf_token=csrf,
     )
 
 
@@ -494,4 +565,3 @@ def revoke_session(
     audit.log_event("session_revoke", user_id=user.id, email=user.email, ip_address=ip, user_agent=ua,
                     detail={"jti": jti})
     return {"ok": True}
-

@@ -19,24 +19,38 @@ function isTokenExpiringSoon(token, thresholdMs = 60000) {
   return payload.exp * 1000 - Date.now() < thresholdMs;
 }
 
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const prefix = `${name}=`;
+  return document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+    ?.slice(prefix.length) || null;
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [accessToken, setAccessToken] = useState(null);
+  const [csrfToken, setCsrfToken] = useState(null);
   const refreshTimerRef = useRef(null);
   const devBypass = isDevAuthBypassEnabled();
 
   const clearAuth = useCallback(() => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
+    setAccessToken(null);
+    setCsrfToken(null);
     setUser(null);
     setIsSignedIn(false);
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
   }, []);
 
-  const scheduleRefresh = useCallback(() => {
+  const scheduleRefresh = useCallback((tokenOverride = null) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    const token = localStorage.getItem("access_token");
+    const token = tokenOverride || accessToken;
     if (!token) return;
     const payload = decodePayload(token);
     if (!payload?.exp) return;
@@ -44,29 +58,34 @@ export function AuthProvider({ children }) {
     if (delay > 0) {
       refreshTimerRef.current = setTimeout(() => tryRefresh(), delay);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tryRefresh = useCallback(async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (!refreshToken) return false;
+    const csrf = csrfToken || readCookie("ey_csrf_token");
     try {
       const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+        },
+        body: JSON.stringify({ csrf_token: csrf || undefined }),
       });
       if (resp.ok) {
         const data = await resp.json();
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.setItem("refresh_token", data.refresh_token);
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        setAccessToken(data.access_token);
+        setCsrfToken(data.csrf_token || csrf || null);
         setUser(data.user);
         setIsSignedIn(true);
-        scheduleRefresh();
-        return true;
+        scheduleRefresh(data.access_token);
+        return data.access_token;
       }
     } catch { /* ignore */ }
     return false;
-  }, [scheduleRefresh]);
+  }, [csrfToken, scheduleRefresh]);
 
   const fetchMe = useCallback(async (token) => {
     try {
@@ -77,7 +96,7 @@ export function AuthProvider({ children }) {
         const data = await resp.json();
         setUser(data);
         setIsSignedIn(true);
-        scheduleRefresh();
+        scheduleRefresh(token);
       } else {
         const refreshed = await tryRefresh();
         if (!refreshed) clearAuth();
@@ -96,8 +115,10 @@ export function AuthProvider({ children }) {
       setIsLoaded(true);
       return;
     }
-    const token = localStorage.getItem("access_token");
+    const token = accessToken || localStorage.getItem("access_token");
     if (token && !isTokenExpiringSoon(token, 0)) {
+      setAccessToken(token);
+      localStorage.removeItem("access_token");
       fetchMe(token);
     } else if (token) {
       // Token exists but expired — try refresh
@@ -106,67 +127,87 @@ export function AuthProvider({ children }) {
         setIsLoaded(true);
       });
     } else {
-      setIsLoaded(true);
+      const csrf = readCookie("ey_csrf_token");
+      if (csrf) {
+        setCsrfToken(csrf);
+        tryRefresh().then((ok) => {
+          if (!ok) clearAuth();
+          setIsLoaded(true);
+        });
+      } else {
+        setIsLoaded(true);
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getToken = useCallback(async () => {
     if (devBypass) return null;
-    const token = localStorage.getItem("access_token");
+    const token = accessToken;
     if (token && isTokenExpiringSoon(token)) {
       const refreshed = await tryRefresh();
-      if (refreshed) return localStorage.getItem("access_token");
+      if (refreshed) return refreshed;
+    }
+    if (!token && readCookie("ey_csrf_token")) {
+      const refreshed = await tryRefresh();
+      if (refreshed) return refreshed;
     }
     return token;
-  }, [devBypass, tryRefresh]);
+  }, [accessToken, devBypass, tryRefresh]);
 
   const login = useCallback(async (email, password) => {
     const resp = await fetch(`${API_BASE}/api/auth/login`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
     const data = await resp.json();
     if (!resp.ok) throw data?.error || data;
-    localStorage.setItem("access_token", data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    setAccessToken(data.access_token);
+    setCsrfToken(data.csrf_token || null);
     setUser(data.user);
     setIsSignedIn(true);
-    scheduleRefresh();
+    scheduleRefresh(data.access_token);
     return data;
   }, [scheduleRefresh]);
 
   const register = useCallback(async (email, password, fullName) => {
     const resp = await fetch(`${API_BASE}/api/auth/register`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, full_name: fullName }),
     });
     const data = await resp.json();
     if (!resp.ok) throw data?.error || data;
-    localStorage.setItem("access_token", data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    setAccessToken(data.access_token);
+    setCsrfToken(data.csrf_token || null);
     setUser(data.user);
     setIsSignedIn(true);
-    scheduleRefresh();
+    scheduleRefresh(data.access_token);
     return data;
   }, [scheduleRefresh]);
 
   const signOut = useCallback(async () => {
-    const token = localStorage.getItem("access_token");
-    const refresh = localStorage.getItem("refresh_token");
+    const token = accessToken;
     try {
       await fetch(`${API_BASE}/api/auth/logout`, {
         method: "POST",
+        credentials: "include",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ refresh_token: refresh }),
+        body: JSON.stringify({ csrf_token: csrfToken || undefined }),
       });
     } catch { /* best effort */ }
     clearAuth();
-  }, [clearAuth]);
+  }, [accessToken, clearAuth, csrfToken]);
 
   const value = { user, isLoaded, isSignedIn, getToken, login, register, signOut };
 
