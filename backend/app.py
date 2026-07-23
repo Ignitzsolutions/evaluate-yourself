@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing import Optional, Dict, List, Any, Literal, Mapping
 import os
 import uuid
@@ -62,6 +62,7 @@ from services.interview.adaptive_engine import (
     normalize_difficulty,
 )
 from services.interview.setup_planner import build_jd_question_plan, resolve_default_difficulty
+from services.json_contracts import validate_baseline_capture, validate_resume_draft
 from services.interview.conversation_planner import (
     build_bootstrap_conversation_plan,
     plan_next_turn as plan_next_turn_graph,
@@ -1105,6 +1106,13 @@ def _validate_candidate_profile_payload(payload: CandidateProfileUpsertRequest) 
         raise HTTPException(status_code=400, detail="At least one target role is required")
     if payload.yearsOfExperience is not None and payload.yearsOfExperience < 0:
         raise HTTPException(status_code=400, detail="yearsOfExperience cannot be negative")
+    try:
+        if payload.resumeDraft is not None:
+            validate_resume_draft(payload.resumeDraft)
+        if payload.baselineCapture is not None:
+            validate_baseline_capture(payload.baselineCapture)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid profile JSON contract: {exc.errors()[0]['msg']}") from exc
 
 
 _RESUME_SKILL_KEYWORDS: List[tuple[str, str, List[str]]] = [
@@ -1280,6 +1288,13 @@ def _validate_profile_payload(payload: UserProfileUpsertRequest) -> None:
                 status_code=400,
                 detail=f"Missing required professional fields: {', '.join(missing)}",
             )
+    try:
+        if getattr(payload, "resumeDraft", None) is not None:
+            validate_resume_draft(payload.resumeDraft)
+        if getattr(payload, "baselineCapture", None) is not None:
+            validate_baseline_capture(payload.baselineCapture)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid profile JSON contract: {exc.errors()[0]['msg']}") from exc
 
 
 def _is_admin_user(user_or_id) -> bool:
@@ -1435,7 +1450,11 @@ def _load_runtime_session(session_id: str) -> Dict[str, Any]:
         if not raw:
             return {}
         return json.loads(raw)
-    except Exception:
+    except Exception as redis_err:
+        if is_production:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to load runtime session: {redis_err}"
+            )
         return {}
 
 
@@ -4422,8 +4441,8 @@ def _upsert_candidate_profile_v2_from_legacy_payload(
         "githubUrl": _strip_or_none(payload.githubUrl),
         "portfolioUrl": _strip_or_none(payload.portfolioUrl),
         "resumeText": _strip_or_none(payload.resumeText),
-        "resumeDraft": payload.resumeDraft if isinstance(payload.resumeDraft, dict) else None,
-        "baselineCapture": payload.baselineCapture if isinstance(payload.baselineCapture, dict) else None,
+        "resumeDraft": validate_resume_draft(payload.resumeDraft) if isinstance(payload.resumeDraft, dict) else None,
+        "baselineCapture": validate_baseline_capture(payload.baselineCapture) if isinstance(payload.baselineCapture, dict) else None,
         "consentDataUse": bool(payload.consentDataUse),
         "consentContact": bool(payload.consentContact),
     }
@@ -4533,8 +4552,8 @@ def _upsert_candidate_profile_v2(
     row.github_url = _strip_or_none(payload.githubUrl)
     row.portfolio_url = _strip_or_none(payload.portfolioUrl)
     row.resume_text = _strip_or_none(payload.resumeText)
-    row.resume_draft_json = json.dumps(payload.resumeDraft, ensure_ascii=False) if isinstance(payload.resumeDraft, dict) else None
-    row.baseline_capture_json = json.dumps(payload.baselineCapture, ensure_ascii=False) if isinstance(payload.baselineCapture, dict) else None
+    row.resume_draft_json = json.dumps(validate_resume_draft(payload.resumeDraft), ensure_ascii=False) if isinstance(payload.resumeDraft, dict) else None
+    row.baseline_capture_json = json.dumps(validate_baseline_capture(payload.baselineCapture), ensure_ascii=False) if isinstance(payload.baselineCapture, dict) else None
     row.consent_data_use = bool(payload.consentDataUse)
     row.consent_contact = bool(payload.consentContact)
     row.profile_completion_score = completion_score

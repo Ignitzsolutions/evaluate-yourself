@@ -158,6 +158,24 @@ def test_canonical_profile_validates_enrichment_urls(profile_client):
     assert "linkedinUrl must be a valid http(s) URL" in response.json()["error"]["message"]
 
 
+def test_canonical_profile_rejects_invalid_profile_json_contract(profile_client):
+    client, _ = profile_client
+
+    response = client.put(
+        "/api/profile",
+        json={
+            "candidateType": "professional",
+            "countryCode": "US",
+            "targetRoles": ["Backend Engineer"],
+            "baselineCapture": {"status": "captured", "durationSeconds": 120},
+            "consentDataUse": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid profile JSON contract" in response.json()["error"]["message"]
+
+
 def test_resume_draft_extracts_confirmable_fields_and_gap_analysis(profile_client):
     client, _ = profile_client
 
